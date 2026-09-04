@@ -102,6 +102,7 @@ test("protected APIs reject requests without a session", async () => {
     ["GET", "/api/plan"],
     ["GET", "/api/dashboard/state"],
     ["GET", "/api/health"],
+    ["GET", "/api/meta/diagnostic"],
     ["POST", "/api/insights/summary"],
     ["POST", "/api/insights/brief"],
     ["POST", "/api/refresh"],

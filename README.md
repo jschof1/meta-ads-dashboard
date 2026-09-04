@@ -63,6 +63,9 @@ See [`.env.example`](./.env.example) for the full list with comments.
 **Optional:**
 - `META_CAMPAIGN_ID` - filter to a specific campaign (blank = full account rollup)
 - `META_CUSTOM_CONVERSION_ID` - the conversion the dashboard counts as "registration"
+- `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`
+- `META_PRIMARY_RESULT_ACTION_TYPE` - required when Meta returns more than one possible lead/result action
+- `META_ATTRIBUTION_WINDOWS` - explicit comma-separated attribution windows, defaulting to `7d_click,1d_view`
 - `META_CAMPAIGN_LAUNCH_DATE` - YYYY-MM-DD; powers "days since launch" + learning-phase status
 - `AIRTABLE_ENABLED` + `AIRTABLE_*` - if you track sales pipeline in Airtable, enable for deeper funnel attribution
 
