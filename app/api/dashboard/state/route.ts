@@ -14,6 +14,7 @@ import { getFunnelCounts } from "@/lib/airtable";
 import { CAMPAIGN_TARGETS, classifyAd } from "@/lib/targets";
 import { buildHeatmap, buildPhase, buildTriggers, detectAnomalies, scoreFatigue } from "@/lib/insights";
 import type { ActionLogEntry } from "@/lib/state-types";
+import { requireApiSession } from "@/lib/api-auth";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -28,7 +29,9 @@ function daysSince(dateIso: string): number | null {
   return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const unauthorized = await requireApiSession(request);
+  if (unauthorized) return unauthorized;
   try {
     const [
       today,

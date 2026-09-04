@@ -10,13 +10,14 @@ import {
   toInt,
 } from "@/lib/meta";
 import { getFunnelCounts } from "@/lib/airtable";
+import { validateCronEnvironment } from "@/lib/env";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 function authorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET;
-  if (!secret) return process.env.NODE_ENV !== "production";
+  if (validateCronEnvironment().length > 0 || !secret) return false;
   const header = req.headers.get("authorization") || "";
   return header === `Bearer ${secret}`;
 }

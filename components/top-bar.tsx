@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, RefreshCw, Sun, Moon } from "lucide-react";
+import { Activity, LogOut, RefreshCw, Sun, Moon } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 function formatAge(ms: number | null): string {
   if (ms == null) return "never";
@@ -14,6 +15,7 @@ function formatAge(ms: number | null): string {
 }
 
 export function TopBar() {
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncIso, setLastSyncIso] = useState<string | null>(null);
   const [syncAgeMs, setSyncAgeMs] = useState<number | null>(null);
@@ -33,6 +35,12 @@ export function TopBar() {
     } finally {
       setRefreshing(false);
     }
+  }
+
+  async function logout() {
+    await fetch("/api/auth", { method: "DELETE" });
+    router.replace("/login");
+    router.refresh();
   }
 
   // Read syncedAt from the API every time the dashboard renders.
@@ -114,6 +122,10 @@ export function TopBar() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             {refreshing ? "Syncing..." : "Sync now"}
+          </button>
+          <button onClick={logout} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 hover:bg-muted">
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Log out</span>
           </button>
         </div>
       </div>
