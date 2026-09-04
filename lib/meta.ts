@@ -19,10 +19,21 @@ type Sleeper = (milliseconds: number) => Promise<void>;
 
 export type MetaInsightAction = { action_type: string; value: string };
 
+export type MetaInsightLevel = "account" | "campaign" | "adset" | "ad";
+
+export type MetaInsightDateRange = {
+  since: string;
+  until: string;
+};
+
 export type MetaInsightRow = {
+  account_id?: string;
+  account_name?: string;
+  campaign_name?: string;
   ad_id?: string;
   ad_name?: string;
   campaign_id?: string;
+  adset_name?: string;
   adset_id?: string;
   spend?: string;
   impressions?: string;
@@ -40,11 +51,21 @@ export type MetaInsightRow = {
 
 export type MetaRateLimitUsage = Record<string, number>;
 
+export type MetaDiagnosticsUsage = Record<string, unknown>;
+
 export type MetaDiagnostics = {
   attempts: number;
   traceId?: string;
   appUsage?: MetaRateLimitUsage;
   adAccountUsage?: MetaRateLimitUsage;
+  insightsThrottle?: MetaDiagnosticsUsage;
+  businessUseCaseUsage?: MetaDiagnosticsUsage;
+  debug?: string;
+  revision?: string;
+  status?: number;
+  code?: number;
+  subcode?: number;
+  type?: string;
   retryAfterMs?: number;
 };
 
@@ -230,10 +251,14 @@ export type MetaResultEventDiagnostic = {
 };
 
 const FIELDS_AD = [
+  "account_id",
+  "account_name",
   "ad_id",
   "ad_name",
   "campaign_id",
+  "campaign_name",
   "adset_id",
+  "adset_name",
   "spend",
   "impressions",
   "reach",
@@ -249,6 +274,14 @@ const FIELDS_AD = [
 ].join(",");
 
 const FIELDS_AGGREGATE = [
+  "account_id",
+  "account_name",
+  "campaign_id",
+  "campaign_name",
+  "adset_id",
+  "adset_name",
+  "ad_id",
+  "ad_name",
   "spend",
   "impressions",
   "reach",
@@ -311,6 +344,12 @@ function parseUsageHeader(value: string | null): MetaRateLimitUsage | undefined 
       .filter((entry): entry is [string, number] => entry[1] !== undefined),
   );
   return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+function parseObjectHeader(value: string | null): MetaDiagnosticsUsage | undefined {
+  if (!value) return undefined;
+  const parsed = parseJsonText(value);
+  return isObject(parsed) ? parsed : undefined;
 }
 
 function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
@@ -394,6 +433,7 @@ export class MetaClient {
   private readonly sleep: Sleeper;
   private readonly random: () => number;
   private readonly primaryResultActionType?: string;
+  private lastDiagnostics: MetaDiagnostics = { attempts: 0 };
 
   constructor(options: MetaClientOptions = {}) {
     const configuredToken = options.token ?? process.env.META_MARKETING_TOKEN;
@@ -447,13 +487,22 @@ export class MetaClient {
           traceId: response.headers.get("x-fb-trace-id") ?? undefined,
           appUsage: parseUsageHeader(response.headers.get("x-app-usage")),
           adAccountUsage: parseUsageHeader(response.headers.get("x-ad-account-usage")),
+          insightsThrottle: parseObjectHeader(response.headers.get("x-fb-ads-insights-throttle")),
+          businessUseCaseUsage: parseObjectHeader(response.headers.get("x-business-use-case-usage")),
+          debug: response.headers.get("x-fb-debug") ?? undefined,
+          revision: response.headers.get("x-fb-rev") ?? undefined,
+          status: response.status,
           retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
         };
+        this.lastDiagnostics = diagnostics;
         const body = await readBody(response);
-        if (!response.ok) {
-          const error = graphError(body);
+        const error = graphError(body);
+        if (!response.ok || error) {
           if (!diagnostics.traceId) diagnostics.traceId = stringValue(error?.fbtrace_id);
           const code = numberValue(error?.code);
+          diagnostics.code = code;
+          diagnostics.subcode = numberValue(error?.error_subcode);
+          diagnostics.type = stringValue(error?.type);
           const kind: MetaErrorKind = isAuthFailure(code, response.status)
             ? "auth"
             : isRateLimit(code, response.status)
@@ -505,6 +554,7 @@ export class MetaClient {
           controller.signal.aborted ? `Meta Graph API request timed out after ${this.timeoutMs}ms` : "Meta Graph API network request failed",
           { kind: "transient", transient: true, diagnostics: { attempts: attempt } },
         );
+        this.lastDiagnostics = networkError.diagnostics;
         if (this.shouldRetry(networkError, attempt)) {
           await this.waitBeforeRetry(networkError, attempt);
           continue;
@@ -560,7 +610,7 @@ export class MetaClient {
       // Meta's cursor object describes the current page; only a valid next URL
       // is an instruction to continue. In particular, do not follow a stale
       // `cursors.after` on a terminal page.
-      const next = cursorFromNext(page.paging?.next, path, this.graphVersion);
+      const next = cursorFromNext(page.paging?.next, page.paging?.cursors?.after, path, this.graphVersion);
       if (!next) break;
       if (next === after) throw new MetaPaginationError("Meta pagination returned the same cursor twice");
       after = next;
@@ -618,6 +668,18 @@ export class MetaClient {
     };
   }
 
+  private insightParamsForRange(range: MetaInsightDateRange, level: MetaInsightLevel): Record<string, string | undefined> {
+    return {
+      level,
+      time_range: JSON.stringify(range),
+      filtering: this.campaignId
+        ? JSON.stringify([{ field: "campaign.id", operator: "IN", value: [this.campaignId] }])
+        : undefined,
+      action_attribution_windows: JSON.stringify(this.attributionWindows),
+      action_report_time: "conversion",
+    };
+  }
+
   async getAccountRollup(window: string): Promise<MetaInsightRow | null> {
     const result = await this.paginate<MetaInsightRow>(`${accountPath(this.accountId)}/insights`, {
       ...this.insightParams(window, "account"),
@@ -649,11 +711,46 @@ export class MetaClient {
     })).data;
   }
 
-  extractResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
-    return extractResultEvents(row, {
+  async getDailyInsights(level: MetaInsightLevel, range: MetaInsightDateRange): Promise<MetaInsightRow[]> {
+    return (await this.paginate<MetaInsightRow>(`${accountPath(this.accountId)}/insights`, {
+      ...this.insightParamsForRange(range, level),
+      fields: level === "account" ? FIELDS_AGGREGATE : FIELDS_AD,
+      time_increment: "1",
+    })).data;
+  }
+
+  getAccountId(): string {
+    return this.accountId;
+  }
+
+  getGraphVersion(): string {
+    return this.graphVersion;
+  }
+
+  getAttributionKey(): string {
+    return this.attributionWindows.join(",");
+  }
+
+  getDiagnostics(): MetaDiagnostics {
+    return this.lastDiagnostics;
+  }
+
+  diagnoseResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
+    return diagnoseResultEvents(row, {
       primaryActionType: this.primaryResultActionType,
       customConversionId: this.customConversionId,
     });
+  }
+
+  extractResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
+    const diagnostic = this.diagnoseResultEvents(row);
+    if (diagnostic.needsConfiguration) {
+      throw new MetaResultEventError(
+        "result event needs configuration: set META_PRIMARY_RESULT_ACTION_TYPE",
+        diagnostic.candidateActionTypes,
+      );
+    }
+    return diagnostic;
   }
 
   extractRegistrations(row: MetaInsightRow): number {
@@ -715,7 +812,12 @@ function parsePaging(value: unknown): MetaPaging | undefined {
   return cursors || next ? { cursors, next } : undefined;
 }
 
-function cursorFromNext(next: string | undefined, expectedPath: string, graphVersion: string): string | undefined {
+function cursorFromNext(
+  next: string | undefined,
+  cursorAfter: string | undefined,
+  expectedPath: string,
+  graphVersion: string,
+): string | undefined {
   if (!next) return undefined;
   try {
     const url = new URL(next);
@@ -723,7 +825,7 @@ function cursorFromNext(next: string | undefined, expectedPath: string, graphVer
     if (url.hostname !== GRAPH_HOST) throw new MetaPaginationError("Meta pagination returned an unexpected host");
     const expected = `/${graphVersion}/${expectedPath.replace(/^\/+/, "")}`;
     if (url.pathname !== expected) throw new MetaPaginationError("Meta pagination returned an unexpected endpoint");
-    const cursor = url.searchParams.get("after");
+    const cursor = url.searchParams.get("after") ?? cursorAfter;
     if (!cursor) throw new MetaPaginationError("Meta pagination next URL did not contain an after cursor");
     return cursor;
   } catch (error) {
@@ -823,21 +925,33 @@ export function extractRegistrations(row: MetaInsightRow): number {
 }
 
 export function toCents(money: string | undefined | null): number {
-  if (!money) return 0;
-  const number = Number.parseFloat(money);
-  return Number.isFinite(number) ? Math.round(number * 100) : 0;
+  return toOptionalCents(money) ?? 0;
 }
 
 export function toFloat(value: string | undefined | null): number {
-  if (!value) return 0;
-  const number = Number.parseFloat(value);
-  return Number.isFinite(number) ? number : 0;
+  return toOptionalFloat(value) ?? 0;
 }
 
 export function toInt(value: string | undefined | null): number {
-  if (!value) return 0;
-  const number = Number.parseInt(value, 10);
-  return Number.isFinite(number) ? number : 0;
+  return toOptionalInt(value) ?? 0;
+}
+
+export function toOptionalCents(money: string | number | undefined | null): number | null {
+  if (money === undefined || money === null || String(money).trim() === "") return null;
+  const number = typeof money === "number" ? money : Number.parseFloat(money);
+  return Number.isFinite(number) ? Math.round(number * 100) : null;
+}
+
+export function toOptionalFloat(value: string | number | undefined | null): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = typeof value === "number" ? value : Number.parseFloat(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function toOptionalInt(value: string | number | undefined | null): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = typeof value === "number" ? value : Number.parseInt(value, 10);
+  return Number.isFinite(number) ? number : null;
 }
 
 export function createMetaClient(options: MetaClientOptions = {}): MetaClient {
@@ -862,6 +976,10 @@ export async function getAdCumulative(window: string): Promise<MetaInsightRow[]>
 
 export async function getAccountTimeseries(window: string): Promise<MetaInsightRow[]> {
   return configuredClient().getAccountTimeseries(window);
+}
+
+export async function getDailyInsights(level: MetaInsightLevel, range: MetaInsightDateRange): Promise<MetaInsightRow[]> {
+  return configuredClient().getDailyInsights(level, range);
 }
 
 export async function listCampaignAds(): Promise<AdSummary[]> {

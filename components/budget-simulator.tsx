@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Calculator, Info } from "lucide-react";
 import type { DashboardState } from "@/lib/state-types";
 
-function fmtMoney(cents: number) {
+function fmtMoney(cents: number | null) {
+  if (cents == null) return "-";
   return `$${(cents / 100).toFixed(0)}`;
 }
 
@@ -13,23 +14,24 @@ export function BudgetSimulator({ state }: { state: DashboardState }) {
   const [dailyCents, setDailyCents] = useState(currentDaily);
 
   const last7 = state.scorecard.last7;
-  const baselineSpend7 = last7.spendCents;
-  const baselineRegs7 = last7.registrations;
+  const baselineSpend7 = last7.spendCents ?? 0;
+  const baselineRegs7 = last7.registrations ?? 0;
+  const hasBaseline = last7.spendCents != null && last7.registrations != null;
   const baselineCpr = last7.cprCents;
 
   // Estimate regs at the new budget: scale linearly, then apply diminishing returns above 1.5x current.
   const scale = currentDaily > 0 ? dailyCents / currentDaily : 1;
   const diminish = scale > 1.5 ? 0.85 : scale > 1 ? 0.95 : 1;
   const monthlySpend = dailyCents * 30;
-  const projectedRegs7 = baselineRegs7 > 0 ? Math.round(baselineRegs7 * scale * diminish) : 0;
+  const projectedRegs7 = hasBaseline && baselineRegs7 > 0 ? Math.round(baselineRegs7 * scale * diminish) : 0;
   const projectedRegs30 = projectedRegs7 * (30 / 7);
   const projectedCpr = projectedRegs30 > 0 ? Math.round(monthlySpend / projectedRegs30) : null;
 
   // Funnel projection using historical conversion rates from this campaign.
   const f = state.funnel;
-  const regsToAttended = f.registrations > 0 ? f.attended / f.registrations : 0.3;
-  const attendedToCalls = f.attended > 0 ? f.callsBooked / f.attended : 0.2;
-  const callsToEnrolled = f.callsBooked > 0 ? f.enrollments / f.callsBooked : 0.25;
+  const regsToAttended = f.registrations != null && f.attended != null && f.registrations > 0 ? f.attended / f.registrations : 0.3;
+  const attendedToCalls = f.attended != null && f.callsBooked != null && f.attended > 0 ? f.callsBooked / f.attended : 0.2;
+  const callsToEnrolled = f.callsBooked != null && f.enrollments != null && f.callsBooked > 0 ? f.enrollments / f.callsBooked : 0.25;
 
   const projAttended = Math.round(projectedRegs30 * regsToAttended);
   const projCalls = Math.round(projAttended * attendedToCalls);
@@ -72,7 +74,7 @@ export function BudgetSimulator({ state }: { state: DashboardState }) {
           <div className="mt-4 p-3 rounded-lg bg-muted/40 border border-border">
             <div className="text-xs text-muted-foreground mb-1">Projected 30-day spend</div>
             <div className="text-xl font-bold tabular-nums">{fmtMoney(monthlySpend)}</div>
-            {baselineCpr != null && (
+            {baselineCpr != null && hasBaseline && (
               <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
                 <Info className="w-3 h-3" />
                 Baseline 7d CPR: ${(baselineCpr / 100).toFixed(2)} · {baselineRegs7} regs on {fmtMoney(baselineSpend7)}

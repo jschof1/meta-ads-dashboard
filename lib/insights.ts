@@ -13,15 +13,17 @@ import type {
 // ---------- Fatigue ----------
 // A creative is "fatiguing" when frequency rises AND CTR or CPR worsens.
 export function scoreFatigue(input: {
-  frequency: number;
-  ctrLink: number;
+  frequency: number | null;
+  ctrLink: number | null;
   cprCents: number | null;
   daysActive: number | null;
-  spendCents: number;
+  spendCents: number | null;
 }): { score: number; reason: string } {
   const { frequency, ctrLink, cprCents, daysActive, spendCents } = input;
 
-  if (spendCents < 3000) return { score: 0, reason: "Not enough spend to read fatigue yet" };
+  if (spendCents == null || spendCents < 3000 || frequency == null || ctrLink == null) {
+    return { score: 0, reason: "Not enough stored evidence to read fatigue yet" };
+  }
 
   let score = 0;
   const reasons: string[] = [];
@@ -131,10 +133,10 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
 // 14-day intensity heatmap. Intensity = combined performance score (low CPR + decent regs = bright).
 export function buildHeatmap(trend: TrendPoint[]): HeatmapCell[] {
   if (trend.length === 0) return [];
-  const maxRegs = Math.max(...trend.map((p) => p.registrations), 1);
+  const maxRegs = Math.max(...trend.map((p) => p.registrations ?? 0), 1);
   return trend.map((p) => {
     const cprScore = p.cprCents == null ? 0 : Math.max(0, 1 - (p.cprCents - 2000) / 6000);
-    const regScore = p.registrations / maxRegs;
+    const regScore = (p.registrations ?? 0) / maxRegs;
     const intensity = Math.min(1, 0.6 * cprScore + 0.4 * regScore);
     return {
       date: p.date,
@@ -149,8 +151,8 @@ export function buildHeatmap(trend: TrendPoint[]): HeatmapCell[] {
 // ---------- Decision triggers ----------
 export function buildTriggers(input: {
   cprCentsLast7: number | null;
-  frequencyLast7: number;
-  registrationsThisWeek: number;
+  frequencyLast7: number | null;
+  registrationsThisWeek: number | null;
   daysSinceLaunch: number | null;
   ads: { fatigueScore: number; adName: string }[];
 }): DecisionTrigger[] {
@@ -179,7 +181,9 @@ export function buildTriggers(input: {
     }
   }
 
-  if (input.frequencyLast7 >= 3) {
+  if (input.frequencyLast7 == null) {
+    triggers.push({ id: "freq", label: "Frequency cap", status: "pending", detail: "Frequency is unavailable for this period." });
+  } else if (input.frequencyLast7 >= 3) {
     triggers.push({ id: "freq", label: "Frequency cap", status: "alert", detail: `Freq ${input.frequencyLast7.toFixed(2)} - audience saturating, refresh creative.` });
   } else if (input.frequencyLast7 >= t.freq_alert_threshold) {
     triggers.push({ id: "freq", label: "Frequency cap", status: "watch", detail: `Freq ${input.frequencyLast7.toFixed(2)} approaching cap.` });
@@ -188,7 +192,9 @@ export function buildTriggers(input: {
   }
 
   const lp = t.learning_phase.events_per_week_for_exit;
-  if (input.registrationsThisWeek >= lp) {
+  if (input.registrationsThisWeek == null) {
+    triggers.push({ id: "learning", label: "Learning phase exit", status: "pending", detail: "Lead events are unavailable for this period." });
+  } else if (input.registrationsThisWeek >= lp) {
     triggers.push({ id: "learning", label: "Learning phase exit", status: "ok", detail: `${input.registrationsThisWeek}/${lp} events this week. Exited.` });
   } else {
     triggers.push({
@@ -222,9 +228,9 @@ export function buildTriggers(input: {
 // ---------- Phase ----------
 export function buildPhase(input: {
   daysSinceLaunch: number | null;
-  spendCentsMTD: number;
-  monthlyBudgetCents: number;
-  registrationsThisWeek: number;
+  spendCentsMTD: number | null;
+  monthlyBudgetCents: number | null;
+  registrationsThisWeek: number | null;
 }): CampaignPhase {
   const d = input.daysSinceLaunch;
   let label = "Pre-launch";
@@ -252,11 +258,11 @@ export function buildPhase(input: {
   const exitCriteria: { label: string; done: boolean }[] = [];
   exitCriteria.push({
     label: `${CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit} events/week`,
-    done: input.registrationsThisWeek >= CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit,
+    done: input.registrationsThisWeek != null && input.registrationsThisWeek >= CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit,
   });
   exitCriteria.push({
     label: `$${(CAMPAIGN_TARGETS.learning_phase.real_signal_min_spend_cents / 100).toFixed(0)} cumulative spend`,
-    done: input.spendCentsMTD >= CAMPAIGN_TARGETS.learning_phase.real_signal_min_spend_cents,
+    done: input.spendCentsMTD != null && input.spendCentsMTD >= CAMPAIGN_TARGETS.learning_phase.real_signal_min_spend_cents,
   });
   if (d != null) {
     exitCriteria.push({

@@ -119,11 +119,11 @@ export function CreativeLeaderboard({ state }: { state: DashboardState }) {
                       </span>
                     </td>
                     <td className="px-3 py-3 text-right tabular-nums">{fmtMoney(a.spendCents)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.impressions.toLocaleString()}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{a.impressions == null ? "-" : a.impressions.toLocaleString()}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{fmtPct(a.ctrLink)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.registrations}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{a.registrations == null ? "-" : a.registrations}</td>
                     <td className={`px-3 py-3 text-right tabular-nums ${cprColor}`}>{fmtMoney(a.cprCents)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.frequency.toFixed(2)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{a.frequency == null ? "-" : a.frequency.toFixed(2)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-muted-foreground" title={a.firstSeenDate ? `First impression on ${a.firstSeenDate}` : "Not yet seen"}>
                       {a.daysActive == null ? "-" : a.daysActive}
                     </td>

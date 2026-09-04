@@ -5,8 +5,8 @@ import { CAMPAIGN_TARGETS } from "@/lib/targets";
 import { Eye, MousePointerClick, UserCheck, Users, Phone, GraduationCap, Info } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-function pct(num: number, den: number) {
-  if (den === 0) return null;
+function pct(num: number | null, den: number | null) {
+  if (num == null || den == null || den === 0) return null;
   return (num / den) * 100;
 }
 
@@ -15,7 +15,8 @@ function fmtPct(v: number | null) {
   return `${v.toFixed(1)}%`;
 }
 
-function fmtMoney(cents: number) {
+function fmtMoney(cents: number | null) {
+  if (cents == null) return "-";
   return `$${(cents / 100).toFixed(2)}`;
 }
 
@@ -30,8 +31,8 @@ function rateColor(p: number | null, band?: Band): string {
 
 type Step = {
   label: string;
-  value: number;
-  base: number;
+  value: number | null;
+  base: number | null;
   icon: LucideIcon;
   bandPct?: Band;
   bandLabel?: string;
@@ -66,7 +67,7 @@ export function Funnel({ state }: { state: DashboardState }) {
       icon: Users,
       bandPct: { lo: t.lp_conversion.lo * 100, hi: t.lp_conversion.hi * 100 },
       bandLabel: `LP conv ${Math.round(t.lp_conversion.lo * 100)}-${Math.round(t.lp_conversion.hi * 100)}%`,
-      sourceNote: `Airtable deduped (Meta pixel: ${f.metaPixelRegistrations})`,
+      sourceNote: `Meta stored (CRM not configured)`,
     },
     {
       label: "Attended",
@@ -75,7 +76,7 @@ export function Funnel({ state }: { state: DashboardState }) {
       icon: UserCheck,
       bandPct: { lo: 30, hi: 50 },
       bandLabel: "Show rate 30-50%",
-      sourceNote: "EverWebinar -> Airtable",
+      sourceNote: "CRM attribution not configured",
     },
     {
       label: "Calls booked",
@@ -84,7 +85,7 @@ export function Funnel({ state }: { state: DashboardState }) {
       icon: Phone,
       bandPct: { lo: 15, hi: 35 },
       bandLabel: "Attend -> call 15-35%",
-      sourceNote: "Framework Leads",
+      sourceNote: "CRM attribution not configured",
     },
     {
       label: "Enrollments",
@@ -93,11 +94,11 @@ export function Funnel({ state }: { state: DashboardState }) {
       icon: GraduationCap,
       bandPct: { lo: t.call_to_close_rate * 100 - 10, hi: t.call_to_close_rate * 100 + 10 },
       bandLabel: `Close ${Math.round(t.call_to_close_rate * 100)}%`,
-      sourceNote: "Framework Leads",
+      sourceNote: "CRM attribution not configured",
     },
   ];
 
-  const max = Math.max(...steps.map((s) => s.value), 1);
+  const max = Math.max(...steps.map((s) => s.value ?? 0), 1);
 
   return (
     <section className="rounded-xl border border-border bg-card mb-6">
@@ -119,7 +120,7 @@ export function Funnel({ state }: { state: DashboardState }) {
       </div>
       <div className="px-5 py-4 space-y-2.5">
         {steps.map((s, i) => {
-          const widthPct = Math.max(2, (s.value / max) * 100);
+          const widthPct = s.value == null ? 0 : Math.max(2, (s.value / max) * 100);
           const conversionPct = i === 0 ? null : pct(s.value, s.base);
           const Icon = s.icon;
           const color = rateColor(conversionPct, s.bandPct);
@@ -137,7 +138,7 @@ export function Funnel({ state }: { state: DashboardState }) {
                   style={{ width: `${widthPct}%` }}
                 />
                 <div className="absolute inset-0 flex items-center justify-between px-3 text-sm">
-                  <span className="font-semibold tabular-nums">{s.value.toLocaleString()}</span>
+                  <span className="font-semibold tabular-nums">{s.value == null ? "-" : s.value.toLocaleString()}</span>
                   {s.sourceNote && (
                     <span className="text-[10px] text-foreground/60 hidden sm:inline">{s.sourceNote}</span>
                   )}

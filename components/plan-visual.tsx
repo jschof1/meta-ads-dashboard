@@ -4,7 +4,8 @@ import { CheckCircle2, Circle, AlertCircle, AlertTriangle, Clock, ClipboardList,
 import { useState } from "react";
 import type { DashboardState, DecisionTrigger } from "@/lib/state-types";
 
-function fmtMoney(cents: number) {
+function fmtMoney(cents: number | null) {
+  if (cents == null) return "-";
   return `$${(cents / 100).toFixed(0)}`;
 }
 
@@ -16,7 +17,9 @@ const TRIGGER_STYLES: Record<DecisionTrigger["status"], { dot: string; bg: strin
 };
 
 function PhaseCard({ phase }: { phase: DashboardState["phase"] }) {
-  const pacePct = phase.spendPaceBudgetCents > 0 ? Math.min(100, (phase.spendPaceCents / phase.spendPaceBudgetCents) * 100) : 0;
+  const pacePct = phase.spendPaceBudgetCents != null && phase.spendPaceBudgetCents > 0 && phase.spendPaceCents != null
+    ? Math.min(100, (phase.spendPaceCents / phase.spendPaceBudgetCents) * 100)
+    : 0;
   const phaseProgressPct = phase.totalDays && phase.daysIn != null ? Math.min(100, (phase.daysIn / phase.totalDays) * 100) : 0;
 
   return (

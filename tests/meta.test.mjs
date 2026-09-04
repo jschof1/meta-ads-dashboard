@@ -89,6 +89,24 @@ test("rejects an unsafe or incomplete paging.next instead of guessing a cursor",
   await assert.rejects(() => missingCursor.client.listCampaigns(), MetaPaginationError);
 });
 
+test("uses the official cursor when paging.next carries no query cursor", async () => {
+  const { client, calls } = makeClient((url) => {
+    if (!url.searchParams.has("after")) {
+      return jsonResponse({
+        data: [{ id: "c1" }],
+        paging: {
+          cursors: { after: "cursor-from-cursors" },
+          next: "https://graph.facebook.com/v25.0/act_123/campaigns",
+        },
+      });
+    }
+    return jsonResponse({ data: [{ id: "c2" }] });
+  });
+
+  assert.deepEqual((await client.listCampaigns()).map((campaign) => campaign.id), ["c1", "c2"]);
+  assert.equal(calls[1].url.searchParams.get("after"), "cursor-from-cursors");
+});
+
 test("stops on a terminal page when cursors remain but Meta omits paging.next", async () => {
   const { client, calls } = makeClient(() => jsonResponse({
     data: [{ id: "terminal" }],
@@ -161,6 +179,26 @@ test("retries transient responses with bounded backoff and exposes trace diagnos
   assert.equal(result.diagnostics.attempts, 2);
   assert.equal(result.diagnostics.traceId, "trace-2");
   assert.equal(result.diagnostics.appUsage.call_count, 12);
+});
+
+test("treats a Graph error body as a failed response even when HTTP status is 200", async () => {
+  const { client, calls } = makeClient(() => jsonResponse({
+    error: { message: "Graph rejected the request", code: 100, error_subcode: 1487534, fbtrace_id: "trace-body-error" },
+  }));
+
+  await assert.rejects(
+    () => client.getAccount(),
+    (error) => {
+      assert.ok(error instanceof MetaApiError);
+      assert.equal(error.kind, "http");
+      assert.equal(error.status, 200);
+      assert.equal(error.code, 100);
+      assert.equal(error.subcode, 1487534);
+      assert.equal(error.traceId, "trace-body-error");
+      return true;
+    },
+  );
+  assert.equal(calls.length, 1);
 });
 
 test("honours Retry-After on rate limiting and returns a typed exhausted error", async () => {
