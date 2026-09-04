@@ -37,7 +37,7 @@ export function Scorecard({ state }: { state: DashboardState }) {
   const dsl = state.meta.daysSinceLaunch;
   const gate = dsl != null ? findCurrentGate(dsl) : null;
   const cprCls = classifyCpr(sc.last7.cprCents);
-  const learningPct = Math.round(sc.learningProgress * 100);
+  const learningPct = sc.learningProgress == null ? null : Math.round(sc.learningProgress * 100);
 
   const todaySpend = sc.today.spendCents;
   const dailyBudget = sc.budget.dailyCents;
@@ -64,8 +64,8 @@ export function Scorecard({ state }: { state: DashboardState }) {
       />
       <Card
         label="Learning phase"
-        value={`${sc.eventsThisWeek}/${sc.learningEventsTarget}`}
-        sub={`${learningPct}% to exit (50 evt/wk)`}
+        value={`${sc.eventsThisWeek == null ? "-" : sc.eventsThisWeek}/${sc.learningEventsTarget}`}
+        sub={learningPct == null ? "Lead event data unavailable" : `${learningPct}% to exit (50 evt/wk)`}
       />
       <Card
         label="7d link CTR"

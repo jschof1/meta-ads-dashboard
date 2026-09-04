@@ -2,6 +2,9 @@
   "name": "ads-dashboard",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "deepmerge-ts": "8.0.2"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
@@ -28,7 +31,6 @@
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
     "next": "16.3.4",
-    "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
@@ -43,6 +45,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "4.23.13",
     "typescript": "^5"

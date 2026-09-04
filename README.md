@@ -37,8 +37,7 @@ cp public/plan.md.template public/plan.md
 # Edit public/plan.md with your campaign details
 
 # Local SQLite (default - no Turso needed for dev)
-DATABASE_URL="file:./dev.db" npx prisma generate
-DATABASE_URL="file:./dev.db" npx prisma db push
+DATABASE_URL="file:./dev.db" npx prisma migrate deploy
 
 npm run dev
 # Visit http://localhost:3000
@@ -55,8 +54,9 @@ See [`.env.example`](./.env.example) for the full list with comments.
 
 **Required:**
 - `DASHBOARD_PASSWORD` - login password
+- `AUTH_SECRET` - at least 32 random characters for signed sessions
+- `CRON_SECRET` - at least 32 random characters for the protected cron endpoint
 - `DATABASE_URL` - libsql connection string (default `file:./dev.db` for local)
-- `ANTHROPIC_API_KEY` - for the AI Daily Briefing
 - `META_MARKETING_TOKEN` - System User token from [cc-meta-tracking-setup](https://github.com/bosar-academy/cc-meta-tracking-setup)
 - `META_AD_ACCOUNT_ID` - format `act_XXXXXXXXX`
 
@@ -67,6 +67,7 @@ See [`.env.example`](./.env.example) for the full list with comments.
 - `META_PRIMARY_RESULT_ACTION_TYPE` - required when Meta returns more than one possible lead/result action
 - `META_ATTRIBUTION_WINDOWS` - explicit comma-separated attribution windows, defaulting to `7d_click,1d_view`
 - `META_CAMPAIGN_LAUNCH_DATE` - YYYY-MM-DD; powers "days since launch" + learning-phase status
+- `ANTHROPIC_API_KEY` - enables the optional AI Daily Briefing and creative brief features
 - `AIRTABLE_ENABLED` + `AIRTABLE_*` - if you track sales pipeline in Airtable, enable for deeper funnel attribution
 
 ## Production deploy (Vercel + Turso)
@@ -77,10 +78,9 @@ turso db create meta-ads-dashboard
 turso db tokens create meta-ads-dashboard
 # Capture URL + token
 
-# 2. Push the schema to Turso
-TURSO_DATABASE_URL="libsql://..." TURSO_AUTH_TOKEN="..." \
-  DATABASE_URL="$TURSO_DATABASE_URL" \
-  npx prisma db push
+# 2. Apply the committed SQL migration to Turso.
+# Prisma Migrate does not deploy directly to a remote libSQL/Turso database.
+turso db shell meta-ads-dashboard < prisma/migrations/20260904170000_pr03_sync_data/migration.sql
 
 # 3. Push code to GitHub (your own repo)
 git remote add origin git@github.com:YOU/YOUR-REPO.git
@@ -94,7 +94,7 @@ git push -u origin main
 
 # 5. Verify
 curl https://<your-vercel-url>/api/cron/sync-meta -H "Authorization: Bearer $CRON_SECRET"
-# Expected: { "ok": true, "snapshot": {...} }
+# Expected after a successful sync: { "ok": true, "status": "SUCCEEDED", ... }
 ```
 
 ## File map
@@ -115,8 +115,7 @@ lib/
   targets.ts           # CPR bands, CAC range, decision gates (EDIT FOR YOUR CAMPAIGN)
   plan-context.ts      # reads public/plan.md
   funnel.ts            # funnel building + attribution
-prisma/
-  schema.prisma        # Snapshot, AdDaily, ActionLog
+  schema.prisma        # legacy tables plus Campaign, AdSet, Ad, Creative, DailyInsight, SyncRun
 public/
   plan.md.template     # campaign brief template - copy to public/plan.md and fill in
 ```
@@ -129,6 +128,15 @@ The two files you edit per campaign:
 2. **`lib/targets.ts`** - your CPR bands, CAC range, decision gates
 
 Both are gitignored or marked as user-editable. The default targets in `lib/targets.ts` are placeholders for a typical $50/day cold lead-gen campaign - replace with your actual unit economics.
+
+## Data and safety notes
+
+- `/api/dashboard/state` reads only the durable database read model. It does not call Meta during page loads.
+- The first sync requests an inclusive 90-day history; later runs refresh the most recent seven days to capture delayed conversions.
+- Sync runs are account-scoped, idempotent and lease-protected. A failed run leaves the last successful data available and marks the dashboard stale/failed.
+- Missing provider metrics remain unavailable (`null`), distinct from a reported zero. Result/action configuration is reported as a warning instead of inventing leads.
+- Meta write helpers are approval-gated and disabled by default. `META_WRITES_ENABLED` must not be enabled without the explicit PR09 safety gate.
+- For a database created previously with `prisma db push`, apply the committed migration SQL once, then mark that migration applied in the local migration ledger with `prisma migrate resolve --applied 20260904170000_pr03_sync_data`. Preserve a backup before changing a production database.
 
 ## Pairs with
 

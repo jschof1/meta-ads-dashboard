@@ -5,6 +5,7 @@ import {
   MetaApiError,
   createMetaClient,
 } from "@/lib/meta";
+import { redactSensitiveData } from "@/lib/safe-json";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -34,12 +35,12 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      account,
-      campaigns,
-      adSets,
-      ads,
-      creatives,
-      insights: { accountRollup: accountInsight, adDaily: adInsights },
+      account: redactSensitiveData(account),
+      campaigns: redactSensitiveData(campaigns),
+      adSets: redactSensitiveData(adSets),
+      ads: redactSensitiveData(ads),
+      creatives: redactSensitiveData(creatives),
+      insights: redactSensitiveData({ accountRollup: accountInsight, adDaily: adInsights }),
       actionTypeDiagnostics: insightRows.map((row) => ({
         adId: row.ad_id ?? null,
         date: row.date_start ?? null,
@@ -47,7 +48,10 @@ export async function GET(request: Request) {
       })),
     });
   } catch (error) {
-    const message = error instanceof MetaApiError ? error.message : "Meta diagnostic failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    const diagnostic = error instanceof MetaApiError
+      ? { kind: error.kind, status: error.status, code: error.code, subcode: error.subcode, traceId: error.traceId }
+      : { kind: "unknown" };
+    console.error("Meta diagnostic failed:", diagnostic);
+    return NextResponse.json({ ok: false, error: "Meta diagnostic failed; see server logs for redacted provider diagnostics." }, { status: 500 });
   }
 }

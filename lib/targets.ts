@@ -89,16 +89,18 @@ export const AD_VERDICT_THRESHOLDS = {
 } as const;
 
 export function classifyAd(input: {
-  spendCents: number;
-  registrations: number;
+  spendCents: number | null;
+  registrations: number | null;
   cprCents: number | null;
-  ctrLink: number;
+  ctrLink: number | null;
 }): { verdict: AdVerdict; reason: string } {
   const t = AD_VERDICT_THRESHOLDS;
   const { spendCents, registrations, cprCents, ctrLink } = input;
+  if (spendCents == null || registrations == null) {
+    return { verdict: "too_early", reason: "Insufficient stored evidence to classify this ad" };
+  }
   const spendDollars = spendCents / 100;
   const cprDollars = cprCents != null ? cprCents / 100 : null;
-  const ctrPct = ctrLink * 100;
 
   if (spendCents < t.too_early_min_spend_cents || registrations < t.too_early_min_regs) {
     return {
@@ -121,22 +123,23 @@ export function classifyAd(input: {
     };
   }
 
-  if (cprCents != null && cprCents <= t.performing_max_cpr_cents && ctrLink < t.low_ctr_warning) {
+  if (cprCents != null && ctrLink != null && cprCents <= t.performing_max_cpr_cents && ctrLink < t.low_ctr_warning) {
     return {
       verdict: "watch",
-      reason: `Watch - $${cprDollars!.toFixed(0)} CPR but ${ctrPct.toFixed(2)}% CTR (low engagement, likely to regress)`,
+      reason: `Watch - $${cprDollars!.toFixed(0)} CPR but ${(ctrLink * 100).toFixed(2)}% CTR (low engagement, likely to regress)`,
     };
   }
 
   if (
     cprCents != null &&
     cprCents <= t.winner_max_cpr_cents &&
+    ctrLink != null &&
     ctrLink >= t.winner_min_ctr &&
     spendCents >= t.too_early_min_spend_cents
   ) {
     return {
       verdict: "winner",
-      reason: `Winner - $${cprDollars!.toFixed(0)} CPR with ${ctrPct.toFixed(2)}% CTR over $${spendDollars.toFixed(0)}`,
+    reason: `Winner - $${cprDollars!.toFixed(0)} CPR with ${(ctrLink * 100).toFixed(2)}% CTR over $${spendDollars.toFixed(0)}`,
     };
   }
 

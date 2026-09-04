@@ -9,8 +9,12 @@ import {
   MetaConfigurationError,
   MetaPaginationError,
   MetaResultEventError,
+  toOptionalCents,
+  toOptionalFloat,
+  toOptionalInt,
 } from "../lib/meta.ts";
 import { MetaWritesDisabledError, pauseAd, setAdsetBudget } from "../lib/meta-writes.ts";
+import { redactSensitiveData, safeJson } from "../lib/safe-json.ts";
 
 const token = "meta-test-token-that-must-never-appear-in-a-url";
 
@@ -89,6 +93,24 @@ test("rejects an unsafe or incomplete paging.next instead of guessing a cursor",
   await assert.rejects(() => missingCursor.client.listCampaigns(), MetaPaginationError);
 });
 
+test("uses the official cursor when paging.next carries no query cursor", async () => {
+  const { client, calls } = makeClient((url) => {
+    if (!url.searchParams.has("after")) {
+      return jsonResponse({
+        data: [{ id: "c1" }],
+        paging: {
+          cursors: { after: "cursor-from-cursors" },
+          next: "https://graph.facebook.com/v25.0/act_123/campaigns",
+        },
+      });
+    }
+    return jsonResponse({ data: [{ id: "c2" }] });
+  });
+
+  assert.deepEqual((await client.listCampaigns()).map((campaign) => campaign.id), ["c1", "c2"]);
+  assert.equal(calls[1].url.searchParams.get("after"), "cursor-from-cursors");
+});
+
 test("stops on a terminal page when cursors remain but Meta omits paging.next", async () => {
   const { client, calls } = makeClient(() => jsonResponse({
     data: [{ id: "terminal" }],
@@ -161,6 +183,30 @@ test("retries transient responses with bounded backoff and exposes trace diagnos
   assert.equal(result.diagnostics.attempts, 2);
   assert.equal(result.diagnostics.traceId, "trace-2");
   assert.equal(result.diagnostics.appUsage.call_count, 12);
+  const history = client.getDiagnostics();
+  assert.equal(history.requestCount, 2);
+  assert.deepEqual(history.traceIds, ["trace-1", "trace-2"]);
+  assert.deepEqual(history.statuses, [503, 200]);
+});
+
+test("treats a Graph error body as a failed response even when HTTP status is 200", async () => {
+  const { client, calls } = makeClient(() => jsonResponse({
+    error: { message: "Graph rejected the request", code: 100, error_subcode: 1487534, fbtrace_id: "trace-body-error" },
+  }));
+
+  await assert.rejects(
+    () => client.getAccount(),
+    (error) => {
+      assert.ok(error instanceof MetaApiError);
+      assert.equal(error.kind, "http");
+      assert.equal(error.status, 200);
+      assert.equal(error.code, 100);
+      assert.equal(error.subcode, 1487534);
+      assert.equal(error.traceId, "trace-body-error");
+      return true;
+    },
+  );
+  assert.equal(calls.length, 1);
 });
 
 test("honours Retry-After on rate limiting and returns a typed exhausted error", async () => {
@@ -186,6 +232,17 @@ test("honours Retry-After on rate limiting and returns a typed exhausted error",
   );
   assert.equal(calls.length, 2);
   assert.deepEqual(sleeps, [3000]);
+});
+
+test("caps an excessive Retry-After delay at the configured safety limit", async () => {
+  const { client, sleeps } = makeClient(() => jsonResponse(
+    { error: { message: "Application request limit reached", code: 4 } },
+    429,
+    { "retry-after": "30" },
+  ), { maxRetries: 1, maxRetryAfterMs: 1_000 });
+
+  await assert.rejects(() => client.request("act_123/insights"), MetaApiError);
+  assert.deepEqual(sleeps, [1_000]);
 });
 
 test("does not retry expired or invalid tokens", async () => {
@@ -231,9 +288,9 @@ test("rejects malformed collections, honours pagination item caps and accepts em
   const partial = makeClient(() => jsonResponse({ data: [{ id: "ad-1", status: "ACTIVE" }] }));
   const ads = await partial.client.listAds();
   assert.equal(ads[0].id, "ad-1");
-  assert.equal(ads[0].name, "ad-1");
+  assert.equal(ads[0].name, undefined);
   assert.equal(ads[0].status, "ACTIVE");
-  assert.equal(ads[0].effective_status, "UNKNOWN");
+  assert.equal(ads[0].effective_status, undefined);
 });
 
 test("diagnoses action types and requires explicit configuration for ambiguity", () => {
@@ -267,6 +324,18 @@ test("diagnoses action types and requires explicit configuration for ambiguity",
   assert.equal(selected.missing, false);
   assert.equal(extractRegistrations({ actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "4" }] }), 4);
   assert.equal(diagnoseResultEvents({ actions: [{ action_type: "link_click", value: "12" }] }).needsConfiguration, true);
+  const malformed = diagnoseResultEvents({ actions: [{ action_type: "offsite_conversion.custom.lead", value: "not-a-number" }] });
+  assert.equal(malformed.value, null);
+  assert.equal(malformed.needsConfiguration, true);
+});
+
+test("keeps malformed numeric provider fields missing instead of coercing them", () => {
+  assert.equal(toOptionalCents("12.34"), 1234);
+  assert.equal(toOptionalCents("12.34oops"), null);
+  assert.equal(toOptionalFloat("0.25"), 0.25);
+  assert.equal(toOptionalFloat("Infinity"), null);
+  assert.equal(toOptionalInt("1000"), 1000);
+  assert.equal(toOptionalInt("1.5"), null);
 });
 
 test("retries network failures and turns an aborted request into a safe timeout error", async () => {
@@ -302,4 +371,24 @@ test("fails closed when credentials are unavailable and disables every Meta writ
   assert.throws(() => createMetaClient({ token, adAccountId: "" }), MetaConfigurationError);
   await assert.rejects(() => pauseAd("ad-1"), MetaWritesDisabledError);
   await assert.rejects(() => setAdsetBudget("adset-1", 1000), MetaWritesDisabledError);
+});
+
+test("redacts credential-shaped keys and values before raw data is stored or returned", () => {
+  const value = redactSensitiveData({
+    access_token: token,
+    token,
+    nested: { authorization: `Bearer ${token}` },
+    next: `https://graph.facebook.com/v25.0/path?access_token=${token}`,
+    jsonText: `{"token":"${token}"}`,
+    id: "safe-id",
+  });
+  assert.deepEqual(value, {
+    access_token: "[REDACTED]",
+    token: "[REDACTED]",
+    nested: { authorization: "[REDACTED]" },
+    next: "https://graph.facebook.com/v25.0/path?access_token=[REDACTED]",
+    jsonText: '{"token":"[REDACTED]"}',
+    id: "safe-id",
+  });
+  assert.equal(safeJson(value).includes(token), false);
 });

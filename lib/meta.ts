@@ -12,6 +12,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_BACKOFF_MS = 250;
 const DEFAULT_BACKOFF_CAP_MS = 2_000;
+const DEFAULT_MAX_RETRY_AFTER_MS = 10_000;
 
 type JsonObject = Record<string, unknown>;
 type Fetcher = typeof fetch;
@@ -19,10 +20,21 @@ type Sleeper = (milliseconds: number) => Promise<void>;
 
 export type MetaInsightAction = { action_type: string; value: string };
 
+export type MetaInsightLevel = "account" | "campaign" | "adset" | "ad";
+
+export type MetaInsightDateRange = {
+  since: string;
+  until: string;
+};
+
 export type MetaInsightRow = {
+  account_id?: string;
+  account_name?: string;
+  campaign_name?: string;
   ad_id?: string;
   ad_name?: string;
   campaign_id?: string;
+  adset_name?: string;
   adset_id?: string;
   spend?: string;
   impressions?: string;
@@ -40,12 +52,25 @@ export type MetaInsightRow = {
 
 export type MetaRateLimitUsage = Record<string, number>;
 
+export type MetaDiagnosticsUsage = Record<string, unknown>;
+
 export type MetaDiagnostics = {
   attempts: number;
   traceId?: string;
   appUsage?: MetaRateLimitUsage;
   adAccountUsage?: MetaRateLimitUsage;
+  insightsThrottle?: MetaDiagnosticsUsage;
+  businessUseCaseUsage?: MetaDiagnosticsUsage;
+  debug?: string;
+  revision?: string;
+  status?: number;
+  code?: number;
+  subcode?: number;
+  type?: string;
   retryAfterMs?: number;
+  requestCount?: number;
+  traceIds?: string[];
+  statuses?: number[];
 };
 
 export type MetaRequestResult<T> = {
@@ -77,6 +102,7 @@ export type MetaClientOptions = {
   fetchImpl?: Fetcher;
   sleep?: Sleeper;
   random?: () => number;
+  maxRetryAfterMs?: number;
 };
 
 export class MetaConfigurationError extends Error {
@@ -176,9 +202,9 @@ export type MetaAdSet = {
 
 export type AdSummary = {
   id: string;
-  name: string;
-  status: string;
-  effective_status: string;
+  name?: string;
+  status?: string;
+  effective_status?: string;
   campaign_id?: string;
   adset_id?: string;
   creative_id?: string;
@@ -230,10 +256,14 @@ export type MetaResultEventDiagnostic = {
 };
 
 const FIELDS_AD = [
+  "account_id",
+  "account_name",
   "ad_id",
   "ad_name",
   "campaign_id",
+  "campaign_name",
   "adset_id",
+  "adset_name",
   "spend",
   "impressions",
   "reach",
@@ -249,6 +279,14 @@ const FIELDS_AD = [
 ].join(",");
 
 const FIELDS_AGGREGATE = [
+  "account_id",
+  "account_name",
+  "campaign_id",
+  "campaign_name",
+  "adset_id",
+  "adset_name",
+  "ad_id",
+  "ad_name",
   "spend",
   "impressions",
   "reach",
@@ -311,6 +349,12 @@ function parseUsageHeader(value: string | null): MetaRateLimitUsage | undefined 
       .filter((entry): entry is [string, number] => entry[1] !== undefined),
   );
   return Object.keys(usage).length > 0 ? usage : undefined;
+}
+
+function parseObjectHeader(value: string | null): MetaDiagnosticsUsage | undefined {
+  if (!value) return undefined;
+  const parsed = parseJsonText(value);
+  return isObject(parsed) ? parsed : undefined;
 }
 
 function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
@@ -394,6 +438,9 @@ export class MetaClient {
   private readonly sleep: Sleeper;
   private readonly random: () => number;
   private readonly primaryResultActionType?: string;
+  private readonly maxRetryAfterMs: number;
+  private lastDiagnostics: MetaDiagnostics = { attempts: 0 };
+  private diagnosticsHistory: MetaDiagnostics[] = [];
 
   constructor(options: MetaClientOptions = {}) {
     const configuredToken = options.token ?? process.env.META_MARKETING_TOKEN;
@@ -417,6 +464,13 @@ export class MetaClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.sleep = options.sleep ?? sleep;
     this.random = options.random ?? Math.random;
+    this.maxRetryAfterMs = Math.max(0, options.maxRetryAfterMs ?? DEFAULT_MAX_RETRY_AFTER_MS);
+  }
+
+  private recordDiagnostics(diagnostics: MetaDiagnostics): void {
+    this.lastDiagnostics = diagnostics;
+    this.diagnosticsHistory.push({ ...diagnostics });
+    if (this.diagnosticsHistory.length > 100) this.diagnosticsHistory.shift();
   }
 
   private url(path: string, params: Record<string, string | undefined>): URL {
@@ -447,13 +501,22 @@ export class MetaClient {
           traceId: response.headers.get("x-fb-trace-id") ?? undefined,
           appUsage: parseUsageHeader(response.headers.get("x-app-usage")),
           adAccountUsage: parseUsageHeader(response.headers.get("x-ad-account-usage")),
+          insightsThrottle: parseObjectHeader(response.headers.get("x-fb-ads-insights-throttle")),
+          businessUseCaseUsage: parseObjectHeader(response.headers.get("x-business-use-case-usage")),
+          debug: response.headers.get("x-fb-debug") ?? undefined,
+          revision: response.headers.get("x-fb-rev") ?? undefined,
+          status: response.status,
           retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
         };
         const body = await readBody(response);
-        if (!response.ok) {
-          const error = graphError(body);
+        const error = graphError(body);
+        if (!response.ok || error) {
           if (!diagnostics.traceId) diagnostics.traceId = stringValue(error?.fbtrace_id);
           const code = numberValue(error?.code);
+          diagnostics.code = code;
+          diagnostics.subcode = numberValue(error?.error_subcode);
+          diagnostics.type = stringValue(error?.type);
+          this.recordDiagnostics(diagnostics);
           const kind: MetaErrorKind = isAuthFailure(code, response.status)
             ? "auth"
             : isRateLimit(code, response.status)
@@ -481,6 +544,7 @@ export class MetaClient {
           throw apiError;
         }
         if (!isObject(body)) {
+          this.recordDiagnostics(diagnostics);
           throw new MetaApiError("Meta Graph API returned a malformed JSON response", {
             kind: "response",
             status: response.status,
@@ -488,6 +552,7 @@ export class MetaClient {
             diagnostics,
           });
         }
+        this.recordDiagnostics(diagnostics);
         return {
           data: ("data" in body ? body.data : body) as T,
           paging: parsePaging(body.paging),
@@ -505,6 +570,7 @@ export class MetaClient {
           controller.signal.aborted ? `Meta Graph API request timed out after ${this.timeoutMs}ms` : "Meta Graph API network request failed",
           { kind: "transient", transient: true, diagnostics: { attempts: attempt } },
         );
+        this.recordDiagnostics(networkError.diagnostics);
         if (this.shouldRetry(networkError, attempt)) {
           await this.waitBeforeRetry(networkError, attempt);
           continue;
@@ -522,7 +588,9 @@ export class MetaClient {
 
   private async waitBeforeRetry(error: MetaApiError, attempt: number): Promise<void> {
     const exponential = Math.min(this.backoffCapMs, this.backoffMs * 2 ** (attempt - 1));
-    await this.sleep(error.diagnostics.retryAfterMs ?? Math.round(exponential + exponential * 0.2 * this.random()));
+    const fallback = Math.round(exponential + exponential * 0.2 * this.random());
+    const retryAfter = error.diagnostics.retryAfterMs;
+    await this.sleep(retryAfter == null ? fallback : Math.min(retryAfter, this.maxRetryAfterMs));
   }
 
   async request<T>(path: string, params: Record<string, string | undefined> = {}): Promise<MetaRequestResult<T>> {
@@ -560,7 +628,7 @@ export class MetaClient {
       // Meta's cursor object describes the current page; only a valid next URL
       // is an instruction to continue. In particular, do not follow a stale
       // `cursors.after` on a terminal page.
-      const next = cursorFromNext(page.paging?.next, path, this.graphVersion);
+      const next = cursorFromNext(page.paging?.next, page.paging?.cursors?.after, path, this.graphVersion);
       if (!next) break;
       if (next === after) throw new MetaPaginationError("Meta pagination returned the same cursor twice");
       after = next;
@@ -618,6 +686,18 @@ export class MetaClient {
     };
   }
 
+  private insightParamsForRange(range: MetaInsightDateRange, level: MetaInsightLevel): Record<string, string | undefined> {
+    return {
+      level,
+      time_range: JSON.stringify(range),
+      filtering: this.campaignId
+        ? JSON.stringify([{ field: "campaign.id", operator: "IN", value: [this.campaignId] }])
+        : undefined,
+      action_attribution_windows: JSON.stringify(this.attributionWindows),
+      action_report_time: "conversion",
+    };
+  }
+
   async getAccountRollup(window: string): Promise<MetaInsightRow | null> {
     const result = await this.paginate<MetaInsightRow>(`${accountPath(this.accountId)}/insights`, {
       ...this.insightParams(window, "account"),
@@ -649,11 +729,52 @@ export class MetaClient {
     })).data;
   }
 
-  extractResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
-    return extractResultEvents(row, {
+  async getDailyInsights(level: MetaInsightLevel, range: MetaInsightDateRange): Promise<MetaInsightRow[]> {
+    return (await this.paginate<MetaInsightRow>(`${accountPath(this.accountId)}/insights`, {
+      ...this.insightParamsForRange(range, level),
+      fields: level === "account" ? FIELDS_AGGREGATE : FIELDS_AD,
+      time_increment: "1",
+    })).data;
+  }
+
+  getAccountId(): string {
+    return this.accountId;
+  }
+
+  getGraphVersion(): string {
+    return this.graphVersion;
+  }
+
+  getAttributionKey(): string {
+    return this.attributionWindows.join(",");
+  }
+
+  getDiagnostics(): MetaDiagnostics {
+    if (this.diagnosticsHistory.length === 0) return this.lastDiagnostics;
+    return {
+      ...this.lastDiagnostics,
+      requestCount: this.diagnosticsHistory.length,
+      traceIds: Array.from(new Set(this.diagnosticsHistory.flatMap((item) => item.traceId ? [item.traceId] : []))),
+      statuses: Array.from(new Set(this.diagnosticsHistory.flatMap((item) => item.status ? [item.status] : []))),
+    };
+  }
+
+  diagnoseResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
+    return diagnoseResultEvents(row, {
       primaryActionType: this.primaryResultActionType,
       customConversionId: this.customConversionId,
     });
+  }
+
+  extractResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
+    const diagnostic = this.diagnoseResultEvents(row);
+    if (diagnostic.needsConfiguration) {
+      throw new MetaResultEventError(
+        "result event needs configuration: set META_PRIMARY_RESULT_ACTION_TYPE",
+        diagnostic.candidateActionTypes,
+      );
+    }
+    return diagnostic;
   }
 
   extractRegistrations(row: MetaInsightRow): number {
@@ -690,9 +811,9 @@ function toCreative(creative: RawCreative): MetaCreative {
 function toAdSummary(ad: RawAd): AdSummary {
   return {
     id: ad.id ?? "",
-    name: ad.name ?? ad.id ?? "",
-    status: ad.status ?? "UNKNOWN",
-    effective_status: ad.effective_status ?? "UNKNOWN",
+    name: ad.name,
+    status: ad.status,
+    effective_status: ad.effective_status,
     campaign_id: ad.campaign_id,
     adset_id: ad.adset_id,
     creative_id: ad.creative?.id,
@@ -715,7 +836,12 @@ function parsePaging(value: unknown): MetaPaging | undefined {
   return cursors || next ? { cursors, next } : undefined;
 }
 
-function cursorFromNext(next: string | undefined, expectedPath: string, graphVersion: string): string | undefined {
+function cursorFromNext(
+  next: string | undefined,
+  cursorAfter: string | undefined,
+  expectedPath: string,
+  graphVersion: string,
+): string | undefined {
   if (!next) return undefined;
   try {
     const url = new URL(next);
@@ -723,7 +849,7 @@ function cursorFromNext(next: string | undefined, expectedPath: string, graphVer
     if (url.hostname !== GRAPH_HOST) throw new MetaPaginationError("Meta pagination returned an unexpected host");
     const expected = `/${graphVersion}/${expectedPath.replace(/^\/+/, "")}`;
     if (url.pathname !== expected) throw new MetaPaginationError("Meta pagination returned an unexpected endpoint");
-    const cursor = url.searchParams.get("after");
+    const cursor = url.searchParams.get("after") ?? cursorAfter;
     if (!cursor) throw new MetaPaginationError("Meta pagination next URL did not contain an after cursor");
     return cursor;
   } catch (error) {
@@ -747,12 +873,13 @@ function actionRows(row: MetaInsightRow): MetaInsightAction[] {
   if (!Array.isArray(row.actions)) return [];
   return row.actions.flatMap((action) => {
     if (!isObject(action) || typeof action.action_type !== "string") return [];
-    const value = typeof action.value === "number" && Number.isFinite(action.value)
-      ? String(action.value)
-      : typeof action.value === "string"
-        ? action.value
-        : "0";
-    return [{ action_type: action.action_type, value }];
+    const value = typeof action.value === "number"
+      ? action.value
+      : typeof action.value === "string" && action.value.trim() !== ""
+        ? Number(action.value)
+        : Number.NaN;
+    if (!Number.isFinite(value) || value < 0) return [];
+    return [{ action_type: action.action_type, value: String(value) }];
   });
 }
 
@@ -822,22 +949,34 @@ export function extractRegistrations(row: MetaInsightRow): number {
   return diagnostic.value ?? 0;
 }
 
-export function toCents(money: string | undefined | null): number {
-  if (!money) return 0;
-  const number = Number.parseFloat(money);
-  return Number.isFinite(number) ? Math.round(number * 100) : 0;
+export function toCents(money: string | number | undefined | null): number {
+  return toOptionalCents(money) ?? 0;
 }
 
-export function toFloat(value: string | undefined | null): number {
-  if (!value) return 0;
-  const number = Number.parseFloat(value);
-  return Number.isFinite(number) ? number : 0;
+export function toFloat(value: string | number | undefined | null): number {
+  return toOptionalFloat(value) ?? 0;
 }
 
-export function toInt(value: string | undefined | null): number {
-  if (!value) return 0;
-  const number = Number.parseInt(value, 10);
-  return Number.isFinite(number) ? number : 0;
+export function toInt(value: string | number | undefined | null): number {
+  return toOptionalInt(value) ?? 0;
+}
+
+export function toOptionalCents(money: string | number | undefined | null): number | null {
+  if (money === undefined || money === null || String(money).trim() === "") return null;
+  const number = typeof money === "number" ? money : Number(money);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) : null;
+}
+
+export function toOptionalFloat(value: string | number | undefined | null): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+export function toOptionalInt(value: string | number | undefined | null): number | null {
+  if (value === undefined || value === null || String(value).trim() === "") return null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 export function createMetaClient(options: MetaClientOptions = {}): MetaClient {
@@ -862,6 +1001,10 @@ export async function getAdCumulative(window: string): Promise<MetaInsightRow[]>
 
 export async function getAccountTimeseries(window: string): Promise<MetaInsightRow[]> {
   return configuredClient().getAccountTimeseries(window);
+}
+
+export async function getDailyInsights(level: MetaInsightLevel, range: MetaInsightDateRange): Promise<MetaInsightRow[]> {
+  return configuredClient().getDailyInsights(level, range);
 }
 
 export async function listCampaignAds(): Promise<AdSummary[]> {

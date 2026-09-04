@@ -9,15 +9,15 @@ export const dynamic = "force-dynamic";
 type Anomaly = { metric: string; direction: string; changePct: number; message: string; severity: string };
 type DashboardState = {
   scorecard?: {
-    today?: { spendCents?: number; registrations?: number; cprCents?: number | null };
-    yesterday?: { spendCents?: number; registrations?: number; cprCents?: number | null };
-    last7?: { spendCents?: number; registrations?: number; cprCents?: number | null; ctrLink?: number; cpmCents?: number; frequency?: number };
-    last30?: { spendCents?: number; registrations?: number; cprCents?: number | null };
-    eventsThisWeek?: number;
+    today?: { spendCents?: number | null; registrations?: number | null; cprCents?: number | null };
+    yesterday?: { spendCents?: number | null; registrations?: number | null; cprCents?: number | null };
+    last7?: { spendCents?: number | null; registrations?: number | null; cprCents?: number | null; ctrLink?: number | null; cpmCents?: number | null; frequency?: number | null };
+    last30?: { spendCents?: number | null; registrations?: number | null; cprCents?: number | null };
+    eventsThisWeek?: number | null;
     learningEventsTarget?: number;
   };
-  ads?: Array<{ adName?: string; cprCents?: number | null; spendCents?: number; status?: string; fatigueScore?: number; fatigueReason?: string }>;
-  funnel?: { registrations?: number; attended?: number; callsBooked?: number; enrollments?: number };
+  ads?: Array<{ adName?: string; cprCents?: number | null; spendCents?: number | null; status?: string; fatigueScore?: number | null; fatigueReason?: string | null }>;
+  funnel?: { registrations?: number | null; attended?: number | null; callsBooked?: number | null; enrollments?: number | null };
   anomalies?: Anomaly[];
   meta?: { daysSinceLaunch?: number | null };
 };
@@ -27,8 +27,13 @@ let cache: CacheEntry | null = null;
 const TTL_MS = 60 * 60 * 1000;
 
 function fmtMoney(cents: number | undefined | null) {
-  if (!cents) return "$0";
+  if (cents == null) return "n/a";
+  if (cents === 0) return "$0.00";
   return `$${(cents / 100).toFixed(2)}`;
+}
+
+function fmtCount(value: number | undefined | null): string {
+  return value == null ? "n/a" : String(value);
 }
 
 function dayKey() {
@@ -62,30 +67,30 @@ export async function POST(request: Request) {
   const last7 = state.scorecard?.last7;
   const last30 = state.scorecard?.last30;
   const ads = state.ads || [];
-  const funnel = state.funnel || { registrations: 0, attended: 0, callsBooked: 0, enrollments: 0 };
+  const funnel = state.funnel || { registrations: null, attended: null, callsBooked: null, enrollments: null };
   const anomalies = state.anomalies || [];
   const dsl = state.meta?.daysSinceLaunch;
 
-  const fatiguedAds = ads.filter((a) => (a.fatigueScore ?? 0) >= 0.5).slice(0, 5);
+  const fatiguedAds = ads.filter((a) => a.fatigueScore != null && a.fatigueScore >= 0.5).slice(0, 5);
 
   const summary = `
-Today: spend ${fmtMoney(today?.spendCents)}, regs ${today?.registrations ?? 0}, CPR ${today?.cprCents != null ? fmtMoney(today.cprCents) : "n/a"}.
-Yesterday: spend ${fmtMoney(yest?.spendCents)}, regs ${yest?.registrations ?? 0}, CPR ${yest?.cprCents != null ? fmtMoney(yest.cprCents) : "n/a"}.
-Last 7d: spend ${fmtMoney(last7?.spendCents)}, regs ${last7?.registrations ?? 0}, CPR ${last7?.cprCents != null ? fmtMoney(last7.cprCents) : "n/a"}, CTR ${last7?.ctrLink != null ? (last7.ctrLink * 100).toFixed(2) + "%" : "n/a"}, CPM ${last7?.cpmCents != null ? fmtMoney(last7.cpmCents) : "n/a"}, freq ${last7?.frequency?.toFixed(2) ?? "n/a"}.
-Last 30d: spend ${fmtMoney(last30?.spendCents)}, regs ${last30?.registrations ?? 0}, CPR ${last30?.cprCents != null ? fmtMoney(last30.cprCents) : "n/a"}.
-Events this week: ${state.scorecard?.eventsThisWeek ?? 0} / ${state.scorecard?.learningEventsTarget ?? 50} (Meta learning-phase exit target).
+Today: spend ${fmtMoney(today?.spendCents)}, regs ${fmtCount(today?.registrations)}, CPR ${fmtMoney(today?.cprCents)}.
+Yesterday: spend ${fmtMoney(yest?.spendCents)}, regs ${fmtCount(yest?.registrations)}, CPR ${fmtMoney(yest?.cprCents)}.
+Last 7d: spend ${fmtMoney(last7?.spendCents)}, regs ${fmtCount(last7?.registrations)}, CPR ${fmtMoney(last7?.cprCents)}, CTR ${last7?.ctrLink != null ? (last7.ctrLink * 100).toFixed(2) + "%" : "n/a"}, CPM ${fmtMoney(last7?.cpmCents)}, freq ${last7?.frequency?.toFixed(2) ?? "n/a"}.
+Last 30d: spend ${fmtMoney(last30?.spendCents)}, regs ${fmtCount(last30?.registrations)}, CPR ${fmtMoney(last30?.cprCents)}.
+Events this week: ${fmtCount(state.scorecard?.eventsThisWeek)} / ${state.scorecard?.learningEventsTarget ?? 50} (Meta learning-phase exit target).
 Days since launch: ${dsl ?? "not yet active"}.
 
 Top 8 ads by CPR:
-${ads.slice(0, 8).map((a) => `- ${a.adName} | spend ${fmtMoney(a.spendCents)} | CPR ${a.cprCents != null ? fmtMoney(a.cprCents) : "n/a"} | fatigue ${((a.fatigueScore ?? 0) * 100).toFixed(0)}% | ${a.status}`).join("\n")}
+${ads.slice(0, 8).map((a) => `- ${a.adName ?? "Unnamed ad"} | spend ${fmtMoney(a.spendCents)} | CPR ${fmtMoney(a.cprCents)} | fatigue ${a.fatigueScore != null ? (a.fatigueScore * 100).toFixed(0) + "%" : "n/a"} | ${a.status ?? "unknown"}`).join("\n")}
 
 ${fatiguedAds.length > 0 ? `Fatiguing creatives:\n${fatiguedAds.map((a) => `- ${a.adName}: ${a.fatigueReason}`).join("\n")}\n` : ""}
 
 Full funnel (last 30d, paid Meta, deduped):
-- Registrations: ${funnel.registrations}
-- Attended webinar: ${funnel.attended}
-- Calls booked: ${funnel.callsBooked}
-- Enrolled: ${funnel.enrollments}
+- Registrations: ${fmtCount(funnel.registrations)}
+- Attended webinar: ${fmtCount(funnel.attended)}
+- Calls booked: ${fmtCount(funnel.callsBooked)}
+- Enrolled: ${fmtCount(funnel.enrollments)}
 
 ${anomalies.length > 0 ? `Anomalies detected:\n${anomalies.map((a) => `- ${a.severity.toUpperCase()}: ${a.message}`).join("\n")}\n` : ""}
 `.trim();
@@ -129,7 +134,7 @@ Return ONLY this JSON shape (no prose outside it):
     cache = { key: cacheKey, text, at: Date.now() };
     return NextResponse.json({ summary: text, cached: false });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ summary: `AI summary failed: ${msg}`, error: true });
+    console.error("AI summary failed:", err instanceof Error ? err.name : "unknown error");
+    return NextResponse.json({ summary: "AI summary unavailable; see server logs.", error: true });
   }
 }

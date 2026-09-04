@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
+import { SyncAlreadyRunningError, syncMeta } from "@/lib/sync";
 
-// On-demand refresh button. Same logic as cron but invoked from the UI.
-// We just delegate to the cron route so the logic lives in one place.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  const unauthorized = await requireApiSession(req);
+export async function POST(request: NextRequest) {
+  const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
-  const url = new URL("/api/cron/sync-meta", req.url);
-  const cronSecret = process.env.CRON_SECRET || "";
-  const res = await fetch(url.toString(), {
-    method: "GET",
-    headers: cronSecret ? { Authorization: `Bearer ${cronSecret}` } : undefined,
-  });
-  const json = await res.json().catch(() => ({}));
-  return NextResponse.json(json, { status: res.status });
+  try {
+    return NextResponse.json({ ok: true, ...(await syncMeta({ trigger: "manual" })) });
+  } catch (error) {
+    if (error instanceof SyncAlreadyRunningError) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
+    }
+    console.error("manual Meta sync failed:", error instanceof Error ? error.name : "unknown error");
+    return NextResponse.json({ ok: false, error: "Meta sync failed; the last successful data remains available." }, { status: 500 });
+  }
 }

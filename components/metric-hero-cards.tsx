@@ -143,7 +143,7 @@ export function MetricHeroCards({ state }: { state: DashboardState }) {
   const trendWithMoney = trend.map((p: TrendPoint) => ({
     date: p.date.slice(5),
     cpr: p.cprCents != null ? p.cprCents / 100 : null,
-    cpm: p.cpmCents > 0 ? p.cpmCents / 100 : null,
+    cpm: p.cpmCents != null && p.cpmCents > 0 ? p.cpmCents / 100 : null,
   }));
 
   const cprSeries: SeriesPoint[] = trendWithMoney.map((p) => ({ date: p.date, value: p.cpr }));

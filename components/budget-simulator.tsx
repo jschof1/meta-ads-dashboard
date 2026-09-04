@@ -4,7 +4,8 @@ import { useState } from "react";
 import { Calculator, Info } from "lucide-react";
 import type { DashboardState } from "@/lib/state-types";
 
-function fmtMoney(cents: number) {
+function fmtMoney(cents: number | null) {
+  if (cents == null) return "-";
   return `$${(cents / 100).toFixed(0)}`;
 }
 
@@ -13,27 +14,26 @@ export function BudgetSimulator({ state }: { state: DashboardState }) {
   const [dailyCents, setDailyCents] = useState(currentDaily);
 
   const last7 = state.scorecard.last7;
-  const baselineSpend7 = last7.spendCents;
-  const baselineRegs7 = last7.registrations;
+  const hasBaseline = last7.spendCents != null && last7.registrations != null;
   const baselineCpr = last7.cprCents;
 
   // Estimate regs at the new budget: scale linearly, then apply diminishing returns above 1.5x current.
   const scale = currentDaily > 0 ? dailyCents / currentDaily : 1;
   const diminish = scale > 1.5 ? 0.85 : scale > 1 ? 0.95 : 1;
   const monthlySpend = dailyCents * 30;
-  const projectedRegs7 = baselineRegs7 > 0 ? Math.round(baselineRegs7 * scale * diminish) : 0;
-  const projectedRegs30 = projectedRegs7 * (30 / 7);
-  const projectedCpr = projectedRegs30 > 0 ? Math.round(monthlySpend / projectedRegs30) : null;
+  const projectedRegs7 = last7.registrations == null ? null : Math.round(last7.registrations * scale * diminish);
+  const projectedRegs30 = projectedRegs7 == null ? null : projectedRegs7 * (30 / 7);
+  const projectedCpr = projectedRegs30 != null && projectedRegs30 > 0 ? Math.round(monthlySpend / projectedRegs30) : null;
 
   // Funnel projection using historical conversion rates from this campaign.
   const f = state.funnel;
-  const regsToAttended = f.registrations > 0 ? f.attended / f.registrations : 0.3;
-  const attendedToCalls = f.attended > 0 ? f.callsBooked / f.attended : 0.2;
-  const callsToEnrolled = f.callsBooked > 0 ? f.enrollments / f.callsBooked : 0.25;
+  const regsToAttended = f.registrations != null && f.attended != null && f.registrations > 0 ? f.attended / f.registrations : null;
+  const attendedToCalls = f.attended != null && f.callsBooked != null && f.attended > 0 ? f.callsBooked / f.attended : null;
+  const callsToEnrolled = f.callsBooked != null && f.enrollments != null && f.callsBooked > 0 ? f.enrollments / f.callsBooked : null;
 
-  const projAttended = Math.round(projectedRegs30 * regsToAttended);
-  const projCalls = Math.round(projAttended * attendedToCalls);
-  const projEnrolled = Math.round(projCalls * callsToEnrolled);
+  const projAttended = projectedRegs30 != null && regsToAttended != null ? Math.round(projectedRegs30 * regsToAttended) : null;
+  const projCalls = projAttended != null && attendedToCalls != null ? Math.round(projAttended * attendedToCalls) : null;
+  const projEnrolled = projCalls != null && callsToEnrolled != null ? Math.round(projCalls * callsToEnrolled) : null;
 
   const SLIDER_MIN = Math.max(1000, Math.round(currentDaily * 0.3));
   const SLIDER_MAX = Math.round(currentDaily * 3);
@@ -72,10 +72,10 @@ export function BudgetSimulator({ state }: { state: DashboardState }) {
           <div className="mt-4 p-3 rounded-lg bg-muted/40 border border-border">
             <div className="text-xs text-muted-foreground mb-1">Projected 30-day spend</div>
             <div className="text-xl font-bold tabular-nums">{fmtMoney(monthlySpend)}</div>
-            {baselineCpr != null && (
+            {baselineCpr != null && hasBaseline && (
               <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
                 <Info className="w-3 h-3" />
-                Baseline 7d CPR: ${(baselineCpr / 100).toFixed(2)} · {baselineRegs7} regs on {fmtMoney(baselineSpend7)}
+                Baseline 7d CPR: ${(baselineCpr / 100).toFixed(2)} · {last7.registrations} regs on {fmtMoney(last7.spendCents)}
               </div>
             )}
           </div>
@@ -84,20 +84,20 @@ export function BudgetSimulator({ state }: { state: DashboardState }) {
         <div className="space-y-2">
           <div className="text-xs text-muted-foreground mb-2">Projected 30-day funnel</div>
           {[
-            { label: "Registrations", value: projectedRegs30, sub: projectedCpr ? `~${fmtMoney(projectedCpr)} CPR` : "" },
-            { label: "Attended", value: projAttended, sub: `${Math.round(regsToAttended * 100)}% show rate` },
-            { label: "Calls booked", value: projCalls, sub: `${Math.round(attendedToCalls * 100)}% attend->call` },
-            { label: "Enrolled", value: projEnrolled, sub: `${Math.round(callsToEnrolled * 100)}% close` },
+            { label: "Registrations", value: projectedRegs30, sub: projectedCpr != null ? `~${fmtMoney(projectedCpr)} CPR` : "" },
+            { label: "Attended", value: projAttended, sub: regsToAttended != null ? `${Math.round(regsToAttended * 100)}% show rate` : "awaiting CRM rate" },
+            { label: "Calls booked", value: projCalls, sub: attendedToCalls != null ? `${Math.round(attendedToCalls * 100)}% attend->call` : "awaiting CRM rate" },
+            { label: "Enrolled", value: projEnrolled, sub: callsToEnrolled != null ? `${Math.round(callsToEnrolled * 100)}% close` : "awaiting CRM rate" },
           ].map((row) => (
             <div key={row.label} className="flex items-center gap-3">
               <div className="w-28 text-sm">{row.label}</div>
               <div className="flex-1 text-right">
-                <span className="text-lg font-semibold tabular-nums">{row.value.toLocaleString()}</span>
+                <span className="text-lg font-semibold tabular-nums">{row.value == null ? "-" : row.value.toLocaleString()}</span>
                 {row.sub && <span className="text-[10px] text-muted-foreground ml-2">{row.sub}</span>}
               </div>
             </div>
           ))}
-          {projEnrolled > 0 && (
+          {projEnrolled != null && projEnrolled > 0 && (
             <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
               <span className="text-xs text-muted-foreground">Projected revenue @ $4,500</span>
               <span className="text-base font-bold text-emerald-500 tabular-nums">${(projEnrolled * 4500).toLocaleString()}</span>
