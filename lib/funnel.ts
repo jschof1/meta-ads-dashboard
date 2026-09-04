@@ -36,7 +36,9 @@ const STATUS_RANK: Record<string, number> = {
   show: 50,
   "won customer": 60,
   won: 60,
-  lost: 5,
+  // Lost is a terminal outcome. It must win deduplication over an earlier
+  // lead row, while rollup handles it separately from the linear stages.
+  lost: 70,
 };
 
 function normaliseStage(stage: string | undefined): string {
@@ -124,13 +126,16 @@ export function rollup(rows: FunnelRow[]): Omit<FunnelCounts, "metaPixelLeads" |
   };
   for (const row of rows) {
     const stage = normaliseStage(row.stage);
+    if (stage === "lost") {
+      counts.lostCustomers += 1;
+      continue;
+    }
     const value = rank(stage);
     if (value >= STATUS_RANK.contacted) counts.contacted += 1;
     if (value >= STATUS_RANK.qualified) counts.qualified += 1;
     if (value >= STATUS_RANK["call booked"]) counts.callsBooked += 1;
     if (value >= STATUS_RANK["call attended"]) counts.callsAttended += 1;
     if (value >= STATUS_RANK.won) counts.wonCustomers += 1;
-    if (stage === "lost") counts.lostCustomers += 1;
   }
   return counts;
 }

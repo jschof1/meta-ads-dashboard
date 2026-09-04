@@ -2,29 +2,39 @@ import { UKTL_CONFIG } from "./uktl-config";
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-function currencyFormatter(currencyCode: string): Intl.NumberFormat | null {
+type CurrencyFormatter = {
+  formatter: Intl.NumberFormat;
+  minorUnitScale: number;
+};
+
+function currencyFormatter(currencyCode: string): CurrencyFormatter | null {
   const code = currencyCode.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(code)) return null;
   try {
-    return new Intl.NumberFormat(UKTL_CONFIG.locale, {
+    const formatter = new Intl.NumberFormat(UKTL_CONFIG.locale, {
       style: "currency",
       currency: code,
       currencyDisplay: "symbol",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
     });
+    const fractionDigits = formatter.resolvedOptions().minimumFractionDigits ?? 2;
+    return { formatter, minorUnitScale: 10 ** fractionDigits };
   } catch {
     return null;
   }
+}
+
+export function currencyMinorUnitScale(currencyCode: string | null | undefined): number | null {
+  if (!currencyCode) return null;
+  return currencyFormatter(currencyCode)?.minorUnitScale ?? null;
 }
 
 /** Format minor units using the currency returned by the Meta account. */
 export function formatMoney(minorUnits: number | null | undefined, currencyCode: string | null | undefined): string {
   if (minorUnits == null) return "—";
   if (!currencyCode) return "Currency pending";
-  const formatter = currencyFormatter(currencyCode);
-  if (!formatter) return "Currency pending";
-  return formatter.format(minorUnits / 100);
+  const currency = currencyFormatter(currencyCode);
+  if (!currency) return "Currency pending";
+  return currency.formatter.format(minorUnits / currency.minorUnitScale);
 }
 
 export function formatCount(value: number | null | undefined): string {

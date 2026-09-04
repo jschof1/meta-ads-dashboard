@@ -195,25 +195,34 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
   const accountId = configuredAccountId();
   const attributionKey = configuredAttributionKey();
   const runScope = { attributionKey, ...(accountId ? { accountId } : {}) };
-  const [latestAttempt, latestSuccess, ads, creatives, logs] = await Promise.all([
+  const [latestAttempt, latestSuccess, logs] = await Promise.all([
     db.syncRun.findFirst({ where: runScope, orderBy: { startedAt: "desc" } }),
     db.syncRun.findFirst({ where: { ...runScope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
-    db.ad.findMany({ orderBy: { name: "asc" } }),
-    db.creative.findMany({ orderBy: { name: "asc" } }),
     db.actionLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
   ]);
   const timeZone = latestSuccess?.timezoneName || "UTC";
   const todayRange = dateRangeForPeriod("today", timeZone, now);
   const oldestRange = dateRangeForPeriod("previous30d", timeZone, now);
-  const storedRows = latestSuccess
+  const successfulRunIds = latestSuccess
+    ? (await db.syncRun.findMany({
+      where: { accountId: latestSuccess.accountId, attributionKey, status: "SUCCEEDED" },
+      select: { id: true },
+    })).map((run) => run.id)
+    : [];
+  const storedRows = latestSuccess && successfulRunIds.length > 0
     ? await db.dailyInsight.findMany({
       where: {
         date: { gte: oldestRange.since, lte: todayRange.until },
         attributionKey,
+        syncRunId: { in: successfulRunIds },
       },
       orderBy: [{ date: "asc" }, { level: "asc" }, { entityId: "asc" }],
     })
     : [];
+  const currentAdIds = [...new Set(storedRows.filter((row) => row.level === "ad").map((row) => row.entityId))];
+  const ads = await db.ad.findMany({ where: { metaId: { in: currentAdIds } }, orderBy: { name: "asc" } });
+  const currentCreativeIds = [...new Set(ads.map((ad) => ad.creativeMetaId).filter((id): id is string => id != null))];
+  const creatives = await db.creative.findMany({ where: { metaId: { in: currentCreativeIds } }, orderBy: { name: "asc" } });
   const storedAccountId = latestSuccess?.accountId ?? null;
   const accountRows = storedRows.filter((row) => row.level === "account" && row.entityId === storedAccountId);
   const adInsightRows = storedRows.filter((row) => row.level === "ad" && row.date >= dateRangeForPeriod("30d", timeZone, now).since);

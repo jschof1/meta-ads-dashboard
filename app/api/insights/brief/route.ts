@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { formatMoney } from "@/lib/format";
 import { requireApiSession } from "@/lib/api-auth";
+import { buildDashboardState } from "@/lib/read-model";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -20,22 +21,43 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
   }
 
-  let body: { currencyCode?: string | null; topAds?: AdInput[]; losingAds?: AdInput[] } = {};
   try {
-    body = await request.json();
-  } catch {
-    body = {};
+    // Derive the evidence from the durable read model. Do not trust browser
+    // supplied ad names, metrics, or currency when constructing an AI prompt.
+    const state = await buildDashboardState();
+    return await generateBrief(state, apiKey);
+  } catch (error) {
+    console.error("Creative brief data load failed:", error instanceof Error ? error.name : "unknown error");
+    return NextResponse.json({ error: "Creative brief unavailable; dashboard data could not be read." }, { status: 503 });
   }
+}
 
-  const winners = (body.topAds ?? []).slice(0, 3);
-  const losers = (body.losingAds ?? []).slice(0, 3);
+async function generateBrief(state: Awaited<ReturnType<typeof buildDashboardState>>, apiKey: string) {
+  const body = { currencyCode: state.meta.currencyCode };
+  const ads = state.ads || [];
+  const winners = ads.filter((ad) => ad.verdict === "winner" || ad.verdict === "performing").slice(0, 3);
+  const losers = ads.filter((ad) => ad.verdict === "cull" || ad.verdict === "watch").slice(0, 3);
+  const topAds: AdInput[] = (winners.length > 0 ? winners : ads.slice(0, 3)).map((ad) => ({
+    adName: ad.adName,
+    cplCents: ad.cplCents,
+    spendCents: ad.spendCents,
+    leads: ad.leads,
+    ctrLink: ad.ctrLink,
+  }));
+  const losingAds: AdInput[] = losers.map((ad) => ({
+    adName: ad.adName,
+    cplCents: ad.cplCents,
+    spendCents: ad.spendCents,
+    leads: ad.leads,
+    ctrLink: ad.ctrLink,
+  }));
 
-  if (winners.length === 0) {
+  if (topAds.length === 0) {
     return NextResponse.json({ error: "No leading ads yet to extract evidence from. Wait for more stored data." }, { status: 400 });
   }
 
-  const winnerLines = winners.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)} | ${ad.leads == null ? "n/a" : ad.leads} leads`).join("\n");
-  const loserLines = losers.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)}`).join("\n");
+  const winnerLines = topAds.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)} | ${ad.leads == null ? "n/a" : ad.leads} leads`).join("\n");
+  const loserLines = losingAds.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)}`).join("\n");
 
   // Read the UKTL operating brief so the AI is grounded in the supplied context.
   const planContext = await import("@/lib/plan-context").then((module) => module.readPlan()).catch(() => "");

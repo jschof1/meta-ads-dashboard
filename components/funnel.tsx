@@ -91,7 +91,7 @@ export function Funnel({ state }: { state: DashboardState }) {
                     <div className="text-[10px] text-muted-foreground">from previous stage</div>
                   </>
                 ) : (
-                  <div className="text-muted-foreground">top of funnel</div>
+                  <div className="text-muted-foreground">{index < 3 ? "top of funnel" : "unknown"}</div>
                 )}
               </div>
             </div>

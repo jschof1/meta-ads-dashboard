@@ -322,6 +322,63 @@ test("loads dashboard state from stored data with no Meta client and reports sta
   assert.equal(stale.meta.lastSuccessfulSyncAt, "2026-09-04T12:00:00.000Z");
 });
 
+test("scopes the dashboard read model to the active account's successful sync history", async () => {
+  const db = await createDatabase();
+  const previousAccountId = process.env.META_AD_ACCOUNT_ID;
+  process.env.META_AD_ACCOUNT_ID = "act_current";
+  try {
+    await db.syncRun.create({
+      data: {
+        id: "run-old-account",
+        accountId: "act_old",
+        currencyCode: "USD",
+        timezoneName: "America/New_York",
+        trigger: "manual",
+        status: "SUCCEEDED",
+        attributionKey: "7d_click,1d_view",
+        startedAt: new Date("2026-09-03T12:00:00.000Z"),
+        finishedAt: new Date("2026-09-03T12:01:00.000Z"),
+      },
+    });
+    await db.syncRun.create({
+      data: {
+        id: "run-current-account",
+        accountId: "act_current",
+        currencyCode: "GBP",
+        timezoneName: "Europe/London",
+        trigger: "manual",
+        status: "SUCCEEDED",
+        attributionKey: "7d_click,1d_view",
+        startedAt: new Date("2026-09-04T12:00:00.000Z"),
+        finishedAt: new Date("2026-09-04T12:01:00.000Z"),
+      },
+    });
+    await db.ad.createMany({
+      data: [
+        { metaId: "ad-old", name: "Old account ad" },
+        { metaId: "ad-current", name: "Current account ad" },
+      ],
+    });
+    await db.dailyInsight.createMany({
+      data: [
+        { date: "2026-09-04", level: "account", entityId: "act_old", attributionKey: "7d_click,1d_view", currencyCode: "USD", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-old-account" },
+        { date: "2026-09-04", level: "ad", entityId: "ad-old", attributionKey: "7d_click,1d_view", currencyCode: "USD", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-old-account" },
+        { date: "2026-09-04", level: "account", entityId: "act_current", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-current-account" },
+        { date: "2026-09-04", level: "ad", entityId: "ad-current", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-current-account" },
+      ],
+    });
+
+    const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:30:00.000Z") });
+    assert.equal(state.meta.adAccountId, "act_current");
+    assert.equal(state.meta.currencyCode, "GBP");
+    assert.equal(state.scorecard.today.spendCents, 900);
+    assert.deepEqual(state.ads.map((ad) => ad.adId), ["ad-current"]);
+  } finally {
+    if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = previousAccountId;
+  }
+});
+
 test("deduplicates repeated provider rows and accepts a delayed null-to-known result", async () => {
   const db = await createDatabase();
   const duplicate = insight("2026-09-04", { spend: "10.00", actions: [] });
@@ -458,7 +515,7 @@ test("handles an empty account without manufacturing zero performance", async ()
   assert.equal(state.trend.at(-1).spendCents, null);
 });
 
-test("preserves known metadata and metrics when a later provider response is partial", async () => {
+test("preserves known metadata but clears omitted metrics after a partial provider response", async () => {
   const db = await createDatabase();
   const source = {
     campaigns: [...metadata.campaigns],
@@ -494,11 +551,12 @@ test("preserves known metadata and metrics when a later provider response is par
   const stored = await db.dailyInsight.findUnique({
     where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
   });
-  assert.equal(stored.spendMinorUnits, 1234);
-  assert.equal(stored.impressions, 1000);
-  assert.equal(stored.leads, 2);
-  assert.match(stored.raw, /12\.34/);
-  assert.match(stored.rawActions, /offsite_conversion\.custom\.lead/);
+  assert.equal(stored.spendMinorUnits, null);
+  assert.equal(stored.impressions, null);
+  assert.equal(stored.leads, null);
+  assert.equal(stored.cplMinorUnits, null);
+  assert.equal(stored.rawActions, "null");
+  assert.equal(stored.raw.includes("12.34"), false);
 });
 
 test("skips provider insight rows outside the requested range", async () => {

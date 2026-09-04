@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { formatMoney } from "@/lib/format";
 import { readPlan } from "@/lib/plan-context";
 import { requireApiSession } from "@/lib/api-auth";
+import { buildDashboardState } from "@/lib/read-model";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -49,12 +50,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ summary: "ANTHROPIC_API_KEY not set. AI summary disabled." });
   }
 
-  let state: DashboardState = {};
   try {
-    state = (await request.json()) as DashboardState;
-  } catch {
-    state = {};
+    // Rehydrate evidence on the server. The browser is an untrusted caller and
+    // must not be able to forge metrics, currency, or funnel outcomes.
+    const state = await buildDashboardState();
+    return await generateSummary(state, apiKey);
+  } catch (error) {
+    console.error("AI summary data load failed:", error instanceof Error ? error.name : "unknown error");
+    return NextResponse.json({ summary: "AI summary unavailable; dashboard data could not be read.", error: true }, { status: 503 });
   }
+}
+
+async function generateSummary(state: DashboardState, apiKey: string) {
 
   const cacheKey = `${dayKey()}::${JSON.stringify(state.scorecard || {})}::${JSON.stringify(state.funnel || {})}::${state.meta?.currencyCode ?? ""}`;
   if (cache && cache.key === cacheKey && Date.now() - cache.at < TTL_MS) {

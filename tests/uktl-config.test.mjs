@@ -31,6 +31,8 @@ test("UKTL configuration is typed, single-business, and explicit about optional 
 test("money and dates use the Meta account currency and account timezone", () => {
   assert.equal(formatMoney(12345, "GBP"), "£123.45");
   assert.equal(formatMoney(12345, "EUR"), "€123.45");
+  assert.equal(formatMoney(12345, "JPY"), "JP¥12,345");
+  assert.equal(formatMoney(12345, "KWD"), "KWD\u00a012.345");
   assert.equal(formatMoney(12345, null), "Currency pending");
   assert.equal(formatMoney(null, "GBP"), "—");
   assert.match(formatDateLabel("2026-09-04", "Europe/London"), /^04\s/);

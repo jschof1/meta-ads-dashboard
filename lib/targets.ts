@@ -10,7 +10,8 @@ export function classifyCpl(cplCents: number | null): MetricBandStatus {
   const target = UKTL_CONFIG.targets.cpl;
   if (target.targetMinorUnits != null && cplCents <= target.targetMinorUnits) return "green";
   if (target.acceptableMinorUnits != null && cplCents <= target.acceptableMinorUnits) return "yellow";
-  if (target.maximumMinorUnits != null) return "red";
+  if (target.maximumMinorUnits != null) return cplCents > target.maximumMinorUnits ? "red" : "yellow";
+  if (target.targetMinorUnits != null || target.acceptableMinorUnits != null) return "yellow";
   return "unknown";
 }
 

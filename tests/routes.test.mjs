@@ -113,6 +113,12 @@ test("login, protected plan access, and logout work through route handlers", asy
   assert.equal(afterLogout.status, 401);
 });
 
+test("the optional static plan file stays behind the authentication boundary", async () => {
+  const response = await get("/plan.md", { redirect: "manual" });
+  assert.equal(response.status, 307);
+  assert.match(response.headers.get("location") ?? "", /\/login$/);
+});
+
 test("protected APIs reject requests without a session", async () => {
   const routes = [
     ["GET", "/api/plan"],

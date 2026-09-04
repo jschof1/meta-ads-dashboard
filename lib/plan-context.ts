@@ -1,5 +1,6 @@
-// Reads the campaign plan markdown copied to public/plan.md at deploy time.
-// Used by the "Plan inline" panel and as context to the AI summary call.
+// Reads the operator plan copied to public/plan.md at deploy time. The proxy
+// protects that static path; this server-side reader never exposes the file
+// without the authenticated API/page boundary.
 
 import { promises as fs } from "node:fs";
 import path from "node:path";

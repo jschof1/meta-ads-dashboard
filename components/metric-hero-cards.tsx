@@ -7,7 +7,7 @@ import { formatDateLabel, formatMoney } from "@/lib/format";
 import { UKTL_CONFIG, type MoneyTarget } from "@/lib/targets";
 
 type SeriesPoint = { date: string; value: number | null };
-type Band = { lo: number; hi: number };
+type Band = MoneyTarget;
 
 function avg(values: (number | null)[]): number | null {
   const valid = values.filter((value): value is number => value != null && value > 0);
@@ -23,10 +23,15 @@ function deltaPct(latest: number | null, baseline: number | null): number | null
 function targetBand(target: MoneyTarget): Band | null {
   const values = [target.targetMinorUnits, target.acceptableMinorUnits, target.maximumMinorUnits]
     .filter((value): value is number => value != null);
-  if (values.length === 0) return null;
-  const lo = target.targetMinorUnits ?? target.acceptableMinorUnits ?? 0;
-  const hi = target.acceptableMinorUnits ?? target.maximumMinorUnits ?? target.targetMinorUnits ?? lo;
-  return { lo: Math.min(lo, hi), hi: Math.max(lo, hi) };
+  return values.length === 0 ? null : target;
+}
+
+function lowerIsBetterStatus(value: number | null, band: Band | null): "good" | "watch" | "alert" | "unknown" {
+  if (value == null || band == null) return "unknown";
+  if (band.targetMinorUnits != null && value <= band.targetMinorUnits) return "good";
+  if (band.acceptableMinorUnits != null && value <= band.acceptableMinorUnits) return "watch";
+  if (band.maximumMinorUnits != null) return value > band.maximumMinorUnits ? "alert" : "watch";
+  return "watch";
 }
 
 function targetLabel(target: MoneyTarget, currencyCode: string | null): string {
@@ -51,14 +56,14 @@ function readingLine(
       ? `No ${metric.toUpperCase()} target set; collecting a historical baseline.`
       : `No ${metric.toUpperCase()} target set; compared with the previous 7d, ${trendWord}.`;
   }
-  const inBand = latest >= band.lo && latest <= band.hi;
+  const status = lowerIsBetterStatus(latest, band);
   if (metric === "cpl") {
-    if (latest < band.lo) return "Below the configured range; compare lead quality before scaling.";
-    if (inBand) return `Inside the configured range, ${trendWord}.`;
-    return "Above the configured range; review lead quality and trend.";
+    if (status === "good") return `Inside the configured target, ${trendWord}.`;
+    if (status === "watch") return `Inside the configured acceptable range, ${trendWord}.`;
+    return "Above the configured maximum; review lead quality and trend.";
   }
-  if (inBand) return `Auction healthy, ${trendWord}.`;
-  if (latest < band.lo) return "Below the configured range; monitor reach and delivery.";
+  if (status === "good") return `Auction healthy against target, ${trendWord}.`;
+  if (status === "watch") return `Auction inside the configured acceptable range, ${trendWord}.`;
   return `Auction expensive, ${trendWord}. Review fresh creative.`;
 }
 
@@ -82,20 +87,21 @@ function HeroCard({
   delta: number | null;
 }) {
   const latest = series.length > 0 ? series[series.length - 1].value : null;
-  const inBand = band != null && latest != null && latest >= band.lo && latest <= band.hi;
+  const status = lowerIsBetterStatus(latest, band);
   const targetConfigured = band != null;
+  const chartColor = status === "good" ? "#10b981" : status === "alert" ? "#ef4444" : status === "watch" ? "#f59e0b" : "#64748b";
   const deltaIcon = delta == null ? Minus : delta > 0 ? ArrowUpRight : ArrowDownRight;
   const DeltaIcon = deltaIcon;
   const deltaColor = delta == null
     ? "text-muted-foreground"
     : delta > 5 ? "text-destructive" : delta < -5 ? "text-emerald-500" : "text-muted-foreground";
-  const accent = !targetConfigured ? "text-muted-foreground" : inBand ? "text-emerald-500" : "text-amber-500";
+  const accent = status === "good" ? "text-emerald-500" : status === "alert" ? "text-destructive" : status === "watch" ? "text-amber-500" : "text-muted-foreground";
 
   return (
     <div className="rounded-2xl border border-border bg-card p-5 relative overflow-hidden">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${!targetConfigured ? "bg-muted text-muted-foreground" : inBand ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"}`}>
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${status === "good" ? "bg-emerald-500/10 text-emerald-500" : status === "alert" ? "bg-destructive/10 text-destructive" : status === "watch" ? "bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}>
             <Icon className="w-4 h-4" />
           </div>
           <div>
@@ -118,8 +124,8 @@ function HeroCard({
           <AreaChart data={series} margin={{ top: 4, right: 0, left: 0, bottom: 4 }}>
             <defs>
               <linearGradient id={`grad-${title}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={!targetConfigured ? "#64748b" : inBand ? "#10b981" : "#f59e0b"} stopOpacity={0.4} />
-                <stop offset="100%" stopColor={!targetConfigured ? "#64748b" : inBand ? "#10b981" : "#f59e0b"} stopOpacity={0} />
+                <stop offset="0%" stopColor={chartColor} stopOpacity={0.4} />
+                <stop offset="100%" stopColor={chartColor} stopOpacity={0} />
               </linearGradient>
             </defs>
             <Tooltip
@@ -130,7 +136,7 @@ function HeroCard({
             <Area
               type="monotone"
               dataKey="value"
-              stroke={!targetConfigured ? "#64748b" : inBand ? "#10b981" : "#f59e0b"}
+              stroke={chartColor}
               strokeWidth={2}
               fill={`url(#grad-${title})`}
               connectNulls

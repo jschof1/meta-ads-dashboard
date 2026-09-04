@@ -14,6 +14,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     "/",
+    "/plan.md",
     "/api/((?!auth(?:/|$)|cron(?:/|$)).*)",
   ],
 };

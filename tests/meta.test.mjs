@@ -10,6 +10,7 @@ import {
   MetaPaginationError,
   MetaResultEventError,
   toOptionalCents,
+  toOptionalMinorUnits,
   toOptionalFloat,
   toOptionalInt,
 } from "../lib/meta.ts";
@@ -332,6 +333,8 @@ test("diagnoses action types and requires explicit configuration for ambiguity",
 test("keeps malformed numeric provider fields missing instead of coercing them", () => {
   assert.equal(toOptionalCents("12.34"), 1234);
   assert.equal(toOptionalCents("12.34oops"), null);
+  assert.equal(toOptionalMinorUnits("12345", "JPY"), 12345);
+  assert.equal(toOptionalMinorUnits("12.345", "KWD"), 12345);
   assert.equal(toOptionalFloat("0.25"), 0.25);
   assert.equal(toOptionalFloat("Infinity"), null);
   assert.equal(toOptionalInt("1000"), 1000);
