@@ -183,6 +183,12 @@ export type AdSummary = {
   adset_id?: string;
   creative_id?: string;
   thumbnail_url?: string;
+  image_hash?: string;
+  image_url?: string;
+  video_id?: string;
+  link_url?: string;
+  object_url?: string;
+  creative_raw?: unknown;
 };
 
 export type MetaCreative = {
@@ -192,9 +198,16 @@ export type MetaCreative = {
   body?: string;
   call_to_action_type?: string;
   thumbnail_url?: string;
+  image_hash?: string;
+  image_url?: string;
+  video_id?: string;
+  object_id?: string;
+  link_url?: string;
+  object_url?: string;
   object_story_spec?: unknown;
   asset_feed_spec?: unknown;
   url_tags?: string;
+  raw?: unknown;
 };
 
 export type MetaEntityDiscovery = {
@@ -206,12 +219,14 @@ export type MetaEntityDiscovery = {
 };
 
 export type MetaResultEventDiagnostic = {
-  actionTypes: string[];
+  actionTypes: Array<{ actionType: string; count: number }>;
+  actionTypeCounts: Record<string, number>;
   candidateActionTypes: string[];
   primaryActionType?: string;
   value: number | null;
   missing: boolean;
   ambiguous: boolean;
+  needsConfiguration: boolean;
 };
 
 const FIELDS_AD = [
@@ -221,6 +236,7 @@ const FIELDS_AD = [
   "adset_id",
   "spend",
   "impressions",
+  "reach",
   "clicks",
   "inline_link_clicks",
   "ctr",
@@ -235,6 +251,7 @@ const FIELDS_AD = [
 const FIELDS_AGGREGATE = [
   "spend",
   "impressions",
+  "reach",
   "clicks",
   "inline_link_clicks",
   "ctr",
@@ -248,8 +265,8 @@ const ENTITY_FIELDS = {
   account: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc,business_name",
   campaigns: "id,name,objective,status,effective_status,start_time,stop_time",
   adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info",
-  ads: "id,name,status,effective_status,campaign_id,adset_id,creative{id,thumbnail_url}",
-  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,object_story_spec,asset_feed_spec,url_tags",
+  ads: "id,name,status,effective_status,campaign_id,adset_id,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec}",
+  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags",
 } as const;
 
 function isObject(value: unknown): value is JsonObject {
@@ -262,10 +279,6 @@ function stringValue(value: unknown): string | undefined {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return [...new Set(values.filter((value): value is string => typeof value === "string" && value.length > 0))];
 }
 
 function parseJsonText(text: string): unknown {
@@ -544,7 +557,10 @@ export class MetaClient {
       pages += 1;
       lastDiagnostics = page.diagnostics;
       lastPaging = page.paging;
-      const next = page.paging?.cursors?.after ?? cursorFromNext(page.paging?.next, path);
+      // Meta's cursor object describes the current page; only a valid next URL
+      // is an instruction to continue. In particular, do not follow a stale
+      // `cursors.after` on a terminal page.
+      const next = cursorFromNext(page.paging?.next, path, this.graphVersion);
       if (!next) break;
       if (next === after) throw new MetaPaginationError("Meta pagination returned the same cursor twice");
       after = next;
@@ -576,7 +592,7 @@ export class MetaClient {
   }
 
   async listCreatives(): Promise<MetaCreative[]> {
-    return (await this.paginate<MetaCreative>(`${accountPath(this.accountId)}/adcreatives`, { fields: ENTITY_FIELDS.creatives })).data;
+    return (await this.paginate<RawCreative>(`${accountPath(this.accountId)}/adcreatives`, { fields: ENTITY_FIELDS.creatives })).data.map(toCreative);
   }
 
   async discoverEntities(): Promise<MetaEntityDiscovery> {
@@ -652,8 +668,24 @@ type RawAd = {
   effective_status?: string;
   campaign_id?: string;
   adset_id?: string;
-  creative?: { id?: string; thumbnail_url?: string };
+  creative?: {
+    id?: string;
+    thumbnail_url?: string;
+    image_hash?: string;
+    image_url?: string;
+    video_id?: string;
+    link_url?: string;
+    object_url?: string;
+    object_story_spec?: unknown;
+    asset_feed_spec?: unknown;
+  };
 };
+
+type RawCreative = Omit<MetaCreative, "raw">;
+
+function toCreative(creative: RawCreative): MetaCreative {
+  return { ...creative, raw: creative };
+}
 
 function toAdSummary(ad: RawAd): AdSummary {
   return {
@@ -665,6 +697,12 @@ function toAdSummary(ad: RawAd): AdSummary {
     adset_id: ad.adset_id,
     creative_id: ad.creative?.id,
     thumbnail_url: ad.creative?.thumbnail_url,
+    image_hash: ad.creative?.image_hash,
+    image_url: ad.creative?.image_url,
+    video_id: ad.creative?.video_id,
+    link_url: ad.creative?.link_url,
+    object_url: ad.creative?.object_url,
+    creative_raw: ad.creative,
   };
 }
 
@@ -677,14 +715,17 @@ function parsePaging(value: unknown): MetaPaging | undefined {
   return cursors || next ? { cursors, next } : undefined;
 }
 
-function cursorFromNext(next: string | undefined, expectedPath: string): string | undefined {
+function cursorFromNext(next: string | undefined, expectedPath: string, graphVersion: string): string | undefined {
   if (!next) return undefined;
   try {
     const url = new URL(next);
+    if (url.protocol !== "https:") throw new MetaPaginationError("Meta pagination returned an unsafe protocol");
     if (url.hostname !== GRAPH_HOST) throw new MetaPaginationError("Meta pagination returned an unexpected host");
-    const expected = `/${expectedPath.replace(/^\/+/, "")}`;
-    if (!url.pathname.endsWith(expected)) throw new MetaPaginationError("Meta pagination returned an unexpected endpoint");
-    return url.searchParams.get("after") ?? undefined;
+    const expected = `/${graphVersion}/${expectedPath.replace(/^\/+/, "")}`;
+    if (url.pathname !== expected) throw new MetaPaginationError("Meta pagination returned an unexpected endpoint");
+    const cursor = url.searchParams.get("after");
+    if (!cursor) throw new MetaPaginationError("Meta pagination next URL did not contain an after cursor");
+    return cursor;
   } catch (error) {
     if (error instanceof MetaPaginationError) throw error;
     throw new MetaPaginationError("Meta pagination returned an invalid next URL");
@@ -704,9 +745,23 @@ const KNOWN_NON_RESULT_ACTIONS = new Set([
 
 function actionRows(row: MetaInsightRow): MetaInsightAction[] {
   if (!Array.isArray(row.actions)) return [];
-  return row.actions.filter(
-    (action): action is MetaInsightAction => isObject(action) && typeof action.action_type === "string" && typeof action.value === "string",
-  );
+  return row.actions.flatMap((action) => {
+    if (!isObject(action) || typeof action.action_type !== "string") return [];
+    const value = typeof action.value === "number" && Number.isFinite(action.value)
+      ? String(action.value)
+      : typeof action.value === "string"
+        ? action.value
+        : "0";
+    return [{ action_type: action.action_type, value }];
+  });
+}
+
+function actionTypeCounts(actions: MetaInsightAction[]): Record<string, number> {
+  return actions.reduce<Record<string, number>>((counts, action) => {
+    const count = Number(action.value);
+    counts[action.action_type] = (counts[action.action_type] ?? 0) + (Number.isFinite(count) ? count : 0);
+    return counts;
+  }, {});
 }
 
 function isResultActionType(actionType: string): boolean {
@@ -724,20 +779,24 @@ export function diagnoseResultEvents(
   options: { primaryActionType?: string; customConversionId?: string } = {},
 ): MetaResultEventDiagnostic {
   const actions = actionRows(row);
-  const actionTypes = uniqueStrings(actions.map((action) => action.action_type));
-  const candidateActionTypes = actionTypes.filter(isResultActionType);
+  const actionTypeCountsByName = actionTypeCounts(actions);
+  const actionTypes = Object.entries(actionTypeCountsByName).map(([actionType, count]) => ({ actionType, count }));
+  const candidateActionTypes = actionTypes.map(({ actionType }) => actionType).filter(isResultActionType);
   const configuredCustom = options.customConversionId ? `offsite_conversion.custom.${options.customConversionId}` : undefined;
   const primaryActionType = options.primaryActionType || configuredCustom || (candidateActionTypes.length === 1 ? candidateActionTypes[0] : undefined);
-  const ambiguous = !options.primaryActionType && !configuredCustom && candidateActionTypes.length > 1;
+  const needsConfiguration = !options.primaryActionType && !configuredCustom && (candidateActionTypes.length === 0 || candidateActionTypes.length > 1);
+  const ambiguous = candidateActionTypes.length > 1 && !options.primaryActionType && !configuredCustom;
   const match = primaryActionType ? actions.find((action) => action.action_type === primaryActionType) : undefined;
   const value = match ? Number(match.value) : null;
   return {
     actionTypes,
+    actionTypeCounts: actionTypeCountsByName,
     candidateActionTypes,
     primaryActionType,
     value: match && Number.isFinite(value) ? value : null,
     missing: !match,
     ambiguous,
+    needsConfiguration,
   };
 }
 
@@ -746,10 +805,10 @@ export function extractResultEvents(
   options: { primaryActionType?: string; customConversionId?: string } = {},
 ): MetaResultEventDiagnostic {
   const diagnostic = diagnoseResultEvents(row, options);
-  if (diagnostic.ambiguous) {
+  if (diagnostic.needsConfiguration) {
     throw new MetaResultEventError(
-      `Meta returned multiple possible result events (${diagnostic.candidateActionTypes.join(", ")}); set META_PRIMARY_RESULT_ACTION_TYPE`,
-      diagnostic.actionTypes,
+      "result event needs configuration: set META_PRIMARY_RESULT_ACTION_TYPE",
+      diagnostic.candidateActionTypes,
     );
   }
   return diagnostic;

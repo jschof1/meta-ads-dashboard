@@ -41,7 +41,7 @@ test("uses the configured graph version, bearer auth, account-wide paths and cur
     if (!after) {
       return jsonResponse({
         data: Array.from({ length: 50 }, (_, index) => ({ id: `ad-${index}`, name: `Ad ${index}` })),
-        paging: { cursors: { after: "cursor-1" } },
+        paging: { cursors: { after: "cursor-1" }, next: "https://graph.facebook.com/v24.0/act_123/ads?after=cursor-1" },
       });
     }
     return jsonResponse({ data: [{ id: "ad-50", name: "Ad 50" }] });
@@ -75,6 +75,30 @@ test("uses a safe cursor from paging.next without replaying its access token", a
   assert.equal(calls.every(({ url }) => !url.toString().includes(token)), true);
 });
 
+test("rejects an unsafe or incomplete paging.next instead of guessing a cursor", async () => {
+  const unsafeHost = makeClient(() => jsonResponse({
+    data: [{ id: "c1" }],
+    paging: { next: "https://evil.example/campaigns?after=leaked" },
+  }));
+  await assert.rejects(() => unsafeHost.client.listCampaigns(), MetaPaginationError);
+
+  const missingCursor = makeClient(() => jsonResponse({
+    data: [{ id: "c1" }],
+    paging: { next: "https://graph.facebook.com/v25.0/act_123/campaigns" },
+  }));
+  await assert.rejects(() => missingCursor.client.listCampaigns(), MetaPaginationError);
+});
+
+test("stops on a terminal page when cursors remain but Meta omits paging.next", async () => {
+  const { client, calls } = makeClient(() => jsonResponse({
+    data: [{ id: "terminal" }],
+    paging: { cursors: { before: "before", after: "stale-after" } },
+  }));
+
+  assert.deepEqual((await client.listCampaigns()).map((campaign) => campaign.id), ["terminal"]);
+  assert.equal(calls.length, 1);
+});
+
 test("discovers account context and all entity types without a campaign id", async () => {
   const { client, calls } = makeClient((url) => {
     const path = url.pathname;
@@ -83,8 +107,8 @@ test("discovers account context and all entity types without a campaign id", asy
     }
     if (path.endsWith("/campaigns")) return jsonResponse({ data: [{ id: "campaign-1", name: "Leads" }] });
     if (path.endsWith("/adsets")) return jsonResponse({ data: [{ id: "adset-1", campaign_id: "campaign-1", learning_stage_info: { status: "LEARNING" } }] });
-    if (path.endsWith("/ads")) return jsonResponse({ data: [{ id: "ad-1", name: "Creative", status: "ACTIVE", effective_status: "ACTIVE", adset_id: "adset-1", creative: { id: "creative-1" } }] });
-    if (path.endsWith("/adcreatives")) return jsonResponse({ data: [{ id: "creative-1", title: "A lead ad", body: "Book a call" }] });
+    if (path.endsWith("/ads")) return jsonResponse({ data: [{ id: "ad-1", name: "Creative", status: "ACTIVE", effective_status: "ACTIVE", adset_id: "adset-1", creative: { id: "creative-1", image_hash: "hash-1", video_id: "video-1", link_url: "https://example.test/book", object_story_spec: { link_data: { image_hash: "hash-1" } } } }] });
+    if (path.endsWith("/adcreatives")) return jsonResponse({ data: [{ id: "creative-1", title: "A lead ad", body: "Book a call", image_hash: "hash-1", video_id: "video-1", object_url: "https://example.test/book", object_story_spec: { video_data: { video_id: "video-1" } } }] });
     throw new Error(`unexpected path ${path}`);
   });
 
@@ -95,7 +119,13 @@ test("discovers account context and all entity types without a campaign id", asy
   assert.equal(discovered.campaigns.length, 1);
   assert.equal(discovered.adSets[0].learning_stage_info.status, "LEARNING");
   assert.equal(discovered.ads[0].creative_id, "creative-1");
+  assert.equal(discovered.ads[0].image_hash, "hash-1");
+  assert.equal(discovered.ads[0].video_id, "video-1");
+  assert.equal(discovered.ads[0].link_url, "https://example.test/book");
+  assert.equal(discovered.ads[0].creative_raw.object_story_spec.link_data.image_hash, "hash-1");
   assert.equal(discovered.creatives[0].body, "Book a call");
+  assert.equal(discovered.creatives[0].object_url, "https://example.test/book");
+  assert.equal(discovered.creatives[0].raw.object_story_spec.video_data.video_id, "video-1");
   assert.equal(calls.some(({ url }) => url.pathname.endsWith("/act_123/adsets")), true);
   assert.equal(calls.some(({ url }) => url.pathname.endsWith("/act_123/ads")), true);
 });
@@ -183,7 +213,13 @@ test("rejects malformed collections, honours pagination item caps and accepts em
   const malformed = makeClient(() => jsonResponse({ data: { id: "not-a-list" } }));
   await assert.rejects(() => malformed.client.listCampaigns(), (error) => error instanceof MetaApiError && error.kind === "response");
 
-  const capped = makeClient((url) => jsonResponse({ data: [{ id: url.searchParams.get("after") ?? "first" }], paging: { cursors: { after: `next-${url.searchParams.get("after") ?? "first"}` } } }), { maxPages: 2 });
+  const capped = makeClient((url) => {
+    const current = url.searchParams.get("after") ?? "first";
+    return jsonResponse({
+      data: [{ id: current }],
+      paging: { cursors: { after: `ignored-${current}` }, next: `https://graph.facebook.com/v25.0/act_123/campaigns?after=next-${current}` },
+    });
+  }, { maxPages: 2 });
   await assert.rejects(() => capped.client.listCampaigns(), MetaPaginationError);
 
   const itemCapped = makeClient(() => jsonResponse({ data: [{ id: "one" }, { id: "two" }] }), { maxItems: 1 });
@@ -194,7 +230,10 @@ test("rejects malformed collections, honours pagination item caps and accepts em
 
   const partial = makeClient(() => jsonResponse({ data: [{ id: "ad-1", status: "ACTIVE" }] }));
   const ads = await partial.client.listAds();
-  assert.deepEqual(ads[0], { id: "ad-1", name: "ad-1", status: "ACTIVE", effective_status: "UNKNOWN", campaign_id: undefined, adset_id: undefined, creative_id: undefined, thumbnail_url: undefined });
+  assert.equal(ads[0].id, "ad-1");
+  assert.equal(ads[0].name, "ad-1");
+  assert.equal(ads[0].status, "ACTIVE");
+  assert.equal(ads[0].effective_status, "UNKNOWN");
 });
 
 test("diagnoses action types and requires explicit configuration for ambiguity", () => {
@@ -206,13 +245,28 @@ test("diagnoses action types and requires explicit configuration for ambiguity",
   const diagnostic = diagnoseResultEvents(ambiguous);
   assert.equal(diagnostic.ambiguous, true);
   assert.deepEqual(diagnostic.candidateActionTypes, ["offsite_conversion.fb_pixel_lead", "offsite_conversion.custom.99"]);
+  assert.deepEqual(diagnostic.actionTypes, [
+    { actionType: "offsite_conversion.fb_pixel_lead", count: 2 },
+    { actionType: "offsite_conversion.custom.99", count: 3 },
+    { actionType: "link_click", count: 12 },
+  ]);
+  assert.deepEqual(diagnostic.actionTypeCounts, {
+    "offsite_conversion.fb_pixel_lead": 2,
+    "offsite_conversion.custom.99": 3,
+    link_click: 12,
+  });
   assert.throws(() => extractResultEvents(ambiguous), MetaResultEventError);
+  assert.throws(() => extractResultEvents({ actions: [{ action_type: "link_click", value: "12" }] }), (error) => {
+    assert.ok(error instanceof MetaResultEventError);
+    assert.match(error.message, /result event needs configuration/);
+    return true;
+  });
 
   const selected = extractResultEvents(ambiguous, { primaryActionType: "offsite_conversion.custom.99" });
   assert.equal(selected.value, 3);
   assert.equal(selected.missing, false);
   assert.equal(extractRegistrations({ actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "4" }] }), 4);
-  assert.equal(diagnoseResultEvents({ actions: [{ action_type: "link_click", value: "12" }] }).missing, true);
+  assert.equal(diagnoseResultEvents({ actions: [{ action_type: "link_click", value: "12" }] }).needsConfiguration, true);
 });
 
 test("retries network failures and turns an aborted request into a safe timeout error", async () => {
