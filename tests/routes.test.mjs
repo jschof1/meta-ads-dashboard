@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { setTimeout as wait } from "node:timers/promises";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const nextBin = new URL("../node_modules/next/dist/bin/next", import.meta.url).pathname;
 const port = 4100 + (process.pid % 500);
 const baseUrl = `http://127.0.0.1:${port}`;
 const dashboardPassword = "route-test-password";
@@ -18,7 +19,7 @@ async function get(path, options = {}) {
 }
 
 async function startServer() {
-  server = spawn("npm", ["run", "dev", "--", "--hostname", "127.0.0.1", "--port", String(port)], {
+  server = spawn(process.execPath, [nextBin, "dev", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: root,
     env: {
       ...process.env,
@@ -33,6 +34,7 @@ async function startServer() {
       AIRTABLE_ENABLED: "false",
     },
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
   });
   server.stdout.on("data", (chunk) => { serverOutput += chunk.toString(); });
   server.stderr.on("data", (chunk) => { serverOutput += chunk.toString(); });
@@ -57,9 +59,18 @@ before(startServer, { timeout: 90_000 });
 
 after(async () => {
   if (!server || server.exitCode !== null) return;
-  server.kill("SIGTERM");
-  await wait(500);
-  if (server.exitCode === null) server.kill("SIGKILL");
+  const pid = server.pid;
+  const signal = (name) => {
+    try {
+      if (process.platform === "win32" || !pid) server.kill(name);
+      else process.kill(-pid, name);
+    } catch {
+      // The process may have exited between the status check and the signal.
+    }
+  };
+  signal("SIGTERM");
+  await wait(1_000);
+  if (server.exitCode === null) signal("SIGKILL");
 });
 
 test("login, protected plan access, and logout work through route handlers", async () => {
