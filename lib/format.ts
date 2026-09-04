@@ -85,6 +85,11 @@ export function formatDateTime(value: string | null | undefined, timeZone: strin
   }).format(date);
 }
 
+export function formatStoredDate(value: string | null | undefined, timeZone: string | null | undefined): string {
+  if (!value) return "Unknown";
+  return validDate(value) ? formatDateLabel(value, timeZone) : formatDateTime(value, timeZone);
+}
+
 export function targetMoneyLabel(minorUnits: number | null | undefined, currencyCode: string | null | undefined): string {
   return minorUnits == null ? "Target not set" : formatMoney(minorUnits, currencyCode);
 }

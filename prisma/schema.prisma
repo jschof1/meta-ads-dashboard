@@ -52,19 +52,24 @@ model AdDaily {
 // Metadata is deliberately account-scoped by the Meta id. This is a single-
 // business application, so there is no tenant or organisation abstraction.
 model Campaign {
-  id               String   @id @default(cuid())
-  metaId           String   @unique
-  name             String
-  objective        String?
-  configuredStatus String?
-  effectiveStatus  String?
-  startDate        String?
-  stopDate         String?
-  raw              String   @default("{}")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  metaId              String   @unique
+  name                String
+  objective           String?
+  configuredStatus    String?
+  effectiveStatus     String?
+  dailyBudgetMinor    Int?
+  lifetimeBudgetMinor Int?
+  startDate           String?
+  stopDate            String?
+  providerUpdatedAt   DateTime?
+  lastSeenSyncRunId   String?
+  raw                 String   @default("{}")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   @@index([effectiveStatus])
+  @@index([lastSeenSyncRunId])
 }
 
 model AdSet {
@@ -82,12 +87,15 @@ model AdSet {
   endDate            String?
   learningStage      String?
   learningStageInfo  String   @default("{}")
+  providerUpdatedAt  DateTime?
+  lastSeenSyncRunId  String?
   raw                String   @default("{}")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([campaignMetaId])
   @@index([effectiveStatus])
+  @@index([lastSeenSyncRunId])
 }
 
 model Ad {
@@ -99,6 +107,8 @@ model Ad {
   configuredStatus String?
   effectiveStatus  String?
   creativeMetaId   String?
+  providerUpdatedAt DateTime?
+  lastSeenSyncRunId String?
   raw              String   @default("{}")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -107,6 +117,7 @@ model Ad {
   @@index([adSetMetaId])
   @@index([creativeMetaId])
   @@index([effectiveStatus])
+  @@index([lastSeenSyncRunId])
 }
 
 model Creative {
@@ -124,12 +135,15 @@ model Creative {
   destinationUrl     String?
   urlTags            String?
   format             String?
+  providerUpdatedAt  DateTime?
+  lastSeenSyncRunId  String?
   raw                String   @default("{}")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([videoId])
   @@index([imageHash])
+  @@index([lastSeenSyncRunId])
 }
 
 // One row per account/entity/day and attribution-window configuration. Every
@@ -141,6 +155,9 @@ model DailyInsight {
   level               String
   entityId            String
   attributionKey      String
+  // "account" for account-wide syncs, or the configured Meta campaign id.
+  // This prevents a scoped refresh from overwriting an account-wide row.
+  scopeKey             String   @default("account")
   currencyCode        String?
   spendMinorUnits     Int?
   impressions         Int?
@@ -159,7 +176,7 @@ model DailyInsight {
   observedAt          DateTime @default(now())
   syncRunId           String
 
-  @@unique([date, level, entityId, attributionKey])
+  @@unique([date, level, entityId, attributionKey, scopeKey])
   @@index([level, entityId, date])
   @@index([syncRunId])
 }
@@ -170,6 +187,7 @@ model DailyInsight {
 model SyncRun {
   id                 String   @id @default(cuid())
   accountId          String
+  campaignId         String?
   accountName        String?
   currencyCode       String?
   timezoneName       String?

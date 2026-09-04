@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { accountLocalDate, chooseSyncRange, dateRangeForPeriod, isDateInRange } from "../lib/periods.ts";
+import { accountLocalDate, chooseSyncRange, dateRangeForPeriod, isDateInRange, isPreviousMtdComparable } from "../lib/periods.ts";
 
 const londonDstStart = new Date("2026-03-29T23:30:00.000Z");
 
@@ -32,12 +32,22 @@ test("falls back to UTC for an invalid timezone without throwing", () => {
 test("returns calendar-aligned current and previous comparison windows", () => {
   const now = new Date("2026-09-04T12:00:00.000Z");
   assert.deepEqual(dateRangeForPeriod("mtd", "Europe/London", now), { since: "2026-09-01", until: "2026-09-04" });
+  assert.deepEqual(dateRangeForPeriod("previousMtd", "Europe/London", now), { since: "2026-08-01", until: "2026-08-04" });
   assert.deepEqual(dateRangeForPeriod("7d", "Europe/London", now), { since: "2026-08-29", until: "2026-09-04" });
   assert.deepEqual(dateRangeForPeriod("previous7d", "Europe/London", now), { since: "2026-08-22", until: "2026-08-28" });
   assert.deepEqual(dateRangeForPeriod("14d", "Europe/London", now), { since: "2026-08-22", until: "2026-09-04" });
   assert.deepEqual(dateRangeForPeriod("previous14d", "Europe/London", now), { since: "2026-08-08", until: "2026-08-21" });
   assert.deepEqual(dateRangeForPeriod("30d", "Europe/London", now), { since: "2026-08-06", until: "2026-09-04" });
   assert.deepEqual(dateRangeForPeriod("previous30d", "Europe/London", now), { since: "2026-07-07", until: "2026-08-05" });
+});
+
+test("clamps a matched previous MTD window to a shorter prior month", () => {
+  const endOfMarch = new Date("2026-03-31T12:00:00.000Z");
+  assert.deepEqual(dateRangeForPeriod("previousMtd", "Europe/London", endOfMarch), { since: "2026-02-01", until: "2026-02-28" });
+  assert.equal(isPreviousMtdComparable(endOfMarch, "Europe/London"), false);
+  const endOfJanuary = new Date("2026-01-31T12:00:00.000Z");
+  assert.deepEqual(dateRangeForPeriod("previousMtd", "Europe/London", endOfJanuary), { since: "2025-12-01", until: "2025-12-31" });
+  assert.equal(isPreviousMtdComparable(endOfJanuary, "Europe/London"), true);
 });
 
 test("keeps the first sync as a 90-day inclusive backfill and later syncs as recent refreshes", () => {

@@ -43,8 +43,9 @@ export default function LoginPage() {
           </div>
           <h1 className="text-2xl font-semibold">UK Trade Leads</h1>
           <p className="text-muted-foreground text-sm">Enter the dashboard password to continue</p>
-        </div>
-        <div className="space-y-3">
+      </div>
+      <div className="space-y-3">
+          <input aria-hidden="true" tabIndex={-1} autoComplete="username" name="username" className="sr-only" />
           <label className="sr-only" htmlFor="password">Dashboard password</label>
           <input id="password" name="password" type="password" required autoComplete="current-password" value={password}
             onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoFocus

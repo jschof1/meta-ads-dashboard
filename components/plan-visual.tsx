@@ -2,7 +2,7 @@
 
 import { CheckCircle2, Circle, AlertCircle, AlertTriangle, Clock, ClipboardList, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import type { DashboardState, DecisionTrigger } from "@/lib/state-types";
+import type { DashboardState, DecisionTrigger, SpendStatus } from "@/lib/state-types";
 import { formatMoney } from "@/lib/format";
 
 const TRIGGER_STYLES: Record<DecisionTrigger["status"], { dot: string; bg: string; text: string; Icon: typeof AlertCircle }> = {
@@ -12,11 +12,18 @@ const TRIGGER_STYLES: Record<DecisionTrigger["status"], { dot: string; bg: strin
   pending: { dot: "bg-muted-foreground", bg: "bg-muted/40 border-border", text: "text-muted-foreground", Icon: Clock },
 };
 
-function PhaseCard({ phase, currencyCode }: { phase: DashboardState["phase"]; currencyCode: string | null }) {
-  const pacePct = phase.spendPaceBudgetCents != null && phase.spendPaceBudgetCents > 0 && phase.spendPaceCents != null
-    ? Math.min(100, (phase.spendPaceCents / phase.spendPaceBudgetCents) * 100)
+function PhaseCard({ phase, currencyCode, spendStatus }: { phase: DashboardState["phase"]; currencyCode: string | null; spendStatus: SpendStatus }) {
+  const pacePct = spendStatus.budgetCents != null && spendStatus.budgetCents > 0 && spendStatus.spendCents != null
+    ? Math.min(100, (spendStatus.spendCents / spendStatus.budgetCents) * 100)
     : 0;
   const phaseProgressPct = phase.totalDays && phase.daysIn != null ? Math.min(100, (phase.daysIn / phase.totalDays) * 100) : 0;
+  const paceBarClass = spendStatus.status === "over_budget" || spendStatus.status === "over_pace"
+    ? "bg-destructive/70"
+    : spendStatus.status === "under_pace"
+      ? "bg-amber-500/70"
+      : spendStatus.status === "on_pace"
+        ? "bg-emerald-500/70"
+        : "bg-muted-foreground/50";
 
   return (
     <div className="rounded-xl border border-border bg-card p-5">
@@ -40,12 +47,14 @@ function PhaseCard({ phase, currencyCode }: { phase: DashboardState["phase"]; cu
 
       <div className="grid grid-cols-2 gap-4 text-xs mb-4">
         <div>
-          <div className="text-muted-foreground mb-1">MTD spend pace</div>
+          <div className="text-muted-foreground mb-1">MTD spend status</div>
           <div className="text-lg font-semibold tabular-nums">
-            {formatMoney(phase.spendPaceCents, currencyCode)} <span className="text-xs text-muted-foreground font-normal">/ {formatMoney(phase.spendPaceBudgetCents, currencyCode)}</span>
+            {spendStatus.label}
           </div>
+          <div className="mt-1 text-[11px] text-muted-foreground">{spendStatus.detail}</div>
+          <div className="mt-1 text-xs tabular-nums text-muted-foreground">{formatMoney(spendStatus.spendCents, currencyCode)} / {formatMoney(spendStatus.budgetCents, currencyCode)} monthly</div>
           <div className="h-1.5 bg-muted rounded-full mt-2 overflow-hidden">
-            <div className="h-full bg-emerald-500/70" style={{ width: `${pacePct}%` }} />
+            <div className={`h-full ${paceBarClass}`} style={{ width: `${pacePct}%` }} />
           </div>
         </div>
         <div>
@@ -101,7 +110,7 @@ export function PlanVisual({ state }: { state: DashboardState }) {
     <section className="space-y-4 mb-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
-            <PhaseCard phase={state.phase} currencyCode={state.meta.currencyCode} />
+            <PhaseCard phase={state.phase} currencyCode={state.meta.currencyCode} spendStatus={state.scorecard.spendStatus} />
         </div>
 
         <div className="lg:col-span-2">
