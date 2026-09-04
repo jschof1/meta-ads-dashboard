@@ -9,7 +9,7 @@ import type { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/db";
 import { dateRangeForPeriod, addCalendarDays, accountLocalDate, type ReportingPeriod } from "@/lib/periods";
 import { buildHeatmap, buildPhase, buildTriggers, detectAnomalies, scoreFatigue } from "@/lib/insights";
-import { CAMPAIGN_TARGETS, classifyAd } from "@/lib/targets";
+import { UKTL_CONFIG, classifyAd } from "@/lib/targets";
 import type { ActionLogEntry, AdRow, Bucket, DashboardState, TrendPoint } from "@/lib/state-types";
 
 const STALE_AFTER_MS = 26 * 60 * 60 * 1_000;
@@ -57,14 +57,14 @@ function aggregate(rows: StoredInsight[]): Bucket {
   const spendCents = sumNullable(rows, "spendMinorUnits");
   const impressions = sumNullable(rows, "impressions");
   const linkClicks = sumNullable(rows, "linkClicks");
-  const registrations = sumNullable(rows, "leads");
+  const leads = sumNullable(rows, "leads");
   return {
     spendCents,
     impressions,
     linkClicks,
-    registrations,
-    cprCents: spendCents != null && registrations != null && registrations > 0
-      ? Math.round(spendCents / registrations)
+    leads,
+    cplCents: spendCents != null && leads != null && leads > 0
+      ? Math.round(spendCents / leads)
       : null,
     ctrLink: linkClicks != null && impressions != null && impressions > 0
       ? linkClicks / impressions
@@ -152,14 +152,14 @@ function adRows(
     const fatigue = scoreFatigue({
       frequency: bucket.frequency,
       ctrLink: bucket.ctrLink,
-      cprCents: bucket.cprCents,
+      cplCents: bucket.cplCents,
       daysActive: daysBetween(firstSeenDate, today),
       spendCents: bucket.spendCents,
     });
     const verdict = classifyAd({
       spendCents: bucket.spendCents,
-      registrations: bucket.registrations,
-      cprCents: bucket.cprCents,
+      leads: bucket.leads,
+      cplCents: bucket.cplCents,
       ctrLink: bucket.ctrLink,
     });
     return {
@@ -171,8 +171,8 @@ function adRows(
       impressions: bucket.impressions,
       linkClicks: bucket.linkClicks,
       ctrLink: bucket.ctrLink,
-      registrations: bucket.registrations,
-      cprCents: bucket.cprCents,
+      leads: bucket.leads,
+      cplCents: bucket.cplCents,
       frequency: bucket.frequency,
       verdict: verdict.verdict,
       verdictReason: verdict.reason,
@@ -182,10 +182,10 @@ function adRows(
       fatigueReason: fatigue.reason,
     };
   }).sort((left, right) => {
-    if (left.cprCents == null && right.cprCents == null) return (right.spendCents ?? -1) - (left.spendCents ?? -1);
-    if (left.cprCents == null) return 1;
-    if (right.cprCents == null) return -1;
-    return left.cprCents - right.cprCents;
+    if (left.cplCents == null && right.cplCents == null) return (right.spendCents ?? -1) - (left.spendCents ?? -1);
+    if (left.cplCents == null) return 1;
+    if (right.cplCents == null) return -1;
+    return left.cplCents - right.cplCents;
   });
 }
 
@@ -240,8 +240,8 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
   const phase = buildPhase({
     daysSinceLaunch: dsl,
     spendCentsMTD: mtd.spendCents,
-    monthlyBudgetCents: CAMPAIGN_TARGETS.monthly_budget_cents,
-    registrationsThisWeek: last7.registrations,
+    monthlyBudgetCents: UKTL_CONFIG.targets.monthlyBudgetMinorUnits,
+    leadsThisWeek: last7.leads,
   });
   const adsState = adRows(adInsightRows, ads, creatives, todayRange.until);
   return {
@@ -272,14 +272,14 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
       previous14: buckets.previous14d,
       last30: buckets["30d"],
       previous30: buckets.previous30d,
-      eventsThisWeek: last7.registrations,
-      learningProgress: last7.registrations == null
+      leadsThisWeek: last7.leads,
+      learningProgress: last7.leads == null || UKTL_CONFIG.targets.learningLeadsPerWeek == null
         ? null
-        : Math.min(1, last7.registrations / CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit),
-      learningEventsTarget: CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit,
+        : Math.min(1, last7.leads / UKTL_CONFIG.targets.learningLeadsPerWeek),
+      learningLeadsTarget: UKTL_CONFIG.targets.learningLeadsPerWeek,
       budget: {
-        dailyCents: CAMPAIGN_TARGETS.daily_budget_cents,
-        monthlyCents: CAMPAIGN_TARGETS.monthly_budget_cents,
+        dailyCents: UKTL_CONFIG.targets.dailyBudgetMinorUnits,
+        monthlyCents: UKTL_CONFIG.targets.monthlyBudgetMinorUnits,
       },
     },
     trend,
@@ -288,11 +288,14 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
     funnel: {
       metaPixelImpressions: buckets["30d"].impressions,
       metaPixelLinkClicks: buckets["30d"].linkClicks,
-      registrations: buckets["30d"].registrations,
-      attended: null,
+      leads: buckets["30d"].leads,
+      contacted: null,
+      qualified: null,
       callsBooked: null,
-      enrollments: null,
-      metaPixelRegistrations: buckets["30d"].registrations,
+      callsAttended: null,
+      wonCustomers: null,
+      lostCustomers: null,
+      metaPixelLeads: buckets["30d"].leads,
       testEmailsExcluded: 0,
       duplicatesCollapsed: 0,
       crmConfigured: false,
@@ -301,13 +304,14 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
     actionLog: actionLog(logs),
     phase,
     triggers: buildTriggers({
-      cprCentsLast7: last7.cprCents,
+      cplCentsLast7: last7.cplCents,
+      currencyCode: latestSuccess?.currencyCode ?? null,
       frequencyLast7: last7.frequency,
-      registrationsThisWeek: last7.registrations,
+      leadsThisWeek: last7.leads,
       daysSinceLaunch: dsl,
       ads: adsState.map((ad) => ({ fatigueScore: ad.fatigueScore, adName: ad.adName })),
     }),
-    targets: CAMPAIGN_TARGETS,
+    targets: UKTL_CONFIG,
   };
 }
 

@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { formatMoney } from "@/lib/format";
 import { requireApiSession } from "@/lib/api-auth";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-type AdInput = { adName?: string; cprCents?: number | null; spendCents?: number | null; registrations?: number | null; ctrLink?: number | null };
+type AdInput = { adName?: string; cplCents?: number | null; spendCents?: number | null; leads?: number | null; ctrLink?: number | null };
 
-function fmtMoney(cents: number | undefined | null) {
-  if (cents == null) return "n/a";
-  if (cents === 0) return "$0.00";
-  return `$${(cents / 100).toFixed(2)}`;
+function fmtMoney(value: number | undefined | null, currencyCode: string | null | undefined) {
+  return value == null ? "n/a" : formatMoney(value, currencyCode);
 }
 
 export async function POST(request: Request) {
@@ -21,7 +20,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "ANTHROPIC_API_KEY not set" }, { status: 500 });
   }
 
-  let body: { topAds?: AdInput[]; losingAds?: AdInput[] } = {};
+  let body: { currencyCode?: string | null; topAds?: AdInput[]; losingAds?: AdInput[] } = {};
   try {
     body = await request.json();
   } catch {
@@ -32,46 +31,46 @@ export async function POST(request: Request) {
   const losers = (body.losingAds ?? []).slice(0, 3);
 
   if (winners.length === 0) {
-    return NextResponse.json({ error: "No winning ads yet to extract DNA from. Wait for more spend." }, { status: 400 });
+    return NextResponse.json({ error: "No leading ads yet to extract evidence from. Wait for more stored data." }, { status: 400 });
   }
 
-  const winnerLines = winners.map((a) => `- ${a.adName ?? "Unnamed ad"} | CPR ${fmtMoney(a.cprCents)} | CTR ${a.ctrLink != null ? (a.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(a.spendCents)} | ${a.registrations == null ? "n/a" : a.registrations} regs`).join("\n");
-  const loserLines = losers.map((a) => `- ${a.adName ?? "Unnamed ad"} | CPR ${fmtMoney(a.cprCents)} | CTR ${a.ctrLink != null ? (a.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(a.spendCents)}`).join("\n");
+  const winnerLines = winners.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)} | ${ad.leads == null ? "n/a" : ad.leads} leads`).join("\n");
+  const loserLines = losers.map((ad) => `- ${ad.adName ?? "Unnamed ad"} | CPL ${fmtMoney(ad.cplCents, body.currencyCode)} | CTR ${ad.ctrLink != null ? (ad.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(ad.spendCents, body.currencyCode)}`).join("\n");
 
-  // Read the campaign brief from public/plan.md if present so the AI is grounded in the user's specific offer.
-  const planContext = await import("@/lib/plan-context").then((m) => m.readPlan()).catch(() => "");
+  // Read the UKTL operating brief so the AI is grounded in the supplied context.
+  const planContext = await import("@/lib/plan-context").then((module) => module.readPlan()).catch(() => "");
 
-  const prompt = `You are a senior performance creative strategist analyzing a Meta ad campaign.
+  const prompt = `You are a senior performance creative strategist for UK Trade Leads, a UK trades lead-generation business.
 
-Campaign context (from the user's plan):
+Campaign context (from the UKTL operating brief):
 ${planContext.slice(0, 2000)}
 
-Your job: given the current winning and losing ads below, propose 3 new creative angles to test next week. Extract WHY winners are winning (hook, format, audience signal) and design variants that double down on the working pattern with novel approaches.
+Your job: given the current leading and lagging ads below, propose 3 new creative angles to test next week. Extract why the leading ads may be working from the supplied evidence and design variants with genuinely different approaches. Do not claim lead quality from CPL alone.
 
-WINNING ADS (low CPR, high CTR):
+LEADING ADS (lower CPL or stronger evidence):
 ${winnerLines}
 
-${loserLines ? `LOSING ADS (high CPR or low CTR):\n${loserLines}\n` : ""}
+${loserLines ? `LAGGING ADS (higher CPL or weaker engagement):\n${loserLines}\n` : ""}
 
 Return ONLY this JSON shape:
 {
-  "winning_dna": "1-2 sentences extracting the pattern that's working - hook style, audience hint, format clue.",
+  "winning_dna": "1-2 sentences extracting the pattern supported by the evidence - hook style, audience hint, format clue.",
   "new_angles": [
     {
       "name": "Concept name (3-5 words)",
       "hook": "First 3 seconds of script or visual. Exact words/visual.",
       "format": "Video / Static / Carousel / Reel",
       "script_outline": "30-second script in 3-4 lines.",
-      "why_it_should_work": "1 sentence tying it back to winning DNA.",
-      "novelty_axis": "What's different from current winners (visual style, hook angle, audience cut, format)"
+      "why_it_should_work": "1 sentence tying it back to the supplied evidence without inventing outcomes.",
+      "novelty_axis": "What's different from current ads (visual style, hook angle, audience cut, format)"
     }
   ]
 }
 
 Rules:
-- NO em dashes anywhere.
+- No em dashes anywhere.
 - 3 angles total. Each must be genuinely novel, not a tiny tweak.
-- Ground recommendations in the campaign context above. Stay on-brand and on-audience.
+- Ground recommendations in the UKTL context and supplied ad evidence.
 - Hooks must be conversational, not corporate.`;
 
   try {

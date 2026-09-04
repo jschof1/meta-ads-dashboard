@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Meta Ads Dashboard",
-  description: "Custom command center for Meta ad campaigns - replaces Ads Manager for daily review",
+  title: "UK Trade Leads Meta Ads Command Centre",
+  description: "Internal UK Trade Leads command centre for reviewing Meta acquisition and lead quality",
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="en-GB"
       className="h-full antialiased dark"
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">

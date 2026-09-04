@@ -777,7 +777,7 @@ export class MetaClient {
     return diagnostic;
   }
 
-  extractRegistrations(row: MetaInsightRow): number {
+  extractLeads(row: MetaInsightRow): number {
     return this.extractResultEvents(row).value ?? 0;
   }
 }
@@ -941,7 +941,7 @@ export function extractResultEvents(
   return diagnostic;
 }
 
-export function extractRegistrations(row: MetaInsightRow): number {
+export function extractLeads(row: MetaInsightRow): number {
   const diagnostic = extractResultEvents(row, {
     primaryActionType: process.env.META_PRIMARY_RESULT_ACTION_TYPE || undefined,
     customConversionId: process.env.META_CUSTOM_CONVERSION_ID || undefined,

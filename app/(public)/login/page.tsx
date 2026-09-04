@@ -41,7 +41,7 @@ export default function LoginPage() {
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
             <Lock className="w-7 h-7 text-primary" />
           </div>
-          <h1 className="text-2xl font-semibold">Meta Ads Dashboard</h1>
+          <h1 className="text-2xl font-semibold">UK Trade Leads</h1>
           <p className="text-muted-foreground text-sm">Enter the dashboard password to continue</p>
         </div>
         <div className="space-y-3">

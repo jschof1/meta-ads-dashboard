@@ -1,4 +1,5 @@
 // Shape returned by /api/dashboard/state. Keep in sync with route.ts.
+import type { UKTLConfig } from "./uktl-config";
 
 export type Bucket = {
   // Values are nullable because Meta may omit a field or no stored row may
@@ -6,14 +7,14 @@ export type Bucket = {
   spendCents: number | null;
   impressions: number | null;
   linkClicks: number | null;
-  registrations: number | null;
-  cprCents: number | null;
+  leads: number | null;
+  cplCents: number | null;
   ctrLink: number | null;
   cpmCents: number | null;
   frequency: number | null;
 };
 
-export type AdVerdictTag = "too_early" | "winner" | "performing" | "watch" | "cull";
+export type AdVerdictTag = "too_early" | "winner" | "performing" | "watch" | "cull" | "unknown";
 
 export type AdRow = {
   adId: string;
@@ -24,8 +25,8 @@ export type AdRow = {
   impressions: number | null;
   linkClicks: number | null;
   ctrLink: number | null;
-  registrations: number | null;
-  cprCents: number | null;
+  leads: number | null;
+  cplCents: number | null;
   frequency: number | null;
   verdict: AdVerdictTag;
   verdictReason: string;
@@ -40,8 +41,8 @@ export type TrendPoint = {
   spendCents: number | null;
   impressions: number | null;
   linkClicks: number | null;
-  registrations: number | null;
-  cprCents: number | null;
+  leads: number | null;
+  cplCents: number | null;
   cpmCents: number | null;
   ctrLink: number | null;
   frequency: number | null;
@@ -51,25 +52,28 @@ export type HeatmapCell = {
   date: string;          // YYYY-MM-DD
   intensity: number;     // 0..1
   spendCents: number | null;
-  registrations: number | null;
-  cprCents: number | null;
+  leads: number | null;
+  cplCents: number | null;
 };
 
 export type FunnelData = {
   metaPixelImpressions: number | null;
   metaPixelLinkClicks: number | null;
-  registrations: number | null;
-  attended: number | null;
+  leads: number | null;
+  contacted: number | null;
+  qualified: number | null;
   callsBooked: number | null;
-  enrollments: number | null;
-  metaPixelRegistrations: number | null;
+  callsAttended: number | null;
+  wonCustomers: number | null;
+  lostCustomers: number | null;
+  metaPixelLeads: number | null;
   testEmailsExcluded: number;
   duplicatesCollapsed: number;
   crmConfigured: boolean;
 };
 
 export type Anomaly = {
-  metric: "cpr" | "cpm" | "ctr" | "spend" | "regs";
+  metric: "cpl" | "cpm" | "ctr" | "spend" | "leads";
   direction: "up" | "down";
   changePct: number;
   date: string;
@@ -129,10 +133,10 @@ export type DashboardState = {
     previous14: Bucket;
     last30: Bucket;
     previous30: Bucket;
-    eventsThisWeek: number | null;
+    leadsThisWeek: number | null;
     learningProgress: number | null;
-    learningEventsTarget: number;
-    budget: { dailyCents: number; monthlyCents: number };
+    learningLeadsTarget: number | null;
+    budget: { dailyCents: number | null; monthlyCents: number | null };
   };
   trend: TrendPoint[];
   heatmap: HeatmapCell[];
@@ -142,5 +146,5 @@ export type DashboardState = {
   actionLog: ActionLogEntry[];
   phase: CampaignPhase;
   triggers: DecisionTrigger[];
-  targets: unknown;
+  targets: UKTLConfig;
 };

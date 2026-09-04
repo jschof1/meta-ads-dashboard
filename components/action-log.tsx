@@ -67,7 +67,7 @@ export function ActionLog({ state }: { state: DashboardState }) {
       <div className="px-5 py-3 border-b border-border flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity className="w-4 h-4 text-primary" />
-          <h2 className="text-sm font-semibold">Auto-action log</h2>
+          <h2 className="text-sm font-semibold">Recorded action log</h2>
         </div>
         <span className="text-xs text-muted-foreground">{entries.length} action{entries.length === 1 ? "" : "s"} this week</span>
       </div>
@@ -75,8 +75,8 @@ export function ActionLog({ state }: { state: DashboardState }) {
       {entries.length === 0 ? (
         <div className="px-5 py-8 text-sm text-muted-foreground text-center">
           <Bot className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
-          <p>No auto-actions yet.</p>
-          <p className="text-xs mt-1">When Claude pauses creatives, shifts budget, or launches variants, it shows up here in real time.</p>
+          <p>No recorded actions yet.</p>
+          <p className="text-xs mt-1">Approved or operator-recorded actions will appear here with their reasoning and result.</p>
         </div>
       ) : (
         <div className="px-5 py-2">

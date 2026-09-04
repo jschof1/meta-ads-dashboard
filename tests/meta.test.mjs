@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   createMetaClient,
   diagnoseResultEvents,
-  extractRegistrations,
+  extractLeads,
   extractResultEvents,
   MetaApiError,
   MetaConfigurationError,
@@ -322,7 +322,7 @@ test("diagnoses action types and requires explicit configuration for ambiguity",
   const selected = extractResultEvents(ambiguous, { primaryActionType: "offsite_conversion.custom.99" });
   assert.equal(selected.value, 3);
   assert.equal(selected.missing, false);
-  assert.equal(extractRegistrations({ actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "4" }] }), 4);
+  assert.equal(extractLeads({ actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "4" }] }), 4);
   assert.equal(diagnoseResultEvents({ actions: [{ action_type: "link_click", value: "12" }] }).needsConfiguration, true);
   const malformed = diagnoseResultEvents({ actions: [{ action_type: "offsite_conversion.custom.lead", value: "not-a-number" }] });
   assert.equal(malformed.value, null);

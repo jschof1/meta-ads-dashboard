@@ -1,117 +1,60 @@
 "use client";
 
 import type { DashboardState } from "@/lib/state-types";
-import { CAMPAIGN_TARGETS } from "@/lib/targets";
-import { Eye, MousePointerClick, UserCheck, Users, Phone, GraduationCap, Info } from "lucide-react";
+import { UKTL_CONFIG, type FunnelStageKey } from "@/lib/targets";
+import { Eye, MousePointerClick, UserRound, UserCheck, Phone, Trophy, Info } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-function pct(num: number | null, den: number | null) {
-  if (num == null || den == null || den === 0) return null;
-  return (num / den) * 100;
+function pct(numerator: number | null, denominator: number | null) {
+  if (numerator == null || denominator == null || denominator === 0) return null;
+  return (numerator / denominator) * 100;
 }
 
-function fmtPct(v: number | null) {
-  if (v == null) return "-";
-  return `${v.toFixed(1)}%`;
-}
-
-function fmtMoney(cents: number | null) {
-  if (cents == null) return "-";
-  return `$${(cents / 100).toFixed(2)}`;
-}
-
-type Band = { lo: number; hi: number };
-function rateColor(p: number | null, band?: Band): string {
-  if (p == null) return "text-muted-foreground";
-  if (!band) return "text-foreground/70";
-  if (p >= band.lo && p <= band.hi) return "text-emerald-500";
-  if (p < band.lo * 0.6 || p > band.hi * 1.5) return "text-destructive";
-  return "text-amber-500";
+function fmtPct(value: number | null) {
+  if (value == null) return "—";
+  return `${value.toFixed(1)}%`;
 }
 
 type Step = {
+  key: FunnelStageKey;
   label: string;
   value: number | null;
   base: number | null;
   icon: LucideIcon;
-  bandPct?: Band;
-  bandLabel?: string;
-  sourceNote?: string;
+  sourceNote: string;
 };
+
+function stageLabel(key: FunnelStageKey): string {
+  return UKTL_CONFIG.funnel.find((stage) => stage.key === key)?.label ?? key;
+}
 
 export function Funnel({ state }: { state: DashboardState }) {
   const f = state.funnel;
-  const t = CAMPAIGN_TARGETS.funnel_assumptions;
-
+  const crmNote = f.crmConfigured ? "CRM" : "CRM data not configured";
   const steps: Step[] = [
-    {
-      label: "Impressions",
-      value: f.metaPixelImpressions,
-      base: f.metaPixelImpressions,
-      icon: Eye,
-      sourceNote: "Meta",
-    },
-    {
-      label: "Link clicks",
-      value: f.metaPixelLinkClicks,
-      base: f.metaPixelImpressions,
-      icon: MousePointerClick,
-      bandPct: { lo: 2.5, hi: 5 },
-      bandLabel: "CTR target 2.5-5%",
-      sourceNote: "Meta",
-    },
-    {
-      label: "Registrations",
-      value: f.registrations,
-      base: f.metaPixelLinkClicks,
-      icon: Users,
-      bandPct: { lo: t.lp_conversion.lo * 100, hi: t.lp_conversion.hi * 100 },
-      bandLabel: `LP conv ${Math.round(t.lp_conversion.lo * 100)}-${Math.round(t.lp_conversion.hi * 100)}%`,
-      sourceNote: `Meta stored (CRM not configured)`,
-    },
-    {
-      label: "Attended",
-      value: f.attended,
-      base: f.registrations,
-      icon: UserCheck,
-      bandPct: { lo: 30, hi: 50 },
-      bandLabel: "Show rate 30-50%",
-      sourceNote: "CRM attribution not configured",
-    },
-    {
-      label: "Calls booked",
-      value: f.callsBooked,
-      base: f.attended,
-      icon: Phone,
-      bandPct: { lo: 15, hi: 35 },
-      bandLabel: "Attend -> call 15-35%",
-      sourceNote: "CRM attribution not configured",
-    },
-    {
-      label: "Enrollments",
-      value: f.enrollments,
-      base: f.callsBooked,
-      icon: GraduationCap,
-      bandPct: { lo: t.call_to_close_rate * 100 - 10, hi: t.call_to_close_rate * 100 + 10 },
-      bandLabel: `Close ${Math.round(t.call_to_close_rate * 100)}%`,
-      sourceNote: "CRM attribution not configured",
-    },
+    { key: "lead", label: "Impressions", value: f.metaPixelImpressions, base: f.metaPixelImpressions, icon: Eye, sourceNote: "Meta" },
+    { key: "lead", label: "Link clicks", value: f.metaPixelLinkClicks, base: f.metaPixelImpressions, icon: MousePointerClick, sourceNote: "Meta" },
+    { key: "lead", label: stageLabel("lead"), value: f.leads, base: f.metaPixelLinkClicks, icon: UserRound, sourceNote: "Meta lead result" },
+    { key: "contacted", label: stageLabel("contacted"), value: f.contacted, base: f.leads, icon: UserCheck, sourceNote: crmNote },
+    { key: "qualified", label: stageLabel("qualified"), value: f.qualified, base: f.contacted, icon: UserCheck, sourceNote: crmNote },
+    { key: "callBooked", label: stageLabel("callBooked"), value: f.callsBooked, base: f.qualified, icon: Phone, sourceNote: crmNote },
+    { key: "callAttended", label: stageLabel("callAttended"), value: f.callsAttended, base: f.callsBooked, icon: Phone, sourceNote: crmNote },
+    { key: "wonCustomer", label: stageLabel("wonCustomer"), value: f.wonCustomers, base: f.callsAttended, icon: Trophy, sourceNote: crmNote },
   ];
 
-  const max = Math.max(...steps.map((s) => s.value ?? 0), 1);
+  const max = Math.max(...steps.map((step) => step.value ?? 0), 1);
+  const lostLabel = stageLabel("lost");
 
   return (
     <section className="rounded-xl border border-border bg-card mb-6">
       <div className="px-5 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-sm font-semibold">Full-funnel (paid Meta, last 30d)</h2>
+        <h2 className="text-sm font-semibold">UKTL conversion path (paid Meta, last 30d)</h2>
         <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
-          <span>CAC ceiling {fmtMoney(CAMPAIGN_TARGETS.cac_target.ceiling_cents)}</span>
-          <span>·</span>
-          <span>Cost/call $250-500</span>
+          <span>{f.crmConfigured ? "CRM attribution connected" : "CRM attribution not configured"}</span>
           {(f.duplicatesCollapsed > 0 || f.testEmailsExcluded > 0) && (
             <span className="inline-flex items-center gap-1 text-emerald-500" title="Deduplication and test-email filter applied">
               <Info className="w-3 h-3" />
-              {f.duplicatesCollapsed > 0 && `${f.duplicatesCollapsed} dup${f.duplicatesCollapsed > 1 ? "s" : ""} collapsed`}
+              {f.duplicatesCollapsed > 0 && `${f.duplicatesCollapsed} duplicate${f.duplicatesCollapsed > 1 ? "s" : ""} collapsed`}
               {f.duplicatesCollapsed > 0 && f.testEmailsExcluded > 0 && ", "}
               {f.testEmailsExcluded > 0 && `${f.testEmailsExcluded} test row${f.testEmailsExcluded > 1 ? "s" : ""} excluded`}
             </span>
@@ -119,37 +62,33 @@ export function Funnel({ state }: { state: DashboardState }) {
         </div>
       </div>
       <div className="px-5 py-4 space-y-2.5">
-        {steps.map((s, i) => {
-          const widthPct = s.value == null ? 0 : Math.max(2, (s.value / max) * 100);
-          const conversionPct = i === 0 ? null : pct(s.value, s.base);
-          const Icon = s.icon;
-          const color = rateColor(conversionPct, s.bandPct);
-
+        {steps.map((step, index) => {
+          const widthPct = step.value == null ? 0 : Math.max(2, (step.value / max) * 100);
+          const conversionPct = index === 0 ? null : pct(step.value, step.base);
+          const Icon = step.icon;
           return (
-            <div key={s.label} className="flex items-center gap-3">
-              <div className="w-40 flex items-center gap-2 text-sm">
+            <div key={`${step.key}-${step.label}`} className="flex items-center gap-3">
+              <div className="w-32 sm:w-40 flex items-center gap-2 text-sm shrink-0">
                 <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
-                <span>{s.label}</span>
+                <span>{step.label}</span>
               </div>
 
-              <div className="flex-1 h-9 bg-muted/60 rounded-lg relative overflow-hidden">
+              <div className="flex-1 h-9 bg-muted/60 rounded-lg relative overflow-hidden min-w-0">
                 <div
                   className="absolute inset-y-0 left-0 bg-gradient-to-r from-primary/80 to-primary/50 transition-all"
                   style={{ width: `${widthPct}%` }}
                 />
-                <div className="absolute inset-0 flex items-center justify-between px-3 text-sm">
-                  <span className="font-semibold tabular-nums">{s.value == null ? "-" : s.value.toLocaleString()}</span>
-                  {s.sourceNote && (
-                    <span className="text-[10px] text-foreground/60 hidden sm:inline">{s.sourceNote}</span>
-                  )}
+                <div className="absolute inset-0 flex items-center justify-between px-3 text-sm gap-2">
+                  <span className="font-semibold tabular-nums">{step.value == null ? "—" : step.value.toLocaleString("en-GB")}</span>
+                  <span className="text-[10px] text-foreground/60 hidden sm:inline truncate">{step.sourceNote}</span>
                 </div>
               </div>
 
-              <div className="w-32 text-right text-xs">
+              <div className="w-28 sm:w-32 text-right text-xs shrink-0">
                 {conversionPct != null ? (
                   <>
-                    <div className={`font-semibold ${color}`}>{fmtPct(conversionPct)}</div>
-                    {s.bandLabel && <div className="text-[10px] text-muted-foreground">{s.bandLabel}</div>}
+                    <div className="font-semibold text-foreground/70">{fmtPct(conversionPct)}</div>
+                    <div className="text-[10px] text-muted-foreground">from previous stage</div>
                   </>
                 ) : (
                   <div className="text-muted-foreground">top of funnel</div>
@@ -158,6 +97,10 @@ export function Funnel({ state }: { state: DashboardState }) {
             </div>
           );
         })}
+      </div>
+      <div className="px-5 pb-4 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <span>{lostLabel}: {f.lostCustomers == null ? "CRM data not configured" : f.lostCustomers.toLocaleString("en-GB")}</span>
+        {!f.crmConfigured && <span>Downstream stages stay unknown until CRM attribution is configured.</span>}
       </div>
     </section>
   );

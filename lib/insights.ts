@@ -1,7 +1,10 @@
-// Pure-function insights helpers: fatigue scoring, anomaly detection, decision triggers, phase.
-// These run inside the API route - no I/O.
+// Pure-function insights helpers: fatigue scoring, anomaly detection,
+// decision triggers, and campaign phase. These run inside the API route - no
+// I/O or live provider calls.
 
-import { CAMPAIGN_TARGETS, findCurrentGate } from "./targets";
+import { formatMoney } from "./format";
+import { UKTL_CONFIG } from "./uktl-config";
+import { classifyCpl, findCurrentGate } from "./targets";
 import type {
   Anomaly,
   CampaignPhase,
@@ -11,42 +14,53 @@ import type {
 } from "./state-types";
 
 // ---------- Fatigue ----------
-// A creative is "fatiguing" when frequency rises AND CTR or CPR worsens.
+// Fatigue is a diagnostic combination of audience repetition and weakening
+// engagement. A CPL contribution is used only when UKTL has supplied a
+// maximum; it is never inferred from an upstream template.
 export function scoreFatigue(input: {
   frequency: number | null;
   ctrLink: number | null;
-  cprCents: number | null;
+  cplCents: number | null;
   daysActive: number | null;
   spendCents: number | null;
 }): { score: number; reason: string } {
-  const { frequency, ctrLink, cprCents, daysActive, spendCents } = input;
+  const { frequency, ctrLink, cplCents, daysActive, spendCents } = input;
+  const minimumSpend = UKTL_CONFIG.evidence.minSpendMinorUnits;
 
-  if (spendCents == null || spendCents < 3000 || frequency == null || ctrLink == null) {
+  if (
+    spendCents == null
+    || spendCents <= 0
+    || frequency == null
+    || ctrLink == null
+    || (minimumSpend != null && spendCents < minimumSpend)
+  ) {
     return { score: 0, reason: "Not enough stored evidence to read fatigue yet" };
   }
 
   let score = 0;
   const reasons: string[] = [];
+  const frequencyRules = UKTL_CONFIG.frequency;
 
-  if (frequency >= 3) {
+  if (frequency >= frequencyRules.alertAbove) {
     score += 0.5;
-    reasons.push(`freq ${frequency.toFixed(2)}`);
-  } else if (frequency >= 2) {
+    reasons.push(`frequency ${frequency.toFixed(2)}`);
+  } else if (frequency >= frequencyRules.watchAbove) {
     score += 0.25;
-    reasons.push(`freq ${frequency.toFixed(2)} (warming)`);
+    reasons.push(`frequency ${frequency.toFixed(2)} (warming)`);
   }
 
-  if (ctrLink < 0.01) {
+  if (ctrLink < frequencyRules.ctrAlertBelow) {
     score += 0.3;
-    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% below 1%`);
-  } else if (ctrLink < 0.015) {
+    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% below diagnostic floor`);
+  } else if (ctrLink < frequencyRules.ctrWatchBelow) {
     score += 0.15;
     reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% soft`);
   }
 
-  if (cprCents != null && cprCents > 4000) {
+  const cplMaximum = UKTL_CONFIG.targets.cpl.maximumMinorUnits;
+  if (cplCents != null && cplMaximum != null && cplCents > cplMaximum) {
     score += 0.2;
-    reasons.push(`CPR $${(cprCents / 100).toFixed(0)} above $40`);
+    reasons.push("CPL above configured maximum");
   }
 
   if (daysActive != null && daysActive >= 7) {
@@ -60,7 +74,8 @@ export function scoreFatigue(input: {
 }
 
 // ---------- Anomalies ----------
-// Compare the latest day to the trailing 7-day mean.
+// Compare the latest day to the trailing 7-day mean. This is a historical
+// comparison and does not require a business target to be configured.
 export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
   if (trend.length < 4) return [];
   const out: Anomaly[] = [];
@@ -79,7 +94,8 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
     return (latestVal - baseVal) / baseVal;
   }
 
-  // For CPM and CPR: lower is better, so DROPS are positive (info), SPIKES are negative (warn/alert).
+  // For CPM and CPL, lower is better, so drops are positive information and
+  // spikes are warnings.
   const cpmDelta = delta(latest.cpmCents, avg((p) => p.cpmCents));
   if (cpmDelta != null && Math.abs(cpmDelta) >= 0.2) {
     const isPositive = cpmDelta < 0;
@@ -95,22 +111,23 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
     });
   }
 
-  const cprDelta = delta(latest.cprCents, avg((p) => p.cprCents));
-  if (cprDelta != null && Math.abs(cprDelta) >= 0.2) {
-    const isPositive = cprDelta < 0;
+  const cplDelta = delta(latest.cplCents, avg((p) => p.cplCents));
+  if (cplDelta != null && Math.abs(cplDelta) >= 0.2) {
+    const isPositive = cplDelta < 0;
     out.push({
-      metric: "cpr",
-      direction: cprDelta > 0 ? "up" : "down",
-      changePct: Math.round(cprDelta * 100),
+      metric: "cpl",
+      direction: cplDelta > 0 ? "up" : "down",
+      changePct: Math.round(cplDelta * 100),
       date: latest.date,
-      message: cprDelta > 0
-        ? `CPR spiked ${Math.abs(Math.round(cprDelta * 100))}% vs 7d avg. Costlier registrations - check creatives.`
-        : `CPR improved ${Math.abs(Math.round(cprDelta * 100))}% vs 7d avg. Cheaper conversions - scaling room.`,
-      severity: isPositive ? "info" : Math.abs(cprDelta) >= 0.4 ? "alert" : "warn",
+      message: cplDelta > 0
+        ? `CPL spiked ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Costlier leads - check creatives and lead quality.`
+        : `CPL improved ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Cheaper leads - compare quality before scaling.`,
+      severity: isPositive ? "info" : Math.abs(cplDelta) >= 0.4 ? "alert" : "warn",
     });
   }
 
-  // For CTR: higher is better. JUMPS are positive (info), FALLS are negative (warn).
+  // For CTR, higher is better. Jumps are positive information and falls are
+  // warnings.
   const ctrDelta = delta(latest.ctrLink, avg((p) => p.ctrLink));
   if (ctrDelta != null && Math.abs(ctrDelta) >= 0.25) {
     const isPositive = ctrDelta > 0;
@@ -130,78 +147,96 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
 }
 
 // ---------- Heatmap ----------
-// 14-day intensity heatmap. Intensity = combined performance score (low CPR + decent regs = bright).
+// 30-day intensity heatmap. Cost intensity is relative to the observed
+// period, so it stays useful when no CPL target has been supplied.
 export function buildHeatmap(trend: TrendPoint[]): HeatmapCell[] {
   if (trend.length === 0) return [];
-  const maxRegs = Math.max(...trend.map((p) => p.registrations ?? 0), 1);
+  const maxLeads = Math.max(...trend.map((p) => p.leads ?? 0), 1);
+  const observedCpl = trend.flatMap((p) => p.cplCents == null ? [] : [p.cplCents]);
+  const lowestCpl = observedCpl.length > 0 ? Math.min(...observedCpl) : null;
+  const highestCpl = observedCpl.length > 0 ? Math.max(...observedCpl) : null;
+  const cplSpan = lowestCpl != null && highestCpl != null ? highestCpl - lowestCpl : 0;
+
   return trend.map((p) => {
-    const cprScore = p.cprCents == null ? 0 : Math.max(0, 1 - (p.cprCents - 2000) / 6000);
-    const regScore = (p.registrations ?? 0) / maxRegs;
-    const intensity = Math.min(1, 0.6 * cprScore + 0.4 * regScore);
+    const cplScore = p.cplCents == null || lowestCpl == null || highestCpl == null
+      ? 0
+      : cplSpan === 0 ? 1 : 1 - ((p.cplCents - lowestCpl) / cplSpan);
+    const leadScore = (p.leads ?? 0) / maxLeads;
+    const intensity = Math.min(1, 0.6 * cplScore + 0.4 * leadScore);
     return {
       date: p.date,
       intensity,
       spendCents: p.spendCents,
-      registrations: p.registrations,
-      cprCents: p.cprCents,
+      leads: p.leads,
+      cplCents: p.cplCents,
     };
   });
 }
 
 // ---------- Decision triggers ----------
 export function buildTriggers(input: {
-  cprCentsLast7: number | null;
+  cplCentsLast7: number | null;
+  currencyCode?: string | null;
   frequencyLast7: number | null;
-  registrationsThisWeek: number | null;
+  leadsThisWeek: number | null;
   daysSinceLaunch: number | null;
   ads: { fatigueScore: number; adName: string }[];
 }): DecisionTrigger[] {
-  const t = CAMPAIGN_TARGETS;
+  const targets = UKTL_CONFIG.targets;
   const triggers: DecisionTrigger[] = [];
+  const cplStatus = classifyCpl(input.cplCentsLast7);
+  const formattedCpl = input.cplCentsLast7 == null
+    ? null
+    : formatMoney(input.cplCentsLast7, input.currencyCode);
 
-  if (input.cprCentsLast7 == null) {
+  if (input.cplCentsLast7 == null) {
     triggers.push({
-      id: "cpr-band",
-      label: "CPR vs target band",
+      id: "cpl-band",
+      label: "CPL target",
       status: "pending",
-      detail: "No registrations yet - waiting for first events.",
+      detail: "CPL is unavailable - waiting for stored lead evidence.",
+    });
+  } else if (cplStatus === "unknown") {
+    triggers.push({
+      id: "cpl-band",
+      label: "CPL target",
+      status: "pending",
+      detail: "No CPL target is configured; historical comparison remains available.",
     });
   } else {
-    const c = input.cprCentsLast7;
-    const lo = t.cpr.week1_2_band.lo;
-    const hi = t.cpr.week1_2_band.hi;
-    if (c <= hi && c >= lo) {
-      triggers.push({ id: "cpr-band", label: "CPR vs target band", status: "ok", detail: `In $${lo / 100}-$${hi / 100} band ($${(c / 100).toFixed(0)}).` });
-    } else if (c < lo) {
-      triggers.push({ id: "cpr-band", label: "CPR vs target band", status: "ok", detail: `Below target band ($${(c / 100).toFixed(0)}). Scaling room.` });
-    } else if (c <= t.cpr.red_floor_cents) {
-      triggers.push({ id: "cpr-band", label: "CPR vs target band", status: "watch", detail: `Above band ($${(c / 100).toFixed(0)} vs $${hi / 100}).` });
-    } else {
-      triggers.push({ id: "cpr-band", label: "CPR vs target band", status: "alert", detail: `Red zone ($${(c / 100).toFixed(0)} > $${t.cpr.red_floor_cents / 100}). Cull losers.` });
-    }
+    const status = cplStatus === "green" ? "ok" : cplStatus === "yellow" ? "watch" : "alert";
+    triggers.push({
+      id: "cpl-band",
+      label: "CPL target",
+      status,
+      detail: `${formattedCpl ?? "CPL available"} is ${cplStatus === "green" ? "inside" : cplStatus === "yellow" ? "within the acceptable" : "above the"} configured range.`,
+    });
   }
 
+  const frequencyRules = UKTL_CONFIG.frequency;
   if (input.frequencyLast7 == null) {
-    triggers.push({ id: "freq", label: "Frequency cap", status: "pending", detail: "Frequency is unavailable for this period." });
-  } else if (input.frequencyLast7 >= 3) {
-    triggers.push({ id: "freq", label: "Frequency cap", status: "alert", detail: `Freq ${input.frequencyLast7.toFixed(2)} - audience saturating, refresh creative.` });
-  } else if (input.frequencyLast7 >= t.freq_alert_threshold) {
-    triggers.push({ id: "freq", label: "Frequency cap", status: "watch", detail: `Freq ${input.frequencyLast7.toFixed(2)} approaching cap.` });
+    triggers.push({ id: "freq", label: "Frequency watch", status: "pending", detail: "Frequency is unavailable for this period." });
+  } else if (input.frequencyLast7 >= frequencyRules.alertAbove) {
+    triggers.push({ id: "freq", label: "Frequency watch", status: "alert", detail: `Frequency ${input.frequencyLast7.toFixed(2)} - audience may be saturating; refresh creative.` });
+  } else if (input.frequencyLast7 >= frequencyRules.watchAbove) {
+    triggers.push({ id: "freq", label: "Frequency watch", status: "watch", detail: `Frequency ${input.frequencyLast7.toFixed(2)} is approaching the configured watch level.` });
   } else {
-    triggers.push({ id: "freq", label: "Frequency cap", status: "ok", detail: `Freq ${input.frequencyLast7.toFixed(2)} healthy.` });
+    triggers.push({ id: "freq", label: "Frequency watch", status: "ok", detail: `Frequency ${input.frequencyLast7.toFixed(2)} is below the configured watch level.` });
   }
 
-  const lp = t.learning_phase.events_per_week_for_exit;
-  if (input.registrationsThisWeek == null) {
-    triggers.push({ id: "learning", label: "Learning phase exit", status: "pending", detail: "Lead events are unavailable for this period." });
-  } else if (input.registrationsThisWeek >= lp) {
-    triggers.push({ id: "learning", label: "Learning phase exit", status: "ok", detail: `${input.registrationsThisWeek}/${lp} events this week. Exited.` });
+  const learningTarget = targets.learningLeadsPerWeek;
+  if (learningTarget == null) {
+    triggers.push({ id: "learning", label: "Learning phase", status: "pending", detail: "No learning lead target is configured." });
+  } else if (input.leadsThisWeek == null) {
+    triggers.push({ id: "learning", label: "Learning phase", status: "pending", detail: "Lead data is unavailable for this period." });
+  } else if (input.leadsThisWeek >= learningTarget) {
+    triggers.push({ id: "learning", label: "Learning phase", status: "ok", detail: `${input.leadsThisWeek}/${learningTarget} leads this week. Target reached.` });
   } else {
     triggers.push({
       id: "learning",
-      label: "Learning phase exit",
-      status: input.registrationsThisWeek >= lp * 0.5 ? "watch" : "pending",
-      detail: `${input.registrationsThisWeek}/${lp} events this week.`,
+      label: "Learning phase",
+      status: input.leadsThisWeek >= learningTarget * 0.5 ? "watch" : "pending",
+      detail: `${input.leadsThisWeek}/${learningTarget} leads this week.`,
     });
   }
 
@@ -211,15 +246,22 @@ export function buildTriggers(input: {
       id: "fatigue",
       label: "Creative fatigue",
       status: "alert",
-      detail: `${fatigued.length} creative(s) fatiguing: ${fatigued.slice(0, 2).map((a) => a.adName).join(", ")}.`,
+      detail: `${fatigued.length} creative(s) may be fatiguing: ${fatigued.slice(0, 2).map((a) => a.adName).join(", ")}.`,
     });
   } else {
-    triggers.push({ id: "fatigue", label: "Creative fatigue", status: "ok", detail: "All creatives healthy." });
+    triggers.push({ id: "fatigue", label: "Creative fatigue", status: "ok", detail: "No creative has crossed the diagnostic fatigue threshold." });
   }
 
   const gate = input.daysSinceLaunch != null ? findCurrentGate(input.daysSinceLaunch) : null;
   if (gate) {
     triggers.push({ id: "gate", label: "Decision gate", status: "pending", detail: gate.label });
+  } else {
+    triggers.push({
+      id: "gate",
+      label: "Decision gate",
+      status: "pending",
+      detail: input.daysSinceLaunch == null ? "Launch date is not configured." : "No decision gates are configured.",
+    });
   }
 
   return triggers;
@@ -230,44 +272,44 @@ export function buildPhase(input: {
   daysSinceLaunch: number | null;
   spendCentsMTD: number | null;
   monthlyBudgetCents: number | null;
-  registrationsThisWeek: number | null;
+  leadsThisWeek: number | null;
 }): CampaignPhase {
   const d = input.daysSinceLaunch;
-  let label = "Pre-launch";
+  let label = "Awaiting launch date";
   let totalDays: number | null = null;
 
   if (d == null) {
-    label = "Pre-launch";
+    label = "Awaiting launch date";
   } else if (d < 7) {
     label = "Week 1 - Learning";
     totalDays = 7;
   } else if (d < 14) {
-    label = "Week 2 - First CPR Read";
+    label = "Week 2 - First lead efficiency read";
     totalDays = 14;
   } else if (d < 21) {
-    label = "Week 3 - Scaling Decision";
+    label = "Week 3 - Scaling decision";
     totalDays = 21;
   } else if (d < 28) {
-    label = "Week 4 - Month 2 Plan";
+    label = "Week 4 - Month 2 plan";
     totalDays = 28;
   } else {
     label = `Month 2+ - Day ${d}`;
-    totalDays = null;
   }
 
   const exitCriteria: { label: string; done: boolean }[] = [];
+  const learningTarget = UKTL_CONFIG.targets.learningLeadsPerWeek;
   exitCriteria.push({
-    label: `${CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit} events/week`,
-    done: input.registrationsThisWeek != null && input.registrationsThisWeek >= CAMPAIGN_TARGETS.learning_phase.events_per_week_for_exit,
+    label: learningTarget == null ? "Learning lead target not set" : `${learningTarget} leads/week`,
+    done: learningTarget != null && input.leadsThisWeek != null && input.leadsThisWeek >= learningTarget,
   });
   exitCriteria.push({
-    label: `$${(CAMPAIGN_TARGETS.learning_phase.real_signal_min_spend_cents / 100).toFixed(0)} cumulative spend`,
-    done: input.spendCentsMTD != null && input.spendCentsMTD >= CAMPAIGN_TARGETS.learning_phase.real_signal_min_spend_cents,
+    label: input.monthlyBudgetCents == null ? "Monthly budget target not set" : "Monthly budget target configured",
+    done: input.monthlyBudgetCents != null,
   });
-  if (d != null) {
+  if (d != null && totalDays != null) {
     exitCriteria.push({
-      label: `${totalDays ?? 7} days elapsed`,
-      done: totalDays != null && d >= totalDays,
+      label: `${totalDays} days elapsed`,
+      done: d >= totalDays,
     });
   }
 

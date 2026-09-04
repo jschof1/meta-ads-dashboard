@@ -176,7 +176,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
 
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
   assert.equal(state.ads[0].verdict, "too_early");
-  assert.match(state.ads[0].verdictReason, /Insufficient stored evidence/);
+  assert.match(state.ads[0].verdictReason, /need 3\+ stored leads/);
 
   const runRow = await db.syncRun.findUnique({ where: { id: result.runId } });
   assert.equal(runRow.status, "SUCCEEDED");
@@ -301,7 +301,7 @@ test("marks a failed refresh without discarding the last successful read model",
   assert.equal(state.meta.lastAttemptStatus, "FAILED");
   assert.equal(state.meta.lastSyncError.includes("provider unavailable"), false);
   assert.match(state.meta.lastSyncError, /redacted provider diagnostic/);
-  assert.equal(state.scorecard.last30.registrations, 2);
+  assert.equal(state.scorecard.last30.leads, 2);
 });
 
 test("loads dashboard state from stored data with no Meta client and reports stale data honestly", async () => {
@@ -315,8 +315,8 @@ test("loads dashboard state from stored data with no Meta client and reports sta
   assert.equal(fresh.meta.syncState, "fresh");
   assert.equal(fresh.meta.currencyCode, "GBP");
   assert.equal(fresh.scorecard.last7.spendCents, 1234);
-  assert.equal(fresh.scorecard.last7.registrations, 2);
-  assert.equal(fresh.funnel.attended, null);
+  assert.equal(fresh.scorecard.last7.leads, 2);
+  assert.equal(fresh.funnel.callsAttended, null);
   assert.equal(fresh.funnel.crmConfigured, false);
   assert.equal(stale.meta.syncState, "stale");
   assert.equal(stale.meta.lastSuccessfulSyncAt, "2026-09-04T12:00:00.000Z");
@@ -452,8 +452,8 @@ test("handles an empty account without manufacturing zero performance", async ()
   assert.equal(state.meta.syncState, "fresh");
   assert.equal(state.scorecard.today.spendCents, null);
   assert.equal(state.scorecard.today.impressions, null);
-  assert.equal(state.scorecard.today.registrations, null);
-  assert.equal(state.scorecard.today.cprCents, null);
+  assert.equal(state.scorecard.today.leads, null);
+  assert.equal(state.scorecard.today.cplCents, null);
   assert.equal(state.trend.length, 30);
   assert.equal(state.trend.at(-1).spendCents, null);
 });
