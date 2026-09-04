@@ -4,7 +4,7 @@ Source of truth: [MASTER_PLAN.md](./MASTER_PLAN.md) and the linked GitHub issues
 
 | PR | Work item | Status | Branch | Dependencies | External gate |
 |---:|---|---|---|---|---|
-| [01](https://github.com/jschof1/meta-ads-dashboard/pull/1) | Secure and reproducible baseline | IN REVIEW | `feat/01-secure-baseline` | — | None |
+| [01](https://github.com/jschof1/meta-ads-dashboard/pull/11) | Secure and reproducible baseline | IN REVIEW | `codex/implement-pr01-from-feat/01-secure-baseline` | — | None |
 | [02](https://github.com/jschof1/meta-ads-dashboard/pull/2) | Production-grade Meta read client | NOT STARTED | `feat/02-meta-read-client` | PR01 | Real Meta credentials for final validation only |
 | [03](https://github.com/jschof1/meta-ads-dashboard/pull/3) | Durable sync and historical data model | NOT STARTED | `feat/03-sync-data-model` | PR02 | Meta credentials for end-to-end validation |
 | [04](https://github.com/jschof1/meta-ads-dashboard/pull/4) | Convert product to UK Trade Leads | NOT STARTED | `feat/04-uktl-domain-model` | PR03 | Targets optional |

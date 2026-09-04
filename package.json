@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types tests/*.test.mjs",
+    "test": "node --import=tsx --test tests/*.test.mjs",
     "postinstall": "prisma generate"
   },
   "dependencies": {
@@ -27,7 +27,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.14.0",
-    "next": "16.2.5",
+    "next": "16.3.4",
     "prisma": "^6.19.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -42,8 +42,9 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.5",
+    "eslint-config-next": "16.3.4",
     "tailwindcss": "^4",
+    "tsx": "4.23.13",
     "typescript": "^5"
   }
 }
