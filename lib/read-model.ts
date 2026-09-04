@@ -25,6 +25,20 @@ const PERIODS: ReportingPeriod[] = [
   "previous30d",
 ];
 
+function configuredAccountId(): string | undefined {
+  const value = process.env.META_AD_ACCOUNT_ID?.trim();
+  if (!value) return undefined;
+  return value.startsWith("act_") ? value : `act_${value}`;
+}
+
+function configuredAttributionKey(): string {
+  const windows = process.env.META_ATTRIBUTION_WINDOWS
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return (windows && windows.length > 0 ? windows : ["7d_click", "1d_view"]).join(",");
+}
+
 type StoredInsight = DailyInsight;
 
 function sumNullable(rows: StoredInsight[], key: keyof StoredInsight): number | null {
@@ -143,10 +157,10 @@ function adRows(
       spendCents: bucket.spendCents,
     });
     const verdict = classifyAd({
-      spendCents: bucket.spendCents ?? 0,
-      registrations: bucket.registrations ?? 0,
+      spendCents: bucket.spendCents,
+      registrations: bucket.registrations,
       cprCents: bucket.cprCents,
-      ctrLink: bucket.ctrLink ?? 0,
+      ctrLink: bucket.ctrLink,
     });
     return {
       adId,
@@ -178,9 +192,12 @@ function adRows(
 export async function buildDashboardState(options: { db?: PrismaClient; now?: Date } = {}): Promise<DashboardState> {
   const db = options.db ?? defaultPrisma;
   const now = options.now ?? new Date();
+  const accountId = configuredAccountId();
+  const attributionKey = configuredAttributionKey();
+  const runScope = { attributionKey, ...(accountId ? { accountId } : {}) };
   const [latestAttempt, latestSuccess, ads, creatives, logs] = await Promise.all([
-    db.syncRun.findFirst({ orderBy: { startedAt: "desc" } }),
-    db.syncRun.findFirst({ where: { status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
+    db.syncRun.findFirst({ where: runScope, orderBy: { startedAt: "desc" } }),
+    db.syncRun.findFirst({ where: { ...runScope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
     db.ad.findMany({ orderBy: { name: "asc" } }),
     db.creative.findMany({ orderBy: { name: "asc" } }),
     db.actionLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
@@ -188,7 +205,6 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
   const timeZone = latestSuccess?.timezoneName || "UTC";
   const todayRange = dateRangeForPeriod("today", timeZone, now);
   const oldestRange = dateRangeForPeriod("previous30d", timeZone, now);
-  const attributionKey = latestSuccess?.attributionKey;
   const storedRows = latestSuccess
     ? await db.dailyInsight.findMany({
       where: {
@@ -198,8 +214,8 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
       orderBy: [{ date: "asc" }, { level: "asc" }, { entityId: "asc" }],
     })
     : [];
-  const accountId = latestSuccess?.accountId ?? null;
-  const accountRows = storedRows.filter((row) => row.level === "account" && row.entityId === accountId);
+  const storedAccountId = latestSuccess?.accountId ?? null;
+  const accountRows = storedRows.filter((row) => row.level === "account" && row.entityId === storedAccountId);
   const adInsightRows = storedRows.filter((row) => row.level === "ad" && row.date >= dateRangeForPeriod("30d", timeZone, now).since);
   const rowsFor = (period: ReportingPeriod) => {
     const range = dateRangeForPeriod(period, timeZone, now);
@@ -230,7 +246,7 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
   const adsState = adRows(adInsightRows, ads, creatives, todayRange.until);
   return {
     meta: {
-      adAccountId: accountId,
+      adAccountId: storedAccountId,
       campaignId: process.env.META_CAMPAIGN_ID ?? null,
       launchDate: process.env.META_CAMPAIGN_LAUNCH_DATE || null,
       daysSinceLaunch: dsl,
@@ -241,7 +257,9 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
       lastSuccessfulSyncAt: latestSuccessAt,
       lastAttemptAt: latestAttemptAt,
       lastAttemptStatus: latestAttempt?.status ?? null,
-      lastSyncError: latestAttempt?.error ?? null,
+      lastSyncError: latestAttempt?.status === "FAILED"
+        ? "Meta sync failed; see server logs for the redacted provider diagnostic."
+        : null,
       syncState: syncState(latestAttempt, latestSuccess, lastSuccessfulAgeMs),
     },
     scorecard: {

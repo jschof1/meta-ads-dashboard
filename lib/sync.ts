@@ -15,7 +15,8 @@ import {
   type MetaResultEventDiagnostic,
   type MetaClient,
 } from "@/lib/meta";
-import { chooseSyncRange, isValidTimeZone, type SyncRange } from "@/lib/periods";
+import { chooseSyncRange, isDateInRange, isValidTimeZone, type SyncRange } from "@/lib/periods";
+import { safeJson } from "@/lib/safe-json";
 
 export type SyncTrigger = "cron" | "manual";
 
@@ -104,18 +105,18 @@ type EntityDiscovery = {
 };
 
 const INSIGHT_LEVELS: MetaInsightLevel[] = ["account", "campaign", "adset", "ad"];
+const SYNC_TRANSACTION_TIMEOUT_MS = 45_000;
 
 function json(value: unknown, fallback = "{}"): string {
-  try {
-    const encoded = JSON.stringify(value);
-    return encoded === undefined ? fallback : encoded;
-  } catch {
-    return fallback;
-  }
+  return safeJson(value, fallback);
 }
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function hasProviderFields(value: object): boolean {
+  return Object.entries(value).some(([key, item]) => key !== "id" && key !== "raw" && item != null);
 }
 
 function canonicalAccountId(value: string): string {
@@ -136,7 +137,11 @@ function safeErrorMessage(error: unknown): string {
     process.env.ANTHROPIC_API_KEY,
     process.env.HIGHLEVEL_PRIVATE_INTEGRATION_TOKEN,
   ].filter((secret): secret is string => Boolean(secret));
-  return secrets.reduce((message, secret) => message.replaceAll(secret, "[REDACTED]"), source).slice(0, 2_000);
+  return secrets
+    .reduce((message, secret) => message.replaceAll(secret, "[REDACTED]"), source)
+    .replace(/(access[_-]?token|authorization|api[_-]?key|secret)=([^&\s]+)/gi, "$1=[REDACTED]")
+    .replace(/Bearer\s+[^\s]+/gi, "Bearer [REDACTED]")
+    .slice(0, 2_000);
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -163,7 +168,7 @@ function creativeFormat(creative: MetaCreative): string | null {
 function entityIdFor(level: MetaInsightLevel, row: MetaInsightRow, accountId: string): string | null {
   switch (level) {
     case "account":
-      return row.account_id || accountId;
+      return row.account_id ? canonicalAccountId(row.account_id) : accountId;
     case "campaign":
       return row.campaign_id || null;
     case "adset":
@@ -190,11 +195,12 @@ function normalizeInsight(
   accountId: string,
   currencyCode: string | null,
   attributionKey: string,
+  range: SyncRange,
   client: Pick<SyncClient, "diagnoseResultEvents">,
 ): NormalizedDailyInsight | null {
   const date = optionalString(row.date_start);
   const entityId = entityIdFor(level, row, accountId);
-  if (!date || !entityId) return null;
+  if (!date || !isDateInRange(date, range) || (row.date_stop !== undefined && row.date_stop !== date) || !entityId) return null;
 
   const spendMinorUnits = toOptionalCents(row.spend);
   const impressions = toOptionalInt(row.impressions);
@@ -242,6 +248,7 @@ function normalizeInsights(
   accountId: string,
   currencyCode: string | null,
   attributionKey: string,
+  range: SyncRange,
   insights: Partial<Record<MetaInsightLevel, MetaInsightRow[]>>,
   client: Pick<SyncClient, "diagnoseResultEvents">,
 ): { rows: NormalizedDailyInsight[]; skipped: number; missingLeadRows: number; candidateActionTypes: string[] } {
@@ -257,7 +264,7 @@ function normalizeInsights(
         missingLeadRows += 1;
         diagnostic.candidateActionTypes.forEach((actionType) => candidates.add(actionType));
       }
-      const row = normalizeInsight(raw, level, accountId, currencyCode, attributionKey, client);
+      const row = normalizeInsight(raw, level, accountId, currencyCode, attributionKey, range, client);
       if (!row) {
         skipped += 1;
         continue;
@@ -400,6 +407,46 @@ async function discover(
   return { account, campaigns, adSets, ads, creatives };
 }
 
+function startLeaseHeartbeat(
+  db: PrismaClient,
+  runId: string,
+  lockOwner: string,
+  leaseSeconds: number,
+): { stop: () => Promise<void> } {
+  const intervalMs = Math.max(1_000, Math.min(30_000, Math.floor(leaseSeconds * 1_000 / 3)));
+  let stopped = false;
+  let inFlight: Promise<void> | null = null;
+
+  async function renew(): Promise<void> {
+    if (stopped || inFlight) return inFlight ?? Promise.resolve();
+    inFlight = (async () => {
+      try {
+        const now = new Date();
+        const result = await db.syncRun.updateMany({
+          where: { id: runId, status: "RUNNING", lockOwner },
+          data: { lockExpiresAt: new Date(now.getTime() + leaseSeconds * 1_000) },
+        });
+        if (result.count !== 1) console.error("Meta sync lease renewal was rejected");
+      } catch (error) {
+        console.error("Meta sync lease renewal failed:", safeErrorMessage(error));
+      }
+    })().finally(() => {
+      inFlight = null;
+    });
+    await inFlight;
+  }
+
+  const timer = setInterval(() => { void renew(); }, intervalMs);
+  timer.unref?.();
+  return {
+    async stop() {
+      stopped = true;
+      clearInterval(timer);
+      if (inFlight) await inFlight;
+    },
+  };
+}
+
 function insightRange(range: SyncRange): MetaInsightDateRange {
   return { since: range.since, until: range.until };
 }
@@ -420,13 +467,23 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
     now,
     leaseSeconds,
   });
+  // Deterministic tests inject a clock and do not need a live timer. In
+  // production the heartbeat starts before any provider work and remains
+  // active through the database transaction so an overlapping invocation
+  // cannot reclaim a slow run.
+  const heartbeat = !options.clock && run.lockOwner
+    ? startLeaseHeartbeat(db, run.id, run.lockOwner, leaseSeconds)
+    : null;
 
   try {
     const previousSuccess = await db.syncRun.findFirst({
-      where: { accountId, status: "SUCCEEDED" },
+      where: { accountId, status: "SUCCEEDED", attributionKey },
       orderBy: { finishedAt: "desc" },
     });
     const account = await client.getAccount();
+    if (!account.id || canonicalAccountId(account.id) !== accountId) {
+      throw new Error("Meta account response did not match the configured account");
+    }
     const accountTimeZone = account.timezone_name || "UTC";
     const validAccountTimeZone = isValidTimeZone(accountTimeZone);
     const timeZone = validAccountTimeZone ? accountTimeZone : "UTC";
@@ -452,19 +509,22 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       },
     });
 
-    const discoveryPromise = discover(client, account);
+    // Metadata discovery is kept inside the same guarded flow as Insights.
+    // Starting an unobserved promise here would risk an unhandled rejection if
+    // an Insights request failed before the metadata promise was awaited.
+    const discovery = await discover(client, account);
     const insightEntries: Array<readonly [MetaInsightLevel, MetaInsightRow[]]> = [];
     for (const level of INSIGHT_LEVELS) {
       // Insights are intentionally paced by level. Meta documents that many
       // simultaneous Insights queries are more likely to hit throttling.
       insightEntries.push([level, await client.getDailyInsights(level, requestRange)]);
     }
-    const discovery = await discoveryPromise;
     const insightRows = Object.fromEntries(insightEntries) as Partial<Record<MetaInsightLevel, MetaInsightRow[]>>;
     const normalized = normalizeInsights(
       accountId,
       optionalString(account.currency),
       attributionKey,
+      range,
       insightRows,
       client,
     );
@@ -487,6 +547,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
 
     await db.$transaction(async (tx) => {
       for (const campaign of discovery.campaigns) {
+        const campaignHasProviderFields = hasProviderFields(campaign);
         await tx.campaign.upsert({
           where: { metaId: campaign.id },
           create: {
@@ -500,17 +561,18 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             raw: json(campaign),
           },
           update: {
-            name: campaign.name || campaign.id,
-            objective: optionalString(campaign.objective),
-            configuredStatus: optionalString(campaign.status),
-            effectiveStatus: optionalString(campaign.effective_status),
-            startDate: optionalString(campaign.start_time),
-            stopDate: optionalString(campaign.stop_time),
-            raw: json(campaign),
+            ...(campaignHasProviderFields ? { raw: json(campaign) } : {}),
+            ...(campaign.name != null ? { name: optionalString(campaign.name) ?? campaign.id } : {}),
+            ...(campaign.objective != null ? { objective: optionalString(campaign.objective) } : {}),
+            ...(campaign.status != null ? { configuredStatus: optionalString(campaign.status) } : {}),
+            ...(campaign.effective_status != null ? { effectiveStatus: optionalString(campaign.effective_status) } : {}),
+            ...(campaign.start_time != null ? { startDate: optionalString(campaign.start_time) } : {}),
+            ...(campaign.stop_time != null ? { stopDate: optionalString(campaign.stop_time) } : {}),
           },
         });
       }
       for (const adSet of discovery.adSets) {
+        const adSetHasProviderFields = hasProviderFields(adSet);
         await tx.adSet.upsert({
           where: { metaId: adSet.id },
           create: {
@@ -533,23 +595,26 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             raw: json(adSet),
           },
           update: {
-            campaignMetaId: optionalString(adSet.campaign_id),
-            name: adSet.name || adSet.id,
-            configuredStatus: optionalString(adSet.status),
-            effectiveStatus: optionalString(adSet.effective_status),
-            optimisationGoal: optionalString(adSet.optimization_goal),
-            billingEvent: optionalString(adSet.billing_event),
-            dailyBudgetMinor: toOptionalInt(adSet.daily_budget),
-            lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget),
-            startDate: optionalString(adSet.start_time),
-            endDate: optionalString(adSet.end_time),
-            learningStage: learningStage(adSet.learning_stage_info),
-            learningStageInfo: json(adSet.learning_stage_info),
-            raw: json(adSet),
+            ...(adSetHasProviderFields ? { raw: json(adSet) } : {}),
+            ...(adSet.campaign_id != null ? { campaignMetaId: optionalString(adSet.campaign_id) } : {}),
+            ...(adSet.name != null ? { name: optionalString(adSet.name) ?? adSet.id } : {}),
+            ...(adSet.status != null ? { configuredStatus: optionalString(adSet.status) } : {}),
+            ...(adSet.effective_status != null ? { effectiveStatus: optionalString(adSet.effective_status) } : {}),
+            ...(adSet.optimization_goal != null ? { optimisationGoal: optionalString(adSet.optimization_goal) } : {}),
+            ...(adSet.billing_event != null ? { billingEvent: optionalString(adSet.billing_event) } : {}),
+            ...(adSet.daily_budget != null ? { dailyBudgetMinor: toOptionalInt(adSet.daily_budget) } : {}),
+            ...(adSet.lifetime_budget != null ? { lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget) } : {}),
+            ...(adSet.start_time != null ? { startDate: optionalString(adSet.start_time) } : {}),
+            ...(adSet.end_time != null ? { endDate: optionalString(adSet.end_time) } : {}),
+            ...(adSet.learning_stage_info != null ? {
+              learningStage: learningStage(adSet.learning_stage_info),
+              learningStageInfo: json(adSet.learning_stage_info),
+            } : {}),
           },
         });
       }
       for (const ad of discovery.ads) {
+        const adHasProviderFields = hasProviderFields(ad);
         await tx.ad.upsert({
           where: { metaId: ad.id },
           create: {
@@ -563,17 +628,28 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             raw: json(ad),
           },
           update: {
-            campaignMetaId: optionalString(ad.campaign_id),
-            adSetMetaId: optionalString(ad.adset_id),
-            name: ad.name || ad.id,
-            configuredStatus: optionalString(ad.status),
-            effectiveStatus: optionalString(ad.effective_status),
-            creativeMetaId: optionalString(ad.creative_id),
-            raw: json(ad),
+            ...(adHasProviderFields ? { raw: json(ad) } : {}),
+            ...(ad.campaign_id != null ? { campaignMetaId: optionalString(ad.campaign_id) } : {}),
+            ...(ad.adset_id != null ? { adSetMetaId: optionalString(ad.adset_id) } : {}),
+            ...(ad.name != null ? { name: optionalString(ad.name) ?? ad.id } : {}),
+            ...(ad.status != null ? { configuredStatus: optionalString(ad.status) } : {}),
+            ...(ad.effective_status != null ? { effectiveStatus: optionalString(ad.effective_status) } : {}),
+            ...(ad.creative_id != null ? { creativeMetaId: optionalString(ad.creative_id) } : {}),
           },
         });
       }
       for (const creative of discovery.creatives) {
+        const creativeHasProviderFields = hasProviderFields(creative);
+        const destinationUrl = creative.object_url != null || creative.link_url != null
+          ? optionalString(creative.object_url) ?? optionalString(creative.link_url)
+          : undefined;
+        const hasFormatFields = [
+          creative.video_id,
+          creative.image_hash,
+          creative.image_url,
+          creative.thumbnail_url,
+          creative.asset_feed_spec,
+        ].some((value) => value != null);
         await tx.creative.upsert({
           where: { metaId: creative.id },
           create: {
@@ -587,29 +663,42 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             imageUrl: optionalString(creative.image_url),
             videoId: optionalString(creative.video_id),
             objectId: optionalString(creative.object_id),
-            destinationUrl: optionalString(creative.object_url) ?? optionalString(creative.link_url),
+            destinationUrl: destinationUrl ?? null,
             urlTags: optionalString(creative.url_tags),
             format: creativeFormat(creative),
             raw: json(creative.raw ?? creative),
           },
           update: {
-            name: optionalString(creative.name),
-            title: optionalString(creative.title),
-            body: optionalString(creative.body),
-            callToActionType: optionalString(creative.call_to_action_type),
-            thumbnailUrl: optionalString(creative.thumbnail_url),
-            imageHash: optionalString(creative.image_hash),
-            imageUrl: optionalString(creative.image_url),
-            videoId: optionalString(creative.video_id),
-            objectId: optionalString(creative.object_id),
-            destinationUrl: optionalString(creative.object_url) ?? optionalString(creative.link_url),
-            urlTags: optionalString(creative.url_tags),
-            format: creativeFormat(creative),
-            raw: json(creative.raw ?? creative),
+            ...(creativeHasProviderFields ? { raw: json(creative.raw ?? creative) } : {}),
+            ...(creative.name != null ? { name: optionalString(creative.name) } : {}),
+            ...(creative.title != null ? { title: optionalString(creative.title) } : {}),
+            ...(creative.body != null ? { body: optionalString(creative.body) } : {}),
+            ...(creative.call_to_action_type != null ? { callToActionType: optionalString(creative.call_to_action_type) } : {}),
+            ...(creative.thumbnail_url != null ? { thumbnailUrl: optionalString(creative.thumbnail_url) } : {}),
+            ...(creative.image_hash != null ? { imageHash: optionalString(creative.image_hash) } : {}),
+            ...(creative.image_url != null ? { imageUrl: optionalString(creative.image_url) } : {}),
+            ...(creative.video_id != null ? { videoId: optionalString(creative.video_id) } : {}),
+            ...(creative.object_id != null ? { objectId: optionalString(creative.object_id) } : {}),
+            ...(destinationUrl !== undefined ? { destinationUrl } : {}),
+            ...(creative.url_tags != null ? { urlTags: optionalString(creative.url_tags) } : {}),
+            ...(hasFormatFields ? { format: creativeFormat(creative) } : {}),
           },
         });
       }
       for (const insight of normalized.rows) {
+        const hasMetricEvidence = [
+          insight.spendMinorUnits,
+          insight.impressions,
+          insight.reach,
+          insight.clicks,
+          insight.linkClicks,
+          insight.leads,
+          insight.cplMinorUnits,
+          insight.cpcMinorUnits,
+          insight.cpmMinorUnits,
+          insight.ctrLink,
+          insight.frequency,
+        ].some((value) => value !== null);
         await tx.dailyInsight.upsert({
           where: {
             date_level_entityId_attributionKey: {
@@ -624,33 +713,35 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             syncRunId: run.id,
           },
           update: {
-            currencyCode: insight.currencyCode,
-            spendMinorUnits: insight.spendMinorUnits,
-            impressions: insight.impressions,
-            reach: insight.reach,
-            clicks: insight.clicks,
-            linkClicks: insight.linkClicks,
-            leads: insight.leads,
-            cplMinorUnits: insight.cplMinorUnits,
-            cpcMinorUnits: insight.cpcMinorUnits,
-            cpmMinorUnits: insight.cpmMinorUnits,
-            ctrLink: insight.ctrLink,
-            frequency: insight.frequency,
-            resultActionType: insight.resultActionType,
-            rawActions: insight.rawActions,
-            raw: insight.raw,
+            ...(insight.currencyCode !== null ? { currencyCode: insight.currencyCode } : {}),
+            ...(insight.spendMinorUnits !== null ? { spendMinorUnits: insight.spendMinorUnits } : {}),
+            ...(insight.impressions !== null ? { impressions: insight.impressions } : {}),
+            ...(insight.reach !== null ? { reach: insight.reach } : {}),
+            ...(insight.clicks !== null ? { clicks: insight.clicks } : {}),
+            ...(insight.linkClicks !== null ? { linkClicks: insight.linkClicks } : {}),
+            ...(insight.leads !== null ? { leads: insight.leads } : {}),
+            ...(insight.cplMinorUnits !== null ? { cplMinorUnits: insight.cplMinorUnits } : {}),
+            ...(insight.cpcMinorUnits !== null ? { cpcMinorUnits: insight.cpcMinorUnits } : {}),
+            ...(insight.cpmMinorUnits !== null ? { cpmMinorUnits: insight.cpmMinorUnits } : {}),
+            ...(insight.ctrLink !== null ? { ctrLink: insight.ctrLink } : {}),
+            ...(insight.frequency !== null ? { frequency: insight.frequency } : {}),
+            ...(insight.resultActionType !== null ? { resultActionType: insight.resultActionType } : {}),
+            ...(hasMetricEvidence || insight.rawActions !== "null" && insight.rawActions !== "[]"
+              ? { rawActions: insight.rawActions, raw: insight.raw }
+              : {}),
             observedAt: now,
             syncRunId: run.id,
           },
         });
       }
+      const completedAt = options.clock?.() ?? new Date();
       const committed = await tx.syncRun.updateMany({
         where: {
           id: run.id,
           status: "RUNNING",
           lockKey: accountId,
           lockOwner: run.lockOwner,
-          lockExpiresAt: { gt: options.clock?.() ?? new Date() },
+          lockExpiresAt: { gt: completedAt },
         },
         data: {
           accountId,
@@ -663,7 +754,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
           requestedUntil: range.until,
           initialBackfill: range.initialBackfill,
           status: "SUCCEEDED",
-          finishedAt: now,
+          finishedAt: completedAt,
           rowsFetched,
           rowsWritten,
           warning,
@@ -676,7 +767,8 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
         },
       });
       if (committed.count !== 1) throw new SyncLeaseLostError();
-    });
+    }, { maxWait: 5_000, timeout: SYNC_TRANSACTION_TIMEOUT_MS });
+    await heartbeat?.stop();
 
     return {
       runId: run.id,
@@ -689,12 +781,14 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       warning,
     };
   } catch (error) {
+    await heartbeat?.stop();
+    const finishedAt = options.clock?.() ?? new Date();
     const diagnostics = client.getDiagnostics();
     await markFailed(
       db,
       run.id,
       run.lockOwner,
-      now,
+      finishedAt,
       error,
       diagnostics.traceId,
       json(diagnostics),

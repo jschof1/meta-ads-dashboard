@@ -11,11 +11,24 @@ export async function GET(request: Request) {
 
   let database: "reachable" | "unreachable" = "unreachable";
   let lastSyncAt: string | null = null;
+  let lastAttemptAt: string | null = null;
+  let syncStatus: "completed" | "running" | "failed" | "never" = "never";
   try {
     await prisma.$queryRaw`SELECT 1`;
     database = "reachable";
-    const snapshot = await prisma.snapshot.findFirst({ orderBy: { capturedAt: "desc" }, select: { capturedAt: true } });
-    lastSyncAt = snapshot?.capturedAt.toISOString() ?? null;
+    const [latestAttempt, latestSuccess] = await Promise.all([
+      prisma.syncRun.findFirst({ orderBy: { startedAt: "desc" }, select: { status: true, startedAt: true, finishedAt: true } }),
+      prisma.syncRun.findFirst({ where: { status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } }),
+    ]);
+    lastSyncAt = latestSuccess?.finishedAt?.toISOString() ?? null;
+    lastAttemptAt = latestAttempt?.finishedAt?.toISOString() ?? latestAttempt?.startedAt?.toISOString() ?? null;
+    syncStatus = latestAttempt?.status === "RUNNING"
+      ? "running"
+      : latestAttempt?.status === "FAILED"
+        ? "failed"
+        : lastSyncAt
+          ? "completed"
+          : "never";
   } catch {
     // Health output intentionally omits exception details and connection information.
   }
@@ -24,6 +37,6 @@ export async function GET(request: Request) {
     status: database === "reachable" ? "ok" : "degraded",
     configuration: getSafeEnvironmentStatus(),
     database,
-    sync: { status: lastSyncAt ? "completed" : "never", lastSyncAt },
+    sync: { status: syncStatus, lastSyncAt, lastAttemptAt },
   }, { status: database === "reachable" ? 200 : 503 });
 }

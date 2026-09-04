@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { Activity, LogOut, RefreshCw, Sun, Moon } from "lucide-react";
 import { useRouter } from "next/navigation";
 
+type SyncState = "never" | "running" | "fresh" | "stale" | "failed";
+
 function formatAge(ms: number | null): string {
   if (ms == null) return "never";
   const s = Math.floor(ms / 1000);
@@ -19,6 +21,8 @@ export function TopBar() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastSyncIso, setLastSyncIso] = useState<string | null>(null);
   const [syncAgeMs, setSyncAgeMs] = useState<number | null>(null);
+  const [syncState, setSyncState] = useState<SyncState>("never");
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
 
   async function refresh() {
@@ -28,8 +32,17 @@ export function TopBar() {
       const json = await res.json();
       if (res.ok) {
         setLastSyncIso(new Date().toISOString());
+        setSyncState("fresh");
+        setSyncError(null);
         window.dispatchEvent(new CustomEvent("ads-dashboard:refresh", { detail: json }));
       } else {
+        if (res.status === 409) {
+          setSyncState("running");
+          setSyncError("A Meta sync is already running");
+        } else {
+          setSyncState("failed");
+          setSyncError(typeof json?.error === "string" ? json.error : "Meta sync failed");
+        }
         console.error("Refresh failed:", json);
       }
     } finally {
@@ -47,7 +60,11 @@ export function TopBar() {
   useEffect(() => {
     fetch("/api/dashboard/state")
       .then((r) => r.json())
-      .then((s) => s?.meta?.lastSyncAt && setLastSyncIso(s.meta.lastSyncAt))
+      .then((s) => {
+        if (s?.meta?.lastSuccessfulSyncAt) setLastSyncIso(s.meta.lastSuccessfulSyncAt);
+        if (s?.meta?.syncState) setSyncState(s.meta.syncState as SyncState);
+        if (s?.meta?.lastSyncError) setSyncError(s.meta.lastSyncError);
+      })
       .catch(() => {});
   }, []);
 
@@ -89,7 +106,17 @@ export function TopBar() {
     localStorage.setItem("ads-theme", next);
   }
 
-  const isFresh = syncAgeMs != null && syncAgeMs < 5 * 60 * 1000;
+  const isFresh = syncState === "fresh" && syncAgeMs != null && syncAgeMs < 5 * 60 * 1000;
+  const statusText = syncState === "failed"
+    ? "Sync failed"
+    : syncState === "stale"
+      ? `Stale · ${formatAge(syncAgeMs)}`
+      : syncState === "running"
+        ? "Sync running"
+        : syncState === "never"
+          ? "Never synced"
+          : `Synced ${formatAge(syncAgeMs)}`;
+  const statusColor = syncState === "failed" ? "bg-destructive" : isFresh ? "bg-emerald-500" : "bg-amber-500";
 
   return (
     <header className="border-b border-border sticky top-0 z-10 bg-background/90 backdrop-blur">
@@ -103,10 +130,10 @@ export function TopBar() {
         </div>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">
-            <span className={`relative inline-flex h-2 w-2 rounded-full ${isFresh ? "bg-emerald-500" : "bg-amber-500"}`}>
+            <span className={`relative inline-flex h-2 w-2 rounded-full ${statusColor}`} title={syncError ?? undefined}>
               {isFresh && <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-60" />}
             </span>
-            <span>Synced {formatAge(syncAgeMs)}</span>
+            <span title={syncError ?? undefined}>{statusText}</span>
           </div>
           <button
             onClick={toggleTheme}

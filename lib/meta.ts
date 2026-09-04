@@ -12,6 +12,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_BACKOFF_MS = 250;
 const DEFAULT_BACKOFF_CAP_MS = 2_000;
+const DEFAULT_MAX_RETRY_AFTER_MS = 10_000;
 
 type JsonObject = Record<string, unknown>;
 type Fetcher = typeof fetch;
@@ -67,6 +68,9 @@ export type MetaDiagnostics = {
   subcode?: number;
   type?: string;
   retryAfterMs?: number;
+  requestCount?: number;
+  traceIds?: string[];
+  statuses?: number[];
 };
 
 export type MetaRequestResult<T> = {
@@ -98,6 +102,7 @@ export type MetaClientOptions = {
   fetchImpl?: Fetcher;
   sleep?: Sleeper;
   random?: () => number;
+  maxRetryAfterMs?: number;
 };
 
 export class MetaConfigurationError extends Error {
@@ -197,9 +202,9 @@ export type MetaAdSet = {
 
 export type AdSummary = {
   id: string;
-  name: string;
-  status: string;
-  effective_status: string;
+  name?: string;
+  status?: string;
+  effective_status?: string;
   campaign_id?: string;
   adset_id?: string;
   creative_id?: string;
@@ -433,7 +438,9 @@ export class MetaClient {
   private readonly sleep: Sleeper;
   private readonly random: () => number;
   private readonly primaryResultActionType?: string;
+  private readonly maxRetryAfterMs: number;
   private lastDiagnostics: MetaDiagnostics = { attempts: 0 };
+  private diagnosticsHistory: MetaDiagnostics[] = [];
 
   constructor(options: MetaClientOptions = {}) {
     const configuredToken = options.token ?? process.env.META_MARKETING_TOKEN;
@@ -457,6 +464,13 @@ export class MetaClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.sleep = options.sleep ?? sleep;
     this.random = options.random ?? Math.random;
+    this.maxRetryAfterMs = Math.max(0, options.maxRetryAfterMs ?? DEFAULT_MAX_RETRY_AFTER_MS);
+  }
+
+  private recordDiagnostics(diagnostics: MetaDiagnostics): void {
+    this.lastDiagnostics = diagnostics;
+    this.diagnosticsHistory.push({ ...diagnostics });
+    if (this.diagnosticsHistory.length > 100) this.diagnosticsHistory.shift();
   }
 
   private url(path: string, params: Record<string, string | undefined>): URL {
@@ -494,7 +508,6 @@ export class MetaClient {
           status: response.status,
           retryAfterMs: parseRetryAfter(response.headers.get("retry-after")),
         };
-        this.lastDiagnostics = diagnostics;
         const body = await readBody(response);
         const error = graphError(body);
         if (!response.ok || error) {
@@ -503,6 +516,7 @@ export class MetaClient {
           diagnostics.code = code;
           diagnostics.subcode = numberValue(error?.error_subcode);
           diagnostics.type = stringValue(error?.type);
+          this.recordDiagnostics(diagnostics);
           const kind: MetaErrorKind = isAuthFailure(code, response.status)
             ? "auth"
             : isRateLimit(code, response.status)
@@ -530,6 +544,7 @@ export class MetaClient {
           throw apiError;
         }
         if (!isObject(body)) {
+          this.recordDiagnostics(diagnostics);
           throw new MetaApiError("Meta Graph API returned a malformed JSON response", {
             kind: "response",
             status: response.status,
@@ -537,6 +552,7 @@ export class MetaClient {
             diagnostics,
           });
         }
+        this.recordDiagnostics(diagnostics);
         return {
           data: ("data" in body ? body.data : body) as T,
           paging: parsePaging(body.paging),
@@ -554,7 +570,7 @@ export class MetaClient {
           controller.signal.aborted ? `Meta Graph API request timed out after ${this.timeoutMs}ms` : "Meta Graph API network request failed",
           { kind: "transient", transient: true, diagnostics: { attempts: attempt } },
         );
-        this.lastDiagnostics = networkError.diagnostics;
+        this.recordDiagnostics(networkError.diagnostics);
         if (this.shouldRetry(networkError, attempt)) {
           await this.waitBeforeRetry(networkError, attempt);
           continue;
@@ -572,7 +588,9 @@ export class MetaClient {
 
   private async waitBeforeRetry(error: MetaApiError, attempt: number): Promise<void> {
     const exponential = Math.min(this.backoffCapMs, this.backoffMs * 2 ** (attempt - 1));
-    await this.sleep(error.diagnostics.retryAfterMs ?? Math.round(exponential + exponential * 0.2 * this.random()));
+    const fallback = Math.round(exponential + exponential * 0.2 * this.random());
+    const retryAfter = error.diagnostics.retryAfterMs;
+    await this.sleep(retryAfter == null ? fallback : Math.min(retryAfter, this.maxRetryAfterMs));
   }
 
   async request<T>(path: string, params: Record<string, string | undefined> = {}): Promise<MetaRequestResult<T>> {
@@ -732,7 +750,13 @@ export class MetaClient {
   }
 
   getDiagnostics(): MetaDiagnostics {
-    return this.lastDiagnostics;
+    if (this.diagnosticsHistory.length === 0) return this.lastDiagnostics;
+    return {
+      ...this.lastDiagnostics,
+      requestCount: this.diagnosticsHistory.length,
+      traceIds: Array.from(new Set(this.diagnosticsHistory.flatMap((item) => item.traceId ? [item.traceId] : []))),
+      statuses: Array.from(new Set(this.diagnosticsHistory.flatMap((item) => item.status ? [item.status] : []))),
+    };
   }
 
   diagnoseResultEvents(row: MetaInsightRow): MetaResultEventDiagnostic {
@@ -787,9 +811,9 @@ function toCreative(creative: RawCreative): MetaCreative {
 function toAdSummary(ad: RawAd): AdSummary {
   return {
     id: ad.id ?? "",
-    name: ad.name ?? ad.id ?? "",
-    status: ad.status ?? "UNKNOWN",
-    effective_status: ad.effective_status ?? "UNKNOWN",
+    name: ad.name,
+    status: ad.status,
+    effective_status: ad.effective_status,
     campaign_id: ad.campaign_id,
     adset_id: ad.adset_id,
     creative_id: ad.creative?.id,
@@ -849,12 +873,13 @@ function actionRows(row: MetaInsightRow): MetaInsightAction[] {
   if (!Array.isArray(row.actions)) return [];
   return row.actions.flatMap((action) => {
     if (!isObject(action) || typeof action.action_type !== "string") return [];
-    const value = typeof action.value === "number" && Number.isFinite(action.value)
-      ? String(action.value)
-      : typeof action.value === "string"
-        ? action.value
-        : "0";
-    return [{ action_type: action.action_type, value }];
+    const value = typeof action.value === "number"
+      ? action.value
+      : typeof action.value === "string" && action.value.trim() !== ""
+        ? Number(action.value)
+        : Number.NaN;
+    if (!Number.isFinite(value) || value < 0) return [];
+    return [{ action_type: action.action_type, value: String(value) }];
   });
 }
 
@@ -924,34 +949,34 @@ export function extractRegistrations(row: MetaInsightRow): number {
   return diagnostic.value ?? 0;
 }
 
-export function toCents(money: string | undefined | null): number {
+export function toCents(money: string | number | undefined | null): number {
   return toOptionalCents(money) ?? 0;
 }
 
-export function toFloat(value: string | undefined | null): number {
+export function toFloat(value: string | number | undefined | null): number {
   return toOptionalFloat(value) ?? 0;
 }
 
-export function toInt(value: string | undefined | null): number {
+export function toInt(value: string | number | undefined | null): number {
   return toOptionalInt(value) ?? 0;
 }
 
 export function toOptionalCents(money: string | number | undefined | null): number | null {
   if (money === undefined || money === null || String(money).trim() === "") return null;
-  const number = typeof money === "number" ? money : Number.parseFloat(money);
-  return Number.isFinite(number) ? Math.round(number * 100) : null;
+  const number = typeof money === "number" ? money : Number(money);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) : null;
 }
 
 export function toOptionalFloat(value: string | number | undefined | null): number | null {
   if (value === undefined || value === null || String(value).trim() === "") return null;
-  const number = typeof value === "number" ? value : Number.parseFloat(value);
-  return Number.isFinite(number) ? number : null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 export function toOptionalInt(value: string | number | undefined | null): number | null {
   if (value === undefined || value === null || String(value).trim() === "") return null;
-  const number = typeof value === "number" ? value : Number.parseInt(value, 10);
-  return Number.isFinite(number) ? number : null;
+  const number = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 export function createMetaClient(options: MetaClientOptions = {}): MetaClient {

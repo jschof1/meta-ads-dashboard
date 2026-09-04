@@ -5,10 +5,11 @@ import { requireApiSession } from "@/lib/api-auth";
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
-type AdInput = { adName?: string; cprCents?: number | null; spendCents?: number; registrations?: number; ctrLink?: number };
+type AdInput = { adName?: string; cprCents?: number | null; spendCents?: number | null; registrations?: number | null; ctrLink?: number | null };
 
 function fmtMoney(cents: number | undefined | null) {
-  if (!cents) return "$0";
+  if (cents == null) return "n/a";
+  if (cents === 0) return "$0.00";
   return `$${(cents / 100).toFixed(2)}`;
 }
 
@@ -34,8 +35,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No winning ads yet to extract DNA from. Wait for more spend." }, { status: 400 });
   }
 
-  const winnerLines = winners.map((a) => `- ${a.adName} | CPR ${a.cprCents != null ? fmtMoney(a.cprCents) : "n/a"} | CTR ${((a.ctrLink ?? 0) * 100).toFixed(2)}% | spend ${fmtMoney(a.spendCents)} | ${a.registrations} regs`).join("\n");
-  const loserLines = losers.map((a) => `- ${a.adName} | CPR ${a.cprCents != null ? fmtMoney(a.cprCents) : "n/a"} | CTR ${((a.ctrLink ?? 0) * 100).toFixed(2)}% | spend ${fmtMoney(a.spendCents)}`).join("\n");
+  const winnerLines = winners.map((a) => `- ${a.adName ?? "Unnamed ad"} | CPR ${fmtMoney(a.cprCents)} | CTR ${a.ctrLink != null ? (a.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(a.spendCents)} | ${a.registrations == null ? "n/a" : a.registrations} regs`).join("\n");
+  const loserLines = losers.map((a) => `- ${a.adName ?? "Unnamed ad"} | CPR ${fmtMoney(a.cprCents)} | CTR ${a.ctrLink != null ? (a.ctrLink * 100).toFixed(2) + "%" : "n/a"} | spend ${fmtMoney(a.spendCents)}`).join("\n");
 
   // Read the campaign brief from public/plan.md if present so the AI is grounded in the user's specific offer.
   const planContext = await import("@/lib/plan-context").then((m) => m.readPlan()).catch(() => "");
@@ -83,11 +84,11 @@ Rules:
     const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      return NextResponse.json({ error: "Model returned no JSON", raw: text }, { status: 502 });
+      return NextResponse.json({ error: "Model returned no JSON" }, { status: 502 });
     }
     return NextResponse.json(JSON.parse(match[0]));
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `Brief generation failed: ${msg}` }, { status: 500 });
+    console.error("Brief generation failed:", err instanceof Error ? err.name : "unknown error");
+    return NextResponse.json({ error: "Brief generation failed; see server logs." }, { status: 500 });
   }
 }

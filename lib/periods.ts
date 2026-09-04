@@ -126,5 +126,8 @@ export function chooseSyncRange(input: {
 }
 
 export function isDateInRange(date: string, range: DateRange): boolean {
-  return ISO_DATE.test(date) && date >= range.since && date <= range.until;
+  if (!ISO_DATE.test(date)) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return false;
+  return date >= range.since && date <= range.until;
 }

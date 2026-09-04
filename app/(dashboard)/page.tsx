@@ -14,6 +14,37 @@ import { BudgetSimulator } from "@/components/budget-simulator";
 import { PlanVisual } from "@/components/plan-visual";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
+function SyncNotice({ state }: { state: DashboardState }) {
+  const syncState = state.meta.syncState;
+  if (syncState === "fresh") return null;
+  const copy = {
+    never: "No successful Meta sync yet. Performance metrics remain unavailable until the first sync completes.",
+    running: "A Meta sync is running. The dashboard is continuing to show the last successful stored data.",
+    stale: "Stored Meta data is stale. The dashboard is showing the last successful sync until a newer run completes.",
+    failed: "The latest Meta sync failed. The dashboard is showing the last successful stored data.",
+    fresh: "",
+  }[syncState];
+  const lastSuccess = state.meta.lastSuccessfulSyncAt
+    ? new Date(state.meta.lastSuccessfulSyncAt).toLocaleString("en-GB", { timeZone: state.meta.timezoneName ?? "UTC" })
+    : null;
+
+  return (
+    <section
+      role="status"
+      className={`mb-6 rounded-xl border px-4 py-3 text-sm ${syncState === "failed" ? "border-destructive/30 bg-destructive/5" : "border-amber-500/30 bg-amber-500/5"}`}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className={`mt-0.5 h-4 w-4 shrink-0 ${syncState === "failed" ? "text-destructive" : "text-amber-500"}`} />
+        <div>
+          <p className="font-medium">{syncState === "failed" ? "Meta sync failed" : syncState === "stale" ? "Stored data is stale" : syncState === "running" ? "Meta sync in progress" : "Awaiting first Meta sync"}</p>
+          <p className="mt-1 text-foreground/80">{copy}</p>
+          {lastSuccess && <p className="mt-1 text-xs text-muted-foreground">Last successful sync: {lastSuccess}</p>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function DashboardHome() {
   const [state, setState] = useState<DashboardState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,6 +108,7 @@ export default function DashboardHome() {
 
   return (
     <>
+      <SyncNotice state={state} />
       <AISummaryPanel state={state} />
       <AnomalyBanner state={state} />
       <Scorecard state={state} />

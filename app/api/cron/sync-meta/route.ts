@@ -22,9 +22,8 @@ async function handle(request: NextRequest) {
     if (error instanceof SyncAlreadyRunningError) {
       return NextResponse.json({ ok: false, error: error.message }, { status: 409 });
     }
-    const message = error instanceof Error ? error.message : "Meta sync failed";
-    console.error("sync-meta failed:", message);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    console.error("sync-meta failed:", error instanceof Error ? error.name : "unknown error");
+    return NextResponse.json({ ok: false, error: "Meta sync failed; the last successful data remains available." }, { status: 500 });
   }
 }
 

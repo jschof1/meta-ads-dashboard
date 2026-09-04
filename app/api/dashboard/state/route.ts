@@ -12,8 +12,7 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await buildDashboardState());
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Dashboard data is unavailable";
-    console.error("dashboard state failed:", message);
+    console.error("dashboard state failed:", error instanceof Error ? error.name : "unknown error");
     return NextResponse.json({ error: "Dashboard data is unavailable" }, { status: 503 });
   }
 }

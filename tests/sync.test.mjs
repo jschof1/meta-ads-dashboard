@@ -99,6 +99,7 @@ function insight(date, overrides = {}) {
 
 function fakeClient(options = {}) {
   const calls = [];
+  const configuredMetadata = options.metadata ?? metadata;
   const rows = options.rows ?? {
     account: [insight("2026-09-04")],
     campaign: [insight("2026-09-04")],
@@ -112,20 +113,21 @@ function fakeClient(options = {}) {
     appUsage: { call_count: 4 },
     adAccountUsage: { acc_id_util_pct: 2 },
   };
+  const attributionKey = options.attributionKey ?? "7d_click,1d_view";
   const client = {
     getAccountId: () => account.id,
     getGraphVersion: () => "v25.0",
-    getAttributionKey: () => "7d_click,1d_view",
+    getAttributionKey: () => attributionKey,
     getDiagnostics: () => diagnostics,
     diagnoseResultEvents: (row) => diagnoseResultEvents(row, diagnosticOptions),
     getAccount: async () => {
       if (options.getAccount) return options.getAccount();
       return account;
     },
-    listCampaigns: async () => metadata.campaigns,
-    listAdSets: async () => metadata.adSets,
-    listAds: async () => metadata.ads,
-    listCreatives: async () => metadata.creatives,
+    listCampaigns: async () => configuredMetadata.campaigns,
+    listAdSets: async () => configuredMetadata.adSets,
+    listAds: async () => configuredMetadata.ads,
+    listCreatives: async () => configuredMetadata.creatives,
     getDailyInsights: async (level, range) => {
       calls.push({ level, range });
       if (options.getDailyInsights) return options.getDailyInsights(level, range);
@@ -142,7 +144,7 @@ async function run(db, client, now = new Date("2026-09-04T12:00:00.000Z"), optio
 test("performs the 90-day first sync, persists metadata/insights, and keeps real zeroes distinct from missing values", async () => {
   const db = await createDatabase();
   const { client, calls } = fakeClient({ rows: {
-    account: [insight("2026-09-04", { spend: "0", impressions: "0", reach: "0", clicks: "0", inline_link_clicks: "0", actions: [] })],
+    account: [insight("2026-09-04", { account_id: "uktl-test", spend: "0", impressions: "0", reach: "0", clicks: "0", inline_link_clicks: "0", actions: [] })],
     campaign: [insight("2026-09-04", { actions: [] })],
     adset: [insight("2026-09-04", { actions: [] })],
     ad: [insight("2026-09-04", { actions: [] })],
@@ -171,6 +173,10 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal(accountRow.spendMinorUnits, 0);
   assert.equal(accountRow.impressions, 0);
   assert.equal(accountRow.leads, null);
+
+  const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+  assert.equal(state.ads[0].verdict, "too_early");
+  assert.match(state.ads[0].verdictReason, /Insufficient stored evidence/);
 
   const runRow = await db.syncRun.findUnique({ where: { id: result.runId } });
   assert.equal(runRow.status, "SUCCEEDED");
@@ -207,6 +213,19 @@ test("is idempotent and overwrites delayed conversion updates during the recent 
   assert.equal(await db.syncRun.count({ where: { status: "SUCCEEDED" } }), 2);
 });
 
+test("starts a fresh backfill when the attribution configuration changes", async () => {
+  const db = await createDatabase();
+  await run(db, fakeClient({ attributionKey: "7d_click,1d_view" }).client, new Date("2026-09-04T12:00:00.000Z"));
+  const changed = fakeClient({ attributionKey: "1d_click,1d_view" });
+  const result = await run(db, changed.client, new Date("2026-09-05T12:00:00.000Z"));
+
+  assert.equal(result.initialBackfill, true);
+  assert.equal(result.since, "2026-06-08");
+  assert.equal(result.until, "2026-09-05");
+  assert.equal(await db.syncRun.count({ where: { status: "SUCCEEDED" } }), 2);
+  assert.equal(await db.dailyInsight.count(), 8);
+});
+
 test("prevents overlapping runs with an account-scoped lease", async () => {
   const db = await createDatabase();
   let release;
@@ -228,6 +247,32 @@ test("prevents overlapping runs with an account-scoped lease", async () => {
   release();
   await first;
   assert.equal(await db.syncRun.count(), 1);
+});
+
+test("reclaims an expired lease and records the abandoned run as failed", async () => {
+  const db = await createDatabase();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  await db.syncRun.create({
+    data: {
+      accountId: account.id,
+      trigger: "cron",
+      status: "RUNNING",
+      attributionKey: "7d_click,1d_view",
+      startedAt: new Date("2026-09-04T11:00:00.000Z"),
+      lockKey: account.id,
+      lockOwner: "abandoned-run",
+      lockExpiresAt: new Date("2026-09-04T11:30:00.000Z"),
+    },
+  });
+
+  const result = await run(db, fakeClient().client, now);
+  const runs = await db.syncRun.findMany({ orderBy: { startedAt: "asc" } });
+
+  assert.equal(result.status, "SUCCEEDED");
+  assert.equal(runs[0].status, "FAILED");
+  assert.match(runs[0].error, /lease expired/);
+  assert.equal(runs[0].lockKey, null);
+  assert.equal(runs[1].status, "SUCCEEDED");
 });
 
 test("marks a failed refresh without discarding the last successful read model", async () => {
@@ -254,6 +299,8 @@ test("marks a failed refresh without discarding the last successful read model",
   assert.equal(latest.traceId, "trace-pr03-test");
   assert.equal(state.meta.syncState, "failed");
   assert.equal(state.meta.lastAttemptStatus, "FAILED");
+  assert.equal(state.meta.lastSyncError.includes("provider unavailable"), false);
+  assert.match(state.meta.lastSyncError, /redacted provider diagnostic/);
   assert.equal(state.scorecard.last30.registrations, 2);
 });
 
@@ -275,15 +322,133 @@ test("loads dashboard state from stored data with no Meta client and reports sta
   assert.equal(stale.meta.lastSuccessfulSyncAt, "2026-09-04T12:00:00.000Z");
 });
 
+test("deduplicates repeated provider rows and accepts a delayed null-to-known result", async () => {
+  const db = await createDatabase();
+  const duplicate = insight("2026-09-04", { spend: "10.00", actions: [] });
+  const { client, rows } = fakeClient({ rows: {
+    account: [duplicate, { ...duplicate, spend: "11.00" }],
+    campaign: [duplicate],
+    adset: [duplicate],
+    ad: [duplicate],
+  } });
+
+  await run(db, client);
+  let stored = await db.dailyInsight.findUnique({
+    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+  });
+  assert.equal(await db.dailyInsight.count(), 4);
+  assert.equal(stored.spendMinorUnits, 1100);
+  assert.equal(stored.leads, null);
+
+  rows.account[0] = insight("2026-09-04", { spend: "11.00", actions: [{ action_type: "offsite_conversion.custom.lead", value: "3" }] });
+  rows.account[1] = rows.account[0];
+  rows.campaign[0] = rows.account[0];
+  rows.adset[0] = rows.account[0];
+  rows.ad[0] = rows.account[0];
+  await run(db, client, new Date("2026-09-05T12:00:00.000Z"));
+  stored = await db.dailyInsight.findUnique({
+    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+  });
+  assert.equal(stored.leads, 3);
+  assert.equal(stored.cplMinorUnits, 367);
+});
+
+test("rolls back metadata and insights together when the durable transaction fails", async () => {
+  const db = await createDatabase();
+  await db.$executeRawUnsafe(`CREATE TRIGGER force_daily_insight_failure BEFORE INSERT ON "DailyInsight" BEGIN SELECT RAISE(ABORT, 'forced transaction failure'); END`);
+
+  // libsql currently maps SQLite RAISE(ABORT, ...) through its generic
+  // foreign-key error surface; either message still proves the transaction
+  // aborted before any metadata was committed.
+  await assert.rejects(() => run(db, fakeClient().client), /forced transaction failure|Foreign key constraint/);
+  assert.equal(await db.campaign.count(), 0);
+  assert.equal(await db.adSet.count(), 0);
+  assert.equal(await db.ad.count(), 0);
+  assert.equal(await db.creative.count(), 0);
+  assert.equal(await db.dailyInsight.count(), 0);
+  const failed = await db.syncRun.findFirst({ orderBy: { startedAt: "desc" } });
+  assert.equal(failed.status, "FAILED");
+  assert.equal(failed.lockKey, null);
+  assert.equal(failed.lockOwner, null);
+});
+
+test("fences a run when its lease is invalidated before commit", async () => {
+  const db = await createDatabase();
+  const { client } = fakeClient({
+    getDailyInsights: async (level) => {
+      if (level === "ad") {
+        await db.syncRun.updateMany({
+          where: { status: "RUNNING" },
+          data: { lockExpiresAt: new Date("1970-01-01T00:00:00.000Z") },
+        });
+      }
+      return [insight("2026-09-04")];
+    },
+  });
+
+  await assert.rejects(() => run(db, client), /lease was lost/);
+  assert.equal(await db.campaign.count(), 0);
+  assert.equal(await db.dailyInsight.count(), 0);
+  const failed = await db.syncRun.findFirst({ orderBy: { startedAt: "desc" } });
+  assert.equal(failed.status, "FAILED");
+  assert.equal(failed.lockKey, null);
+  assert.equal(failed.lockOwner, null);
+});
+
+test("keeps existing read-model rows intact when an update transaction fails", async () => {
+  const db = await createDatabase();
+  await run(db, fakeClient().client, new Date("2026-09-04T12:00:00.000Z"));
+  await db.$executeRawUnsafe(`CREATE TRIGGER force_campaign_update_failure BEFORE UPDATE ON "Campaign" BEGIN SELECT RAISE(ABORT, 'forced campaign update failure'); END`);
+
+  await assert.rejects(() => run(db, fakeClient().client, new Date("2026-09-05T12:00:00.000Z")), /forced campaign update failure|Foreign key constraint/);
+  const campaign = await db.campaign.findUnique({ where: { metaId: "campaign-1" } });
+  const stored = await db.dailyInsight.findUnique({
+    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+  });
+  assert.equal(campaign.name, "UKTL Leads");
+  assert.equal(stored.spendMinorUnits, 1234);
+  assert.equal(stored.leads, 2);
+  assert.equal(await db.syncRun.count({ where: { status: "SUCCEEDED" } }), 1);
+});
+
+test("uses an account-local DST boundary when choosing the sync range", async () => {
+  const db = await createDatabase();
+  const transition = new Date("2026-03-29T23:30:00.000Z");
+  const { client, calls } = fakeClient({ rows: {
+    account: [insight("2026-03-30")],
+    campaign: [insight("2026-03-30")],
+    adset: [insight("2026-03-30")],
+    ad: [insight("2026-03-30")],
+  } });
+
+  const result = await run(db, client, transition);
+  assert.equal(result.until, "2026-03-30");
+  assert.equal(calls[0].range.until, "2026-03-30");
+  assert.equal(await db.dailyInsight.count(), 4);
+});
+
+test("uses UTC and records a warning when Meta supplies an invalid account timezone", async () => {
+  const db = await createDatabase();
+  const { client } = fakeClient({ getAccount: async () => ({ ...account, timezone_name: "Mars/Olympus" }) });
+  const result = await run(db, client);
+  const stored = await db.syncRun.findUnique({ where: { id: result.runId } });
+
+  assert.equal(stored.timezoneName, "UTC");
+  assert.match(stored.warning, /invalid account timezone/);
+});
+
 test("handles an empty account without manufacturing zero performance", async () => {
   const db = await createDatabase();
-  const { client } = fakeClient({ rows: { account: [], campaign: [], adset: [], ad: [] } });
+  const { client } = fakeClient({
+    metadata: { campaigns: [], adSets: [], ads: [], creatives: [] },
+    rows: { account: [], campaign: [], adset: [], ad: [] },
+  });
   const result = await run(db, client);
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
 
   assert.equal(result.status, "SUCCEEDED");
-  assert.equal(result.rowsFetched, 4);
-  assert.equal(result.rowsWritten, 4);
+  assert.equal(result.rowsFetched, 0);
+  assert.equal(result.rowsWritten, 0);
   assert.equal(state.meta.syncState, "fresh");
   assert.equal(state.scorecard.today.spendCents, null);
   assert.equal(state.scorecard.today.impressions, null);
@@ -291,4 +456,62 @@ test("handles an empty account without manufacturing zero performance", async ()
   assert.equal(state.scorecard.today.cprCents, null);
   assert.equal(state.trend.length, 30);
   assert.equal(state.trend.at(-1).spendCents, null);
+});
+
+test("preserves known metadata and metrics when a later provider response is partial", async () => {
+  const db = await createDatabase();
+  const source = {
+    campaigns: [...metadata.campaigns],
+    adSets: [...metadata.adSets],
+    ads: [...metadata.ads],
+    creatives: [...metadata.creatives],
+  };
+  const { client, rows } = fakeClient({ metadata: source });
+  await run(db, client, new Date("2026-09-04T12:00:00.000Z"));
+
+  source.campaigns[0] = { id: "campaign-1", name: null, objective: null, status: null, effective_status: null };
+  source.adSets[0] = { id: "adset-1", name: null, daily_budget: null, lifetime_budget: null, status: null };
+  source.ads[0] = { id: "ad-1", name: null, status: null, effective_status: null };
+  source.creatives[0] = { id: "creative-1", name: null, title: null, body: null };
+  const partial = insight("2026-09-04", {
+    spend: undefined,
+    impressions: undefined,
+    reach: undefined,
+    clicks: undefined,
+    inline_link_clicks: undefined,
+    actions: undefined,
+  });
+  rows.account[0] = partial;
+  rows.campaign[0] = partial;
+  rows.adset[0] = partial;
+  rows.ad[0] = partial;
+  await run(db, client, new Date("2026-09-05T12:00:00.000Z"));
+
+  assert.equal((await db.campaign.findUnique({ where: { metaId: "campaign-1" } })).name, "UKTL Leads");
+  assert.equal((await db.adSet.findUnique({ where: { metaId: "adset-1" } })).dailyBudgetMinor, 5000);
+  assert.equal((await db.ad.findUnique({ where: { metaId: "ad-1" } })).name, "Trade lead creative");
+  assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).title, "Get more trade leads");
+  const stored = await db.dailyInsight.findUnique({
+    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+  });
+  assert.equal(stored.spendMinorUnits, 1234);
+  assert.equal(stored.impressions, 1000);
+  assert.equal(stored.leads, 2);
+  assert.match(stored.raw, /12\.34/);
+  assert.match(stored.rawActions, /offsite_conversion\.custom\.lead/);
+});
+
+test("skips provider insight rows outside the requested range", async () => {
+  const db = await createDatabase();
+  const { client } = fakeClient({ rows: {
+    account: [insight("2026-01-01")],
+    campaign: [insight("2026-01-01")],
+    adset: [insight("2026-01-01")],
+    ad: [insight("2026-01-01")],
+  } });
+  const result = await run(db, client);
+  assert.equal(result.rowsFetched, 8);
+  assert.equal(result.rowsWritten, 4);
+  assert.match(result.warning, /malformed insight row/);
+  assert.equal(await db.dailyInsight.count(), 0);
 });
