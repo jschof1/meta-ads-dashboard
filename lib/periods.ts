@@ -2,6 +2,7 @@ export type ReportingPeriod =
   | "today"
   | "yesterday"
   | "mtd"
+  | "previousMtd"
   | "7d"
   | "previous7d"
   | "14d"
@@ -63,6 +64,28 @@ export function accountLocalDate(now = new Date(), timeZone = "UTC"): string {
   return dateParts(now, timeZone);
 }
 
+function previousMtdRange(today: string): DateRange {
+  const currentMonthStart = `${today.slice(0, 8)}01`;
+  const previousMonthLastDay = addCalendarDays(currentMonthStart, -1);
+  const previousMonthStart = `${previousMonthLastDay.slice(0, 8)}01`;
+  const elapsedDays = Number(today.slice(8, 10)) - 1;
+  const matchedUntil = addCalendarDays(previousMonthStart, elapsedDays);
+  return {
+    since: previousMonthStart,
+    until: matchedUntil > previousMonthLastDay ? previousMonthLastDay : matchedUntil,
+  };
+}
+
+/** Whether the previous-MTD range has the same elapsed calendar-day count. */
+export function isPreviousMtdComparable(now = new Date(), timeZone = "UTC"): boolean {
+  const today = accountLocalDate(now, timeZone);
+  const currentMonthStart = `${today.slice(0, 8)}01`;
+  const previousMonthLastDay = addCalendarDays(currentMonthStart, -1);
+  const previousMonthStart = `${previousMonthLastDay.slice(0, 8)}01`;
+  const elapsedDays = Number(today.slice(8, 10)) - 1;
+  return addCalendarDays(previousMonthStart, elapsedDays) <= previousMonthLastDay;
+}
+
 export function isValidTimeZone(timeZone: string | undefined): boolean {
   if (!timeZone) return false;
   try {
@@ -88,6 +111,8 @@ export function dateRangeForPeriod(
     }
     case "mtd":
       return { since: `${today.slice(0, 8)}01`, until: today };
+    case "previousMtd":
+      return previousMtdRange(today);
     case "7d":
       return { since: addCalendarDays(today, -6), until: today };
     case "previous7d":

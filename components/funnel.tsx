@@ -1,7 +1,9 @@
 "use client";
 
 import type { DashboardState } from "@/lib/state-types";
+import type { DashboardPeriod } from "@/lib/state-types";
 import { UKTL_CONFIG, type FunnelStageKey } from "@/lib/targets";
+import { currentBucket, periodDefinition } from "@/lib/dashboard-periods";
 import { Eye, MousePointerClick, UserRound, UserCheck, Phone, Trophy, Info } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -28,14 +30,19 @@ function stageLabel(key: FunnelStageKey): string {
   return UKTL_CONFIG.funnel.find((stage) => stage.key === key)?.label ?? key;
 }
 
-export function Funnel({ state }: { state: DashboardState }) {
+export function Funnel({ state, period = "30d" }: { state: DashboardState; period?: DashboardPeriod }) {
   const f = state.funnel;
+  const periodBucket = currentBucket(state.scorecard, period);
+  const periodLabel = periodDefinition(period).label;
+  const metaImpressions = period === "30d" ? f.metaPixelImpressions : periodBucket.impressions;
+  const metaLinkClicks = period === "30d" ? f.metaPixelLinkClicks : periodBucket.linkClicks;
+  const metaLeads = period === "30d" ? f.leads : periodBucket.leads;
   const crmNote = f.crmConfigured ? "CRM" : "CRM data not configured";
   const steps: Step[] = [
-    { key: "lead", label: "Impressions", value: f.metaPixelImpressions, base: f.metaPixelImpressions, icon: Eye, sourceNote: "Meta" },
-    { key: "lead", label: "Link clicks", value: f.metaPixelLinkClicks, base: f.metaPixelImpressions, icon: MousePointerClick, sourceNote: "Meta" },
-    { key: "lead", label: stageLabel("lead"), value: f.leads, base: f.metaPixelLinkClicks, icon: UserRound, sourceNote: "Meta lead result" },
-    { key: "contacted", label: stageLabel("contacted"), value: f.contacted, base: f.leads, icon: UserCheck, sourceNote: crmNote },
+    { key: "lead", label: "Impressions", value: metaImpressions, base: metaImpressions, icon: Eye, sourceNote: "Meta" },
+    { key: "lead", label: "Link clicks", value: metaLinkClicks, base: metaImpressions, icon: MousePointerClick, sourceNote: "Meta" },
+    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: metaLinkClicks, icon: UserRound, sourceNote: "Meta lead result" },
+    { key: "contacted", label: stageLabel("contacted"), value: period === "30d" ? f.contacted : null, base: metaLeads, icon: UserCheck, sourceNote: crmNote },
     { key: "qualified", label: stageLabel("qualified"), value: f.qualified, base: f.contacted, icon: UserCheck, sourceNote: crmNote },
     { key: "callBooked", label: stageLabel("callBooked"), value: f.callsBooked, base: f.qualified, icon: Phone, sourceNote: crmNote },
     { key: "callAttended", label: stageLabel("callAttended"), value: f.callsAttended, base: f.callsBooked, icon: Phone, sourceNote: crmNote },
@@ -48,7 +55,7 @@ export function Funnel({ state }: { state: DashboardState }) {
   return (
     <section className="rounded-xl border border-border bg-card mb-6">
       <div className="px-5 py-3 border-b border-border flex items-center justify-between flex-wrap gap-2">
-        <h2 className="text-sm font-semibold">UKTL conversion path (paid Meta, last 30d)</h2>
+        <h2 className="text-sm font-semibold">UKTL conversion path (paid Meta, {periodLabel})</h2>
         <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
           <span>{f.crmConfigured ? "CRM attribution connected" : "CRM attribution not configured"}</span>
           {(f.duplicatesCollapsed > 0 || f.testEmailsExcluded > 0) && (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { DashboardState } from "@/lib/state-types";
+import type { DashboardPeriod, DashboardState } from "@/lib/state-types";
 import { AISummaryPanel } from "@/components/ai-summary-panel";
 import { AnomalyBanner } from "@/components/anomaly-banner";
 import { Scorecard } from "@/components/scorecard";
@@ -11,6 +11,10 @@ import { CreativeBriefGenerator } from "@/components/creative-brief-generator";
 import { Funnel } from "@/components/funnel";
 import { ActionLog } from "@/components/action-log";
 import { PlanVisual } from "@/components/plan-visual";
+import { CampaignDrilldown } from "@/components/campaign-drilldown";
+import { DataQualityPanel } from "@/components/data-quality-panel";
+import { OperatorHeader } from "@/components/operator-header";
+import { PeriodSelector } from "@/components/period-selector";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 
@@ -49,6 +53,7 @@ export default function DashboardHome() {
   const [state, setState] = useState<DashboardState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<DashboardPeriod>("7d");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -98,7 +103,7 @@ export default function DashboardHome() {
         </div>
         <p className="text-foreground/80">{error}</p>
         <p className="text-xs text-muted-foreground mt-2">
-          Likely causes: META_MARKETING_TOKEN missing or expired, or Turso connection failing. Check Vercel env vars.
+          The dashboard reads durable stored data. Check the database connection and the server logs for the read-model error.
         </p>
       </div>
     );
@@ -108,12 +113,19 @@ export default function DashboardHome() {
 
   return (
     <>
+      <OperatorHeader state={state} period={period} />
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <PeriodSelector period={period} onChange={setPeriod} />
+        <p className="text-xs text-muted-foreground">Use the matched comparison to decide where to look next.</p>
+      </div>
       <SyncNotice state={state} />
+      <DataQualityPanel state={state} period={period} />
       <AISummaryPanel state={state} />
       <AnomalyBanner state={state} />
-      <Scorecard state={state} />
-      <MetricHeroCards state={state} />
-      <Funnel state={state} />
+      <Scorecard state={state} period={period} />
+      <MetricHeroCards state={state} period={period} />
+      <Funnel state={state} period={period} />
+      <CampaignDrilldown state={state} period={period} />
 
       <section className="flex items-center justify-between mb-3 mt-2">
         <div>
@@ -122,14 +134,14 @@ export default function DashboardHome() {
         </div>
         <CreativeBriefGenerator state={state} />
       </section>
-      <CreativeLeaderboard state={state} />
+      <CreativeLeaderboard state={state} period={period} />
 
       <ActionLog state={state} />
       <PlanVisual state={state} />
 
       <footer className="text-xs text-muted-foreground py-6">
         Last sync: {formatDateTime(state.meta.lastSyncAt, state.meta.timezoneName)} ·
-        Campaign {state.meta.campaignId} · Account {state.meta.adAccountId}
+        {state.meta.accountName || "UK Trade Leads"} · Campaign {state.meta.campaignId || "not configured"} · Account {state.meta.adAccountId || "not configured"}
       </footer>
     </>
   );

@@ -45,6 +45,10 @@ export function TopBar() {
         }
         console.error("Refresh failed:", json);
       }
+    } catch (error) {
+      setSyncState("failed");
+      setSyncError("The sync request could not be completed.");
+      console.error("Refresh request failed:", error instanceof Error ? error.name : "unknown error");
     } finally {
       setRefreshing(false);
     }
@@ -120,7 +124,7 @@ export function TopBar() {
 
   return (
     <header className="border-b border-border sticky top-0 z-10 bg-background/90 backdrop-blur">
-      <div className="max-w-screen-2xl mx-auto px-4 sm:px-8 py-3 flex items-center gap-4">
+      <div className="mx-auto flex max-w-screen-2xl items-center gap-2 px-4 py-3 sm:gap-4 sm:px-8">
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-primary" />
           <h1 className="text-sm sm:text-lg font-semibold whitespace-nowrap shrink-0">UK Trade Leads</h1>
@@ -128,12 +132,12 @@ export function TopBar() {
         <div className="text-xs text-muted-foreground hidden sm:block">
           Meta Ads Command Centre · UK trades acquisition
         </div>
-        <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="ml-auto flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground sm:gap-3">
           <div className="flex items-center gap-1.5">
             <span className={`relative inline-flex h-2 w-2 rounded-full ${statusColor}`} title={syncError ?? undefined}>
               {isFresh && <span className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-60" />}
             </span>
-            <span title={syncError ?? undefined}>{statusText}</span>
+            <span className="hidden sm:inline" title={syncError ?? undefined}>{statusText}</span>
           </div>
           <button
             onClick={toggleTheme}
@@ -145,12 +149,13 @@ export function TopBar() {
           <button
             onClick={refresh}
             disabled={refreshing}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 hover:bg-muted disabled:opacity-50"
+            aria-label="Sync now"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border px-0 py-1.5 hover:bg-muted disabled:opacity-50 sm:h-auto sm:w-auto sm:justify-start sm:px-3"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            {refreshing ? "Syncing..." : "Sync now"}
+            <span className="hidden sm:inline">{refreshing ? "Syncing..." : "Sync now"}</span>
           </button>
-          <button onClick={logout} className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 hover:bg-muted">
+          <button onClick={logout} aria-label="Log out" className="inline-flex h-8 w-8 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border px-0 py-1.5 hover:bg-muted sm:h-auto sm:w-auto sm:justify-start sm:px-3">
             <LogOut className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Log out</span>
           </button>

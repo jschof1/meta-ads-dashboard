@@ -64,10 +64,10 @@ Targets and budgets are not environment defaults. They live in the typed UKTL co
 
 ## Production deploy
 
-Use a private Vercel project and a production libSQL/Turso database. Apply the committed migrations before serving the app:
+Use a private Vercel project and a production libSQL/Turso database. With the production `DATABASE_URL` configured, apply all committed migrations before serving the app:
 
 ```bash
-turso db shell meta-ads-dashboard < prisma/migrations/20260904170000_pr03_sync_data/migration.sql
+npx prisma migrate deploy
 ```
 
 Set the environment values from `.env.example` in Vercel. Keep all tokens server-side. Configure the Vercel cron to call `/api/cron/sync-meta` with the bearer value represented by `CRON_SECRET`, then verify the response is a successful stored sync before treating the deployment as live.

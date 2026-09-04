@@ -21,15 +21,21 @@ export function scoreFatigue(input: {
   frequency: number | null;
   ctrLink: number | null;
   cplCents: number | null;
+  impressions: number | null;
+  leads: number | null;
   daysActive: number | null;
   spendCents: number | null;
 }): { score: number; reason: string } {
-  const { frequency, ctrLink, cplCents, daysActive, spendCents } = input;
+  const { frequency, ctrLink, cplCents, impressions, leads, daysActive, spendCents } = input;
   const minimumSpend = UKTL_CONFIG.evidence.minSpendMinorUnits;
 
   if (
     spendCents == null
     || spendCents <= 0
+    || impressions == null
+    || impressions < UKTL_CONFIG.evidence.minImpressionsForRate
+    || leads == null
+    || leads < UKTL_CONFIG.evidence.minLeadsForVerdict
     || frequency == null
     || ctrLink == null
     || (minimumSpend != null && spendCents < minimumSpend)
@@ -180,7 +186,7 @@ export function buildTriggers(input: {
   frequencyLast7: number | null;
   leadsThisWeek: number | null;
   daysSinceLaunch: number | null;
-  ads: { fatigueScore: number; adName: string }[];
+  ads: { fatigueScore: number; adName: string; evidenceStatus: "unknown" | "thin" | "sufficient" }[];
 }): DecisionTrigger[] {
   const targets = UKTL_CONFIG.targets;
   const triggers: DecisionTrigger[] = [];
@@ -248,6 +254,8 @@ export function buildTriggers(input: {
       status: "alert",
       detail: `${fatigued.length} creative(s) may be fatiguing: ${fatigued.slice(0, 2).map((a) => a.adName).join(", ")}.`,
     });
+  } else if (input.ads.some((ad) => ad.evidenceStatus !== "sufficient")) {
+    triggers.push({ id: "fatigue", label: "Creative fatigue", status: "pending", detail: "Fatigue diagnostic withheld until stored impression and lead evidence clears the configured thresholds." });
   } else {
     triggers.push({ id: "fatigue", label: "Creative fatigue", status: "ok", detail: "No creative has crossed the diagnostic fatigue threshold." });
   }

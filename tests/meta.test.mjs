@@ -153,6 +153,27 @@ test("discovers account context and all entity types without a campaign id", asy
   assert.equal(calls.some(({ url }) => url.pathname.endsWith("/act_123/ads")), true);
 });
 
+test("scopes entity discovery, including account-wide creatives, to a configured campaign", async () => {
+  const { client, calls } = makeClient((url) => {
+    const path = url.pathname;
+    if (path.endsWith("/act_123")) return jsonResponse({ id: "act_123", name: "UKTL", currency: "GBP", timezone_name: "Europe/London" });
+    if (path.endsWith("/campaigns")) return jsonResponse({ data: [{ id: "campaign-1" }, { id: "campaign-2" }] });
+    if (path.endsWith("/campaign-1/adsets")) return jsonResponse({ data: [{ id: "adset-1", campaign_id: "campaign-1" }, { id: "adset-2", campaign_id: "campaign-2" }] });
+    if (path.endsWith("/campaign-1/ads")) return jsonResponse({ data: [{ id: "ad-1", campaign_id: "campaign-1", adset_id: "adset-1", creative: { id: "creative-1" } }, { id: "ad-2", campaign_id: "campaign-2", adset_id: "adset-2", creative: { id: "creative-2" } }] });
+    if (path.endsWith("/adcreatives")) return jsonResponse({ data: [{ id: "creative-1" }, { id: "creative-2" }] });
+    throw new Error("unexpected path " + path);
+  }, { campaignId: "campaign-1" });
+
+  const discovered = await client.discoverEntities();
+
+  assert.deepEqual(discovered.campaigns.map((campaign) => campaign.id), ["campaign-1"]);
+  assert.deepEqual(discovered.adSets.map((adSet) => adSet.id), ["adset-1"]);
+  assert.deepEqual(discovered.ads.map((ad) => ad.id), ["ad-1"]);
+  assert.deepEqual(discovered.creatives.map((creative) => creative.id), ["creative-1"]);
+  assert.equal(calls.some(({ url }) => url.pathname.endsWith("/campaign-1/adsets")), true);
+  assert.equal(calls.some(({ url }) => url.pathname.endsWith("/campaign-1/ads")), true);
+});
+
 test("insights use explicit attribution and preserve account-wide operation when no campaign is configured", async () => {
   const { client, calls } = makeClient(() => jsonResponse({ data: [{ spend: "12.34", date_start: "2026-09-04" }] }));
 
@@ -292,6 +313,38 @@ test("rejects malformed collections, honours pagination item caps and accepts em
   assert.equal(ads[0].name, undefined);
   assert.equal(ads[0].status, "ACTIVE");
   assert.equal(ads[0].effective_status, undefined);
+});
+
+test("keeps omitted optional ad fields omitted for partial metadata updates", async () => {
+  const { client } = makeClient((url) => {
+    if (url.pathname.endsWith("/ads")) return jsonResponse({ data: [{ id: "ad-partial", status: "ACTIVE", creative: {} }] });
+    throw new Error("unexpected path " + url.pathname);
+  });
+
+  const [ad] = await client.listAds();
+
+  assert.equal(ad.id, "ad-partial");
+  assert.equal(ad.status, "ACTIVE");
+  assert.equal(Object.hasOwn(ad, "name"), false);
+  assert.equal(Object.hasOwn(ad, "effective_status"), false);
+  assert.equal(Object.hasOwn(ad, "campaign_id"), false);
+  assert.equal(Object.hasOwn(ad, "creative_id"), false);
+  assert.equal(Object.hasOwn(ad, "thumbnail_url"), false);
+  assert.equal(Object.hasOwn(ad, "updated_time"), false);
+});
+
+test("preserves an explicit null creative association from Meta", async () => {
+  const { client } = makeClient((url) => {
+    if (url.pathname.endsWith("/ads")) return jsonResponse({ data: [{ id: "ad-no-creative", name: "No creative", creative: null }] });
+    throw new Error("unexpected path " + url.pathname);
+  });
+
+  const [ad] = await client.listAds();
+
+  assert.equal(ad.creative_id, null);
+  assert.equal(ad.creative_raw, null);
+  assert.equal(Object.hasOwn(ad, "creative_id"), true);
+  assert.equal(Object.hasOwn(ad, "creative_raw"), true);
 });
 
 test("diagnoses action types and requires explicit configuration for ambiguity", () => {

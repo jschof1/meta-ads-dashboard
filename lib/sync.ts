@@ -115,8 +115,65 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
+function optionalDateTime(value: unknown): Date | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
 function hasProviderFields(value: object): boolean {
-  return Object.entries(value).some(([key, item]) => key !== "id" && key !== "raw" && item != null);
+  return Object.keys(value).some((key) => key !== "id" && key !== "raw");
+}
+
+function hasProviderField(value: object, field: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, field);
+}
+
+const CURRENT_METADATA_FIELDS = {
+  campaign: {
+    required: ["name", "objective", "status", "effective_status", "updated_time"],
+    alternatives: [["daily_budget", "lifetime_budget"]],
+  },
+  adSet: {
+    required: ["campaign_id", "name", "status", "effective_status", "learning_stage_info", "updated_time"],
+    alternatives: [["daily_budget", "lifetime_budget"]],
+  },
+  ad: {
+    required: ["name", "status", "effective_status", "campaign_id", "adset_id", "creative_id", "updated_time"],
+    alternatives: [],
+  },
+  creative: {
+    required: [
+      "name",
+      "title",
+      "body",
+      "call_to_action_type",
+      "thumbnail_url",
+      "image_hash",
+      "image_url",
+      "video_id",
+      "object_id",
+      "link_url",
+      "object_url",
+      "asset_feed_spec",
+      "url_tags",
+      "updated_time",
+    ],
+    alternatives: [],
+  },
+} as const;
+
+function hasCompleteProviderMetadata(
+  value: object,
+  fields: { required: readonly string[]; alternatives: readonly (readonly string[])[] },
+): boolean {
+  return fields.required.every((field) => hasProviderField(value, field))
+    && fields.alternatives.every((group) => group.some((field) => hasProviderField(value, field)));
+}
+
+function configuredCampaignId(): string | undefined {
+  const value = process.env.META_CAMPAIGN_ID?.trim();
+  return value || undefined;
 }
 
 function canonicalAccountId(value: string): string {
@@ -251,6 +308,7 @@ function normalizeInsights(
   range: SyncRange,
   insights: Partial<Record<MetaInsightLevel, MetaInsightRow[]>>,
   client: Pick<SyncClient, "diagnoseResultEvents">,
+  campaignId?: string,
 ): { rows: NormalizedDailyInsight[]; skipped: number; missingLeadRows: number; candidateActionTypes: string[] } {
   const byKey = new Map<string, NormalizedDailyInsight>();
   let skipped = 0;
@@ -259,6 +317,10 @@ function normalizeInsights(
 
   for (const level of INSIGHT_LEVELS) {
     for (const raw of insights[level] ?? []) {
+      if (campaignId && level !== "account" && raw.campaign_id !== campaignId) {
+        skipped += 1;
+        continue;
+      }
       const diagnostic = client.diagnoseResultEvents(raw);
       if (diagnostic.needsConfiguration || diagnostic.value === null) {
         missingLeadRows += 1;
@@ -303,6 +365,7 @@ async function acquireRun(
   db: PrismaClient,
   input: {
     accountId: string;
+    campaignId: string | null;
     attributionKey: string;
     trigger: SyncTrigger;
     now: Date;
@@ -348,6 +411,7 @@ async function acquireRun(
       return tx.syncRun.create({
         data: {
           accountId: input.accountId,
+          campaignId: input.campaignId,
           trigger: input.trigger,
           status: "RUNNING",
           attributionKey: input.attributionKey,
@@ -397,14 +461,34 @@ async function markFailed(
 async function discover(
   client: SyncClient,
   account: MetaAccount,
+  campaignId?: string,
 ): Promise<EntityDiscovery> {
   const [campaigns, adSets, ads, creatives] = await Promise.all([
     client.listCampaigns(),
-    client.listAdSets(),
-    client.listAds(),
+    client.listAdSets(campaignId),
+    client.listAds(campaignId),
     client.listCreatives(),
   ]);
-  return { account, campaigns, adSets, ads, creatives };
+  const selectedCampaigns = campaignId
+    ? campaigns.filter((campaign) => campaign.id === campaignId)
+    : campaigns;
+  const selectedAdSets = campaignId
+    ? adSets.filter((adSet) => adSet.campaign_id === campaignId)
+    : adSets;
+  const selectedAds = campaignId
+    ? ads.filter((ad) => ad.campaign_id === campaignId)
+    : ads;
+  const selectedCreativeIds = new Set(selectedAds.map((ad) => ad.creative_id).filter((id): id is string => Boolean(id)));
+  const selectedCreatives = campaignId
+    ? creatives.filter((creative) => selectedCreativeIds.has(creative.id))
+    : creatives;
+  return {
+    account,
+    campaigns: selectedCampaigns,
+    adSets: selectedAdSets,
+    ads: selectedAds,
+    creatives: selectedCreatives,
+  };
 }
 
 function startLeaseHeartbeat(
@@ -458,10 +542,14 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
   const now = options.now ?? new Date();
   const trigger = options.trigger ?? "manual";
   const accountId = canonicalAccountId(client.getAccountId());
+  const configuredCampaign = configuredCampaignId();
+  const runCampaignId = configuredCampaign ?? null;
+  const syncScopeKey = runCampaignId ?? "account";
   const attributionKey = client.getAttributionKey();
   const leaseSeconds = options.leaseSeconds ?? positiveInteger(process.env.META_SYNC_LEASE_SECONDS, 900);
   const run = await acquireRun(db, {
     accountId,
+    campaignId: runCampaignId,
     attributionKey,
     trigger,
     now,
@@ -477,7 +565,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
 
   try {
     const previousSuccess = await db.syncRun.findFirst({
-      where: { accountId, status: "SUCCEEDED", attributionKey },
+      where: { accountId, campaignId: runCampaignId, status: "SUCCEEDED", attributionKey },
       orderBy: { finishedAt: "desc" },
     });
     const account = await client.getAccount();
@@ -512,7 +600,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
     // Metadata discovery is kept inside the same guarded flow as Insights.
     // Starting an unobserved promise here would risk an unhandled rejection if
     // an Insights request failed before the metadata promise was awaited.
-    const discovery = await discover(client, account);
+    const discovery = await discover(client, account, configuredCampaign);
     const insightEntries: Array<readonly [MetaInsightLevel, MetaInsightRow[]]> = [];
     for (const level of INSIGHT_LEVELS) {
       // Insights are intentionally paced by level. Meta documents that many
@@ -527,6 +615,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       range,
       insightRows,
       client,
+      configuredCampaign,
     );
     const warning = warningFor({
       ...normalized,
@@ -548,6 +637,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
     await db.$transaction(async (tx) => {
       for (const campaign of discovery.campaigns) {
         const campaignHasProviderFields = hasProviderFields(campaign);
+        const campaignMetadataIsCurrent = hasCompleteProviderMetadata(campaign, CURRENT_METADATA_FIELDS.campaign);
         await tx.campaign.upsert({
           where: { metaId: campaign.id },
           create: {
@@ -556,23 +646,32 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             objective: optionalString(campaign.objective),
             configuredStatus: optionalString(campaign.status),
             effectiveStatus: optionalString(campaign.effective_status),
+            dailyBudgetMinor: toOptionalInt(campaign.daily_budget),
+            lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget),
             startDate: optionalString(campaign.start_time),
             stopDate: optionalString(campaign.stop_time),
+            providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null,
+            lastSeenSyncRunId: campaignMetadataIsCurrent ? run.id : null,
             raw: json(campaign),
           },
           update: {
             ...(campaignHasProviderFields ? { raw: json(campaign) } : {}),
-            ...(campaign.name != null ? { name: optionalString(campaign.name) ?? campaign.id } : {}),
-            ...(campaign.objective != null ? { objective: optionalString(campaign.objective) } : {}),
-            ...(campaign.status != null ? { configuredStatus: optionalString(campaign.status) } : {}),
-            ...(campaign.effective_status != null ? { effectiveStatus: optionalString(campaign.effective_status) } : {}),
-            ...(campaign.start_time != null ? { startDate: optionalString(campaign.start_time) } : {}),
-            ...(campaign.stop_time != null ? { stopDate: optionalString(campaign.stop_time) } : {}),
+            ...(hasProviderField(campaign, "name") ? { name: optionalString(campaign.name) ?? campaign.id } : {}),
+            ...(hasProviderField(campaign, "objective") ? { objective: optionalString(campaign.objective) } : {}),
+            ...(hasProviderField(campaign, "status") ? { configuredStatus: optionalString(campaign.status) } : {}),
+            ...(hasProviderField(campaign, "effective_status") ? { effectiveStatus: optionalString(campaign.effective_status) } : {}),
+            ...(hasProviderField(campaign, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(campaign.daily_budget) } : {}),
+            ...(hasProviderField(campaign, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget) } : {}),
+            ...(hasProviderField(campaign, "start_time") ? { startDate: optionalString(campaign.start_time) } : {}),
+            ...(hasProviderField(campaign, "stop_time") ? { stopDate: optionalString(campaign.stop_time) } : {}),
+            ...(hasProviderField(campaign, "updated_time") ? { providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null } : {}),
+            ...(campaignMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
           },
         });
       }
       for (const adSet of discovery.adSets) {
         const adSetHasProviderFields = hasProviderFields(adSet);
+        const adSetMetadataIsCurrent = hasCompleteProviderMetadata(adSet, CURRENT_METADATA_FIELDS.adSet);
         await tx.adSet.upsert({
           where: { metaId: adSet.id },
           create: {
@@ -592,29 +691,34 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             endDate: optionalString(adSet.end_time),
             learningStage: learningStage(adSet.learning_stage_info),
             learningStageInfo: json(adSet.learning_stage_info),
+            providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null,
+            lastSeenSyncRunId: adSetMetadataIsCurrent ? run.id : null,
             raw: json(adSet),
           },
           update: {
             ...(adSetHasProviderFields ? { raw: json(adSet) } : {}),
-            ...(adSet.campaign_id != null ? { campaignMetaId: optionalString(adSet.campaign_id) } : {}),
-            ...(adSet.name != null ? { name: optionalString(adSet.name) ?? adSet.id } : {}),
-            ...(adSet.status != null ? { configuredStatus: optionalString(adSet.status) } : {}),
-            ...(adSet.effective_status != null ? { effectiveStatus: optionalString(adSet.effective_status) } : {}),
-            ...(adSet.optimization_goal != null ? { optimisationGoal: optionalString(adSet.optimization_goal) } : {}),
-            ...(adSet.billing_event != null ? { billingEvent: optionalString(adSet.billing_event) } : {}),
-            ...(adSet.daily_budget != null ? { dailyBudgetMinor: toOptionalInt(adSet.daily_budget) } : {}),
-            ...(adSet.lifetime_budget != null ? { lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget) } : {}),
-            ...(adSet.start_time != null ? { startDate: optionalString(adSet.start_time) } : {}),
-            ...(adSet.end_time != null ? { endDate: optionalString(adSet.end_time) } : {}),
-            ...(adSet.learning_stage_info != null ? {
+            ...(hasProviderField(adSet, "campaign_id") ? { campaignMetaId: optionalString(adSet.campaign_id) } : {}),
+            ...(hasProviderField(adSet, "name") ? { name: optionalString(adSet.name) ?? adSet.id } : {}),
+            ...(hasProviderField(adSet, "status") ? { configuredStatus: optionalString(adSet.status) } : {}),
+            ...(hasProviderField(adSet, "effective_status") ? { effectiveStatus: optionalString(adSet.effective_status) } : {}),
+            ...(hasProviderField(adSet, "optimization_goal") ? { optimisationGoal: optionalString(adSet.optimization_goal) } : {}),
+            ...(hasProviderField(adSet, "billing_event") ? { billingEvent: optionalString(adSet.billing_event) } : {}),
+            ...(hasProviderField(adSet, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(adSet.daily_budget) } : {}),
+            ...(hasProviderField(adSet, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget) } : {}),
+            ...(hasProviderField(adSet, "start_time") ? { startDate: optionalString(adSet.start_time) } : {}),
+            ...(hasProviderField(adSet, "end_time") ? { endDate: optionalString(adSet.end_time) } : {}),
+            ...(hasProviderField(adSet, "learning_stage_info") ? {
               learningStage: learningStage(adSet.learning_stage_info),
               learningStageInfo: json(adSet.learning_stage_info),
             } : {}),
+            ...(hasProviderField(adSet, "updated_time") ? { providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null } : {}),
+            ...(adSetMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
           },
         });
       }
       for (const ad of discovery.ads) {
         const adHasProviderFields = hasProviderFields(ad);
+        const adMetadataIsCurrent = hasCompleteProviderMetadata(ad, CURRENT_METADATA_FIELDS.ad);
         await tx.ad.upsert({
           where: { metaId: ad.id },
           create: {
@@ -625,31 +729,36 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             configuredStatus: optionalString(ad.status),
             effectiveStatus: optionalString(ad.effective_status),
             creativeMetaId: optionalString(ad.creative_id),
+            providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null,
+            lastSeenSyncRunId: adMetadataIsCurrent ? run.id : null,
             raw: json(ad),
           },
           update: {
             ...(adHasProviderFields ? { raw: json(ad) } : {}),
-            ...(ad.campaign_id != null ? { campaignMetaId: optionalString(ad.campaign_id) } : {}),
-            ...(ad.adset_id != null ? { adSetMetaId: optionalString(ad.adset_id) } : {}),
-            ...(ad.name != null ? { name: optionalString(ad.name) ?? ad.id } : {}),
-            ...(ad.status != null ? { configuredStatus: optionalString(ad.status) } : {}),
-            ...(ad.effective_status != null ? { effectiveStatus: optionalString(ad.effective_status) } : {}),
-            ...(ad.creative_id != null ? { creativeMetaId: optionalString(ad.creative_id) } : {}),
+            ...(hasProviderField(ad, "campaign_id") ? { campaignMetaId: optionalString(ad.campaign_id) } : {}),
+            ...(hasProviderField(ad, "adset_id") ? { adSetMetaId: optionalString(ad.adset_id) } : {}),
+            ...(hasProviderField(ad, "name") ? { name: optionalString(ad.name) ?? ad.id } : {}),
+            ...(hasProviderField(ad, "status") ? { configuredStatus: optionalString(ad.status) } : {}),
+            ...(hasProviderField(ad, "effective_status") ? { effectiveStatus: optionalString(ad.effective_status) } : {}),
+            ...(hasProviderField(ad, "creative_id") ? { creativeMetaId: optionalString(ad.creative_id) } : {}),
+            ...(hasProviderField(ad, "updated_time") ? { providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null } : {}),
+            ...(adMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
           },
         });
       }
       for (const creative of discovery.creatives) {
         const creativeHasProviderFields = hasProviderFields(creative);
-        const destinationUrl = creative.object_url != null || creative.link_url != null
+        const creativeMetadataIsCurrent = hasCompleteProviderMetadata(creative, CURRENT_METADATA_FIELDS.creative);
+        const destinationUrl = hasProviderField(creative, "object_url") || hasProviderField(creative, "link_url")
           ? optionalString(creative.object_url) ?? optionalString(creative.link_url)
           : undefined;
         const hasFormatFields = [
-          creative.video_id,
-          creative.image_hash,
-          creative.image_url,
-          creative.thumbnail_url,
-          creative.asset_feed_spec,
-        ].some((value) => value != null);
+          "video_id",
+          "image_hash",
+          "image_url",
+          "thumbnail_url",
+          "asset_feed_spec",
+        ].some((field) => hasProviderField(creative, field));
         await tx.creative.upsert({
           where: { metaId: creative.id },
           create: {
@@ -666,37 +775,43 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             destinationUrl: destinationUrl ?? null,
             urlTags: optionalString(creative.url_tags),
             format: creativeFormat(creative),
+            providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null,
+            lastSeenSyncRunId: creativeMetadataIsCurrent ? run.id : null,
             raw: json(creative.raw ?? creative),
           },
           update: {
             ...(creativeHasProviderFields ? { raw: json(creative.raw ?? creative) } : {}),
-            ...(creative.name != null ? { name: optionalString(creative.name) } : {}),
-            ...(creative.title != null ? { title: optionalString(creative.title) } : {}),
-            ...(creative.body != null ? { body: optionalString(creative.body) } : {}),
-            ...(creative.call_to_action_type != null ? { callToActionType: optionalString(creative.call_to_action_type) } : {}),
-            ...(creative.thumbnail_url != null ? { thumbnailUrl: optionalString(creative.thumbnail_url) } : {}),
-            ...(creative.image_hash != null ? { imageHash: optionalString(creative.image_hash) } : {}),
-            ...(creative.image_url != null ? { imageUrl: optionalString(creative.image_url) } : {}),
-            ...(creative.video_id != null ? { videoId: optionalString(creative.video_id) } : {}),
-            ...(creative.object_id != null ? { objectId: optionalString(creative.object_id) } : {}),
+            ...(hasProviderField(creative, "name") ? { name: optionalString(creative.name) } : {}),
+            ...(hasProviderField(creative, "title") ? { title: optionalString(creative.title) } : {}),
+            ...(hasProviderField(creative, "body") ? { body: optionalString(creative.body) } : {}),
+            ...(hasProviderField(creative, "call_to_action_type") ? { callToActionType: optionalString(creative.call_to_action_type) } : {}),
+            ...(hasProviderField(creative, "thumbnail_url") ? { thumbnailUrl: optionalString(creative.thumbnail_url) } : {}),
+            ...(hasProviderField(creative, "image_hash") ? { imageHash: optionalString(creative.image_hash) } : {}),
+            ...(hasProviderField(creative, "image_url") ? { imageUrl: optionalString(creative.image_url) } : {}),
+            ...(hasProviderField(creative, "video_id") ? { videoId: optionalString(creative.video_id) } : {}),
+            ...(hasProviderField(creative, "object_id") ? { objectId: optionalString(creative.object_id) } : {}),
             ...(destinationUrl !== undefined ? { destinationUrl } : {}),
-            ...(creative.url_tags != null ? { urlTags: optionalString(creative.url_tags) } : {}),
+            ...(hasProviderField(creative, "url_tags") ? { urlTags: optionalString(creative.url_tags) } : {}),
             ...(hasFormatFields ? { format: creativeFormat(creative) } : {}),
+            ...(hasProviderField(creative, "updated_time") ? { providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null } : {}),
+            ...(creativeMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
           },
         });
       }
       for (const insight of normalized.rows) {
         await tx.dailyInsight.upsert({
           where: {
-            date_level_entityId_attributionKey: {
+            date_level_entityId_attributionKey_scopeKey: {
               date: insight.date,
               level: insight.level,
               entityId: insight.entityId,
               attributionKey: insight.attributionKey,
+              scopeKey: syncScopeKey,
             },
           },
           create: {
             ...insight,
+            scopeKey: syncScopeKey,
             syncRunId: run.id,
           },
           update: {

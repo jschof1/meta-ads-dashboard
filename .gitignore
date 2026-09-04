@@ -43,6 +43,9 @@ prisma/*.db-journal
 *.db
 *.db-journal
 
+# browser QA artefacts (may contain entered fixture values)
+/.playwright-cli/
+
 # User-supplied campaign plan (template lives at public/plan.md.template)
 public/plan.md
 

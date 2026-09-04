@@ -183,8 +183,11 @@ export type MetaCampaign = {
   objective?: string;
   status?: string;
   effective_status?: string;
+  daily_budget?: string;
+  lifetime_budget?: string;
   start_time?: string;
   stop_time?: string;
+  updated_time?: string;
 };
 
 export type MetaAdSet = {
@@ -200,6 +203,7 @@ export type MetaAdSet = {
   start_time?: string;
   end_time?: string;
   learning_stage_info?: unknown;
+  updated_time?: string;
 };
 
 export type AdSummary = {
@@ -209,7 +213,7 @@ export type AdSummary = {
   effective_status?: string;
   campaign_id?: string;
   adset_id?: string;
-  creative_id?: string;
+  creative_id?: string | null;
   thumbnail_url?: string;
   image_hash?: string;
   image_url?: string;
@@ -217,6 +221,7 @@ export type AdSummary = {
   link_url?: string;
   object_url?: string;
   creative_raw?: unknown;
+  updated_time?: string;
 };
 
 export type MetaCreative = {
@@ -236,6 +241,7 @@ export type MetaCreative = {
   asset_feed_spec?: unknown;
   url_tags?: string;
   raw?: unknown;
+  updated_time?: string;
 };
 
 export type MetaEntityDiscovery = {
@@ -303,10 +309,10 @@ const FIELDS_AGGREGATE = [
 
 const ENTITY_FIELDS = {
   account: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc,business_name",
-  campaigns: "id,name,objective,status,effective_status,start_time,stop_time",
-  adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info",
-  ads: "id,name,status,effective_status,campaign_id,adset_id,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec}",
-  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags",
+  campaigns: "id,name,objective,status,effective_status,daily_budget,lifetime_budget,start_time,stop_time,updated_time",
+  adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info,updated_time",
+  ads: "id,name,status,effective_status,campaign_id,adset_id,updated_time,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec,updated_time}",
+  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags,updated_time",
 } as const;
 
 function isObject(value: unknown): value is JsonObject {
@@ -669,11 +675,30 @@ export class MetaClient {
     const account = await this.getAccount();
     const [campaigns, adSets, ads, creatives] = await Promise.all([
       this.listCampaigns(),
-      this.listAdSets(),
-      this.listAds(),
+      this.listAdSets(this.campaignId),
+      this.listAds(this.campaignId),
       this.listCreatives(),
     ]);
-    return { account, campaigns, adSets, ads, creatives };
+    const selectedCampaigns = this.campaignId
+      ? campaigns.filter((campaign) => campaign.id === this.campaignId)
+      : campaigns;
+    const selectedAdSets = this.campaignId
+      ? adSets.filter((adSet) => adSet.campaign_id === this.campaignId)
+      : adSets;
+    const selectedAds = this.campaignId
+      ? ads.filter((ad) => ad.campaign_id === this.campaignId)
+      : ads;
+    const selectedCreativeIds = new Set(selectedAds.map((ad) => ad.creative_id).filter((id): id is string => Boolean(id)));
+    const selectedCreatives = this.campaignId
+      ? creatives.filter((creative) => selectedCreativeIds.has(creative.id))
+      : creatives;
+    return {
+      account,
+      campaigns: selectedCampaigns,
+      adSets: selectedAdSets,
+      ads: selectedAds,
+      creatives: selectedCreatives,
+    };
   }
 
   private insightParams(window: string, level: "account" | "ad"): Record<string, string | undefined> {
@@ -791,6 +816,7 @@ type RawAd = {
   effective_status?: string;
   campaign_id?: string;
   adset_id?: string;
+  updated_time?: string;
   creative?: {
     id?: string;
     thumbnail_url?: string;
@@ -801,7 +827,8 @@ type RawAd = {
     object_url?: string;
     object_story_spec?: unknown;
     asset_feed_spec?: unknown;
-  };
+    updated_time?: string;
+  } | null;
 };
 
 type RawCreative = Omit<MetaCreative, "raw">;
@@ -811,22 +838,25 @@ function toCreative(creative: RawCreative): MetaCreative {
 }
 
 function toAdSummary(ad: RawAd): AdSummary {
-  return {
-    id: ad.id ?? "",
-    name: ad.name,
-    status: ad.status,
-    effective_status: ad.effective_status,
-    campaign_id: ad.campaign_id,
-    adset_id: ad.adset_id,
-    creative_id: ad.creative?.id,
-    thumbnail_url: ad.creative?.thumbnail_url,
-    image_hash: ad.creative?.image_hash,
-    image_url: ad.creative?.image_url,
-    video_id: ad.creative?.video_id,
-    link_url: ad.creative?.link_url,
-    object_url: ad.creative?.object_url,
-    creative_raw: ad.creative,
-  };
+  const summary: AdSummary = { id: ad.id ?? "" };
+  const adFields = ["name", "status", "effective_status", "campaign_id", "adset_id", "updated_time"] as const;
+  for (const field of adFields) {
+    if (Object.prototype.hasOwnProperty.call(ad, field)) summary[field] = ad[field];
+  }
+  if (Object.prototype.hasOwnProperty.call(ad, "creative")) summary.creative_raw = ad.creative;
+  const creative = ad.creative;
+  if (creative === null) {
+    summary.creative_id = null;
+  } else if (creative) {
+    const creativeFields = ["id", "thumbnail_url", "image_hash", "image_url", "video_id", "link_url", "object_url"] as const;
+    for (const field of creativeFields) {
+      if (Object.prototype.hasOwnProperty.call(creative, field)) {
+        const summaryField = field === "id" ? "creative_id" : field;
+        summary[summaryField] = creative[field];
+      }
+    }
+  }
+  return summary;
 }
 
 function parsePaging(value: unknown): MetaPaging | undefined {

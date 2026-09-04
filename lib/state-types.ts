@@ -9,9 +9,34 @@ export type Bucket = {
   linkClicks: number | null;
   leads: number | null;
   cplCents: number | null;
+  cpcCents: number | null;
   ctrLink: number | null;
   cpmCents: number | null;
+  // For multi-day windows this is the impression-weighted average of the
+  // stored daily Meta frequencies; it is not de-duplicated cross-day reach.
   frequency: number | null;
+};
+
+export type DashboardPeriod = "today" | "7d" | "14d" | "30d" | "mtd";
+
+export type PeriodBuckets = {
+  today: Bucket;
+  yesterday: Bucket;
+  mtd: Bucket;
+  previousMtd: Bucket;
+  last7: Bucket;
+  previous7: Bucket;
+  last14: Bucket;
+  previous14: Bucket;
+  last30: Bucket;
+  previous30: Bucket;
+};
+
+export type EvidenceStatus = "unknown" | "thin" | "sufficient";
+
+export type EntityEvidence = {
+  status: EvidenceStatus;
+  reason: string;
 };
 
 export type AdVerdictTag = "too_early" | "winner" | "performing" | "watch" | "cull" | "unknown";
@@ -20,7 +45,22 @@ export type AdRow = {
   adId: string;
   adName: string;
   status: string;
+  isCurrent: boolean;
   thumbnailUrl: string | null;
+  imageUrl: string | null;
+  videoId: string | null;
+  creativeId: string | null;
+  format: string | null;
+  title: string | null;
+  body: string | null;
+  callToAction: string | null;
+  destinationUrl: string | null;
+  lastChangeAt: string | null;
+  campaignId: string | null;
+  adSetId: string | null;
+  periods: PeriodBuckets;
+  evidence: Record<DashboardPeriod, EntityEvidence>;
+  evidenceStatus: EvidenceStatus;
   spendCents: number | null;
   impressions: number | null;
   linkClicks: number | null;
@@ -36,6 +76,37 @@ export type AdRow = {
   fatigueReason: string;
 };
 
+export type CampaignRow = {
+  campaignId: string;
+  campaignName: string;
+  objective: string | null;
+  status: string;
+  isCurrent: boolean;
+  dailyBudgetMinor: number | null;
+  lifetimeBudgetMinor: number | null;
+  startDate: string | null;
+  stopDate: string | null;
+  periods: PeriodBuckets;
+  evidence: Record<DashboardPeriod, EntityEvidence>;
+  evidenceStatus: EvidenceStatus;
+};
+
+export type AdSetRow = {
+  adSetId: string;
+  campaignId: string | null;
+  adSetName: string;
+  status: string;
+  isCurrent: boolean;
+  learningStage: string | null;
+  dailyBudgetMinor: number | null;
+  lifetimeBudgetMinor: number | null;
+  startDate: string | null;
+  endDate: string | null;
+  periods: PeriodBuckets;
+  evidence: Record<DashboardPeriod, EntityEvidence>;
+  evidenceStatus: EvidenceStatus;
+};
+
 export type TrendPoint = {
   date: string;
   spendCents: number | null;
@@ -43,6 +114,7 @@ export type TrendPoint = {
   linkClicks: number | null;
   leads: number | null;
   cplCents: number | null;
+  cpcCents: number | null;
   cpmCents: number | null;
   ctrLink: number | null;
   frequency: number | null;
@@ -81,6 +153,15 @@ export type Anomaly = {
   severity: "info" | "warn" | "alert";
 };
 
+export type DataWarning = {
+  id: string;
+  severity: "warn" | "alert" | "info";
+  label: string;
+  detail: string;
+};
+
+export type PeriodDataWarnings = Record<DashboardPeriod, DataWarning[]>;
+
 export type ActionLogEntry = {
   id: string;
   createdAt: string;
@@ -107,9 +188,21 @@ export type CampaignPhase = {
   exitCriteria: { label: string; done: boolean }[];
 };
 
+export type SpendStatus = {
+  status: "unknown" | "under_pace" | "on_pace" | "over_pace" | "over_budget";
+  label: string;
+  detail: string;
+  spendCents: number | null;
+  expectedCents: number | null;
+  budgetCents: number | null;
+  elapsedDay: number | null;
+  daysInMonth: number | null;
+};
+
 export type DashboardState = {
   meta: {
     adAccountId: string | null;
+    accountName: string | null;
     campaignId: string | null;
     launchDate: string | null;
     daysSinceLaunch: number | null;
@@ -121,26 +214,23 @@ export type DashboardState = {
     lastAttemptAt: string | null;
     lastAttemptStatus: string | null;
     lastSyncError: string | null;
+    mtdComparisonComparable: boolean;
+    metadataStaleCount: number;
     syncState: "never" | "running" | "fresh" | "stale" | "failed";
   };
-  scorecard: {
-    today: Bucket;
-    yesterday: Bucket;
-    mtd: Bucket;
-    last7: Bucket;
-    previous7: Bucket;
-    last14: Bucket;
-    previous14: Bucket;
-    last30: Bucket;
-    previous30: Bucket;
+  scorecard: PeriodBuckets & {
     leadsThisWeek: number | null;
     learningProgress: number | null;
     learningLeadsTarget: number | null;
     budget: { dailyCents: number | null; monthlyCents: number | null };
+    spendStatus: SpendStatus;
   };
   trend: TrendPoint[];
   heatmap: HeatmapCell[];
   ads: AdRow[];
+  campaigns: CampaignRow[];
+  adSets: AdSetRow[];
+  dataWarnings: PeriodDataWarnings;
   funnel: FunnelData;
   anomalies: Anomaly[];
   actionLog: ActionLogEntry[];

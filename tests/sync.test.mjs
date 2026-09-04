@@ -8,19 +8,24 @@ import { diagnoseResultEvents } from "../lib/meta.ts";
 import { buildDashboardState } from "../lib/read-model.ts";
 import { SyncAlreadyRunningError, syncMeta } from "../lib/sync.ts";
 
-const migrationPath = new URL("../prisma/migrations/20260904170000_pr03_sync_data/migration.sql", import.meta.url);
+const migrationPaths = [
+  new URL("../prisma/migrations/20260904170000_pr03_sync_data/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
+];
 const databases = [];
 
 async function createDatabase() {
   const directory = await mkdtemp(join(tmpdir(), "meta-ads-pr03-"));
   const path = join(directory, "test.db");
   const db = createPrismaClient({ url: `file:${path}` });
-  const migration = await readFile(migrationPath, "utf8");
-  const statements = migration
-    .split(/;\s*(?:\n|$)/g)
-    .map((statement) => statement.trim())
-    .filter(Boolean);
-  for (const statement of statements) await db.$executeRawUnsafe(statement);
+  for (const migrationPath of migrationPaths) {
+    const migration = await readFile(migrationPath, "utf8");
+    const statements = migration
+      .split(/;\s*(?:\n|$)/g)
+      .map((statement) => statement.trim())
+      .filter(Boolean);
+    for (const statement of statements) await db.$executeRawUnsafe(statement);
+  }
   databases.push({ db, directory });
   return db;
 }
@@ -41,7 +46,7 @@ const account = {
 };
 
 const metadata = {
-  campaigns: [{ id: "campaign-1", name: "UKTL Leads", objective: "OUTCOME_LEADS", status: "ACTIVE", effective_status: "ACTIVE" }],
+  campaigns: [{ id: "campaign-1", name: "UKTL Leads", objective: "OUTCOME_LEADS", status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "10000", lifetime_budget: "250000", updated_time: "2026-09-04T10:00:00+0000" }],
   adSets: [{
     id: "adset-1",
     campaign_id: "campaign-1",
@@ -53,6 +58,7 @@ const metadata = {
     daily_budget: "5000",
     lifetime_budget: "120000",
     learning_stage_info: { status: "LEARNING", samples: 4 },
+    updated_time: "2026-09-04T10:01:00+0000",
   }],
   ads: [{
     id: "ad-1",
@@ -62,6 +68,7 @@ const metadata = {
     campaign_id: "campaign-1",
     adset_id: "adset-1",
     creative_id: "creative-1",
+    updated_time: "2026-09-04T10:02:00+0000",
   }],
   creatives: [{
     id: "creative-1",
@@ -71,7 +78,14 @@ const metadata = {
     call_to_action_type: "LEARN_MORE",
     thumbnail_url: "https://example.test/thumb.jpg",
     image_hash: "hash-1",
+    image_url: null,
+    video_id: null,
+    object_id: null,
+    link_url: null,
     object_url: "https://example.test/book",
+    asset_feed_spec: null,
+    url_tags: null,
+    updated_time: "2026-09-04T10:03:00+0000",
   }],
 };
 
@@ -153,6 +167,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   const result = await run(db, client);
 
   assert.equal(result.initialBackfill, true);
+  assert.equal(await db.syncRun.findUnique({ where: { id: result.runId } }).then((row) => row.campaignId), null);
   assert.equal(result.since, "2026-06-07");
   assert.equal(result.until, "2026-09-04");
   assert.equal(calls.length, 4);
@@ -164,11 +179,21 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   ]);
 
   assert.equal(await db.campaign.count(), 1);
+  assert.equal(await db.campaign.findUnique({ where: { metaId: "campaign-1" } }).then((row) => row.dailyBudgetMinor), 10000);
+  assert.equal(await db.campaign.findUnique({ where: { metaId: "campaign-1" } }).then((row) => row.lifetimeBudgetMinor), 250000);
   assert.equal(await db.adSet.findUnique({ where: { metaId: "adset-1" } }).then((row) => row.dailyBudgetMinor), 5000);
   assert.equal(await db.adSet.findUnique({ where: { metaId: "adset-1" } }).then((row) => row.lifetimeBudgetMinor), 120000);
+  assert.equal((await db.campaign.findUnique({ where: { metaId: "campaign-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:00:00.000Z");
+  assert.equal((await db.campaign.findUnique({ where: { metaId: "campaign-1" } })).lastSeenSyncRunId, result.runId);
+  assert.equal((await db.adSet.findUnique({ where: { metaId: "adset-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:01:00.000Z");
+  assert.equal((await db.adSet.findUnique({ where: { metaId: "adset-1" } })).lastSeenSyncRunId, result.runId);
+  assert.equal((await db.ad.findUnique({ where: { metaId: "ad-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:02:00.000Z");
+  assert.equal((await db.ad.findUnique({ where: { metaId: "ad-1" } })).lastSeenSyncRunId, result.runId);
+  assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:03:00.000Z");
+  assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).lastSeenSyncRunId, result.runId);
   assert.equal(await db.dailyInsight.count(), 4);
   const accountRow = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(accountRow.spendMinorUnits, 0);
   assert.equal(accountRow.impressions, 0);
@@ -177,6 +202,12 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
   assert.equal(state.ads[0].verdict, "too_early");
   assert.match(state.ads[0].verdictReason, /need 3\+ stored leads/);
+  assert.equal(state.ads[0].lastChangeAt, "2026-09-04T10:03:00.000Z");
+  assert.equal(state.ads[0].format, "image");
+  assert.equal(state.campaigns[0].status, "ACTIVE");
+  assert.equal(state.adSets[0].status, "ACTIVE");
+  assert.equal(state.adSets[0].learningStage, "LEARNING");
+  assert.equal(state.ads[0].isCurrent, true);
 
   const runRow = await db.syncRun.findUnique({ where: { id: result.runId } });
   assert.equal(runRow.status, "SUCCEEDED");
@@ -205,7 +236,7 @@ test("is idempotent and overwrites delayed conversion updates during the recent 
   assert.equal(calls[4].range.since, "2026-08-30");
   assert.equal(await db.dailyInsight.count(), 4);
   const row = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(row.spendMinorUnits, 2000);
   assert.equal(row.leads, 4);
@@ -288,7 +319,7 @@ test("marks a failed refresh without discarding the last successful read model",
   await assert.rejects(() => run(db, failing.client, new Date("2026-09-05T12:00:00.000Z")), /provider unavailable/);
 
   const stored = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   const latest = await db.syncRun.findFirst({ orderBy: { startedAt: "desc" } });
   const state = await buildDashboardState({ db, now: new Date("2026-09-05T12:00:00.000Z") });
@@ -379,6 +410,141 @@ test("scopes the dashboard read model to the active account's successful sync hi
   }
 });
 
+test("keeps campaign-scoped dashboard reads separate from account-wide sync history", async () => {
+  const db = await createDatabase();
+  const previousAccountId = process.env.META_AD_ACCOUNT_ID;
+  const previousCampaignId = process.env.META_CAMPAIGN_ID;
+  process.env.META_AD_ACCOUNT_ID = "act_scope";
+  process.env.META_CAMPAIGN_ID = "campaign-selected";
+  try {
+    await db.syncRun.createMany({
+      data: [
+        {
+          id: "run-account-wide",
+          accountId: "act_scope",
+          campaignId: null,
+          currencyCode: "GBP",
+          timezoneName: "Europe/London",
+          trigger: "manual",
+          status: "SUCCEEDED",
+          attributionKey: "7d_click,1d_view",
+          startedAt: new Date("2026-09-03T12:00:00.000Z"),
+          finishedAt: new Date("2026-09-03T12:01:00.000Z"),
+        },
+        {
+          id: "run-campaign-scoped",
+          accountId: "act_scope",
+          campaignId: "campaign-selected",
+          currencyCode: "GBP",
+          timezoneName: "Europe/London",
+          trigger: "manual",
+          status: "SUCCEEDED",
+          attributionKey: "7d_click,1d_view",
+          startedAt: new Date("2026-09-04T12:00:00.000Z"),
+          finishedAt: new Date("2026-09-04T12:01:00.000Z"),
+        },
+      ],
+    });
+    await db.dailyInsight.createMany({
+      data: [
+        { date: "2026-09-03", level: "account", entityId: "act_scope", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-account-wide" },
+        { date: "2026-09-03", level: "campaign", entityId: "campaign-other", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-account-wide" },
+        { date: "2026-09-04", level: "account", entityId: "act_scope", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-campaign-scoped" },
+        { date: "2026-09-04", level: "campaign", entityId: "campaign-selected", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-campaign-scoped" },
+      ],
+    });
+
+    const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:30:00.000Z") });
+
+    assert.equal(state.meta.campaignId, "campaign-selected");
+    assert.equal(state.meta.adAccountId, "act_scope");
+    assert.equal(state.scorecard.today.spendCents, 900);
+    assert.equal(state.scorecard.today.leads, 1);
+    assert.deepEqual(state.campaigns.map((campaign) => campaign.campaignId), ["campaign-selected"]);
+  } finally {
+    if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = previousAccountId;
+    if (previousCampaignId === undefined) delete process.env.META_CAMPAIGN_ID;
+    else process.env.META_CAMPAIGN_ID = previousCampaignId;
+  }
+});
+
+test("keeps independent campaign-scoped histories isolated across campaigns and failed attempts", async () => {
+  const db = await createDatabase();
+  const previousAccountId = process.env.META_AD_ACCOUNT_ID;
+  const previousCampaignId = process.env.META_CAMPAIGN_ID;
+  process.env.META_AD_ACCOUNT_ID = "act_scope-history";
+  try {
+    await db.syncRun.createMany({
+      data: [
+        {
+          id: "run-scope-a",
+          accountId: "act_scope-history",
+          campaignId: "campaign-a",
+          currencyCode: "GBP",
+          timezoneName: "Europe/London",
+          trigger: "manual",
+          status: "SUCCEEDED",
+          attributionKey: "7d_click,1d_view",
+          startedAt: new Date("2026-09-04T08:00:00.000Z"),
+          finishedAt: new Date("2026-09-04T08:01:00.000Z"),
+        },
+        {
+          id: "run-scope-b",
+          accountId: "act_scope-history",
+          campaignId: "campaign-b",
+          currencyCode: "GBP",
+          timezoneName: "Europe/London",
+          trigger: "manual",
+          status: "SUCCEEDED",
+          attributionKey: "7d_click,1d_view",
+          startedAt: new Date("2026-09-04T09:00:00.000Z"),
+          finishedAt: new Date("2026-09-04T09:01:00.000Z"),
+        },
+        {
+          id: "run-scope-b-failed",
+          accountId: "act_scope-history",
+          campaignId: "campaign-b",
+          currencyCode: "GBP",
+          timezoneName: "Europe/London",
+          trigger: "cron",
+          status: "FAILED",
+          attributionKey: "7d_click,1d_view",
+          startedAt: new Date("2026-09-04T10:00:00.000Z"),
+          finishedAt: new Date("2026-09-04T10:01:00.000Z"),
+          error: "redacted provider diagnostic",
+        },
+      ],
+    });
+    await db.dailyInsight.createMany({
+      data: [
+        { date: "2026-09-04", level: "account", entityId: "act_scope-history", scopeKey: "campaign-a", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 100, impressions: 100, leads: 1, syncRunId: "run-scope-a" },
+        { date: "2026-09-04", level: "campaign", entityId: "campaign-a", scopeKey: "campaign-a", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 100, impressions: 100, leads: 1, syncRunId: "run-scope-a" },
+        { date: "2026-09-04", level: "account", entityId: "act_scope-history", scopeKey: "campaign-b", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 200, impressions: 200, leads: 2, syncRunId: "run-scope-b" },
+        { date: "2026-09-04", level: "campaign", entityId: "campaign-b", scopeKey: "campaign-b", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 200, impressions: 200, leads: 2, syncRunId: "run-scope-b" },
+      ],
+    });
+
+    process.env.META_CAMPAIGN_ID = "campaign-a";
+    const campaignA = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+    assert.equal(campaignA.scorecard.today.spendCents, 100);
+    assert.deepEqual(campaignA.campaigns.map((campaign) => campaign.campaignId), ["campaign-a"]);
+    assert.equal(campaignA.meta.syncState, "fresh");
+
+    process.env.META_CAMPAIGN_ID = "campaign-b";
+    const campaignB = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+    assert.equal(campaignB.scorecard.today.spendCents, 200);
+    assert.deepEqual(campaignB.campaigns.map((campaign) => campaign.campaignId), ["campaign-b"]);
+    assert.equal(campaignB.meta.syncState, "failed");
+    assert.equal(campaignB.dataWarnings.today.some((warning) => warning.id === "sync-failed"), true);
+  } finally {
+    if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = previousAccountId;
+    if (previousCampaignId === undefined) delete process.env.META_CAMPAIGN_ID;
+    else process.env.META_CAMPAIGN_ID = previousCampaignId;
+  }
+});
+
 test("deduplicates repeated provider rows and accepts a delayed null-to-known result", async () => {
   const db = await createDatabase();
   const duplicate = insight("2026-09-04", { spend: "10.00", actions: [] });
@@ -391,7 +557,7 @@ test("deduplicates repeated provider rows and accepts a delayed null-to-known re
 
   await run(db, client);
   let stored = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(await db.dailyInsight.count(), 4);
   assert.equal(stored.spendMinorUnits, 1100);
@@ -404,7 +570,7 @@ test("deduplicates repeated provider rows and accepts a delayed null-to-known re
   rows.ad[0] = rows.account[0];
   await run(db, client, new Date("2026-09-05T12:00:00.000Z"));
   stored = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(stored.leads, 3);
   assert.equal(stored.cplMinorUnits, 367);
@@ -460,7 +626,7 @@ test("keeps existing read-model rows intact when an update transaction fails", a
   await assert.rejects(() => run(db, fakeClient().client, new Date("2026-09-05T12:00:00.000Z")), /forced campaign update failure|Foreign key constraint/);
   const campaign = await db.campaign.findUnique({ where: { metaId: "campaign-1" } });
   const stored = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(campaign.name, "UKTL Leads");
   assert.equal(stored.spendMinorUnits, 1234);
@@ -524,12 +690,12 @@ test("preserves known metadata but clears omitted metrics after a partial provid
     creatives: [...metadata.creatives],
   };
   const { client, rows } = fakeClient({ metadata: source });
-  await run(db, client, new Date("2026-09-04T12:00:00.000Z"));
+  const first = await run(db, client, new Date("2026-09-04T12:00:00.000Z"));
 
-  source.campaigns[0] = { id: "campaign-1", name: null, objective: null, status: null, effective_status: null };
-  source.adSets[0] = { id: "adset-1", name: null, daily_budget: null, lifetime_budget: null, status: null };
-  source.ads[0] = { id: "ad-1", name: null, status: null, effective_status: null };
-  source.creatives[0] = { id: "creative-1", name: null, title: null, body: null };
+  source.campaigns[0] = { id: "campaign-1" };
+  source.adSets[0] = { id: "adset-1" };
+  source.ads[0] = { id: "ad-1" };
+  source.creatives[0] = { id: "creative-1" };
   const partial = insight("2026-09-04", {
     spend: undefined,
     impressions: undefined,
@@ -548,8 +714,12 @@ test("preserves known metadata but clears omitted metrics after a partial provid
   assert.equal((await db.adSet.findUnique({ where: { metaId: "adset-1" } })).dailyBudgetMinor, 5000);
   assert.equal((await db.ad.findUnique({ where: { metaId: "ad-1" } })).name, "Trade lead creative");
   assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).title, "Get more trade leads");
+  assert.equal((await db.campaign.findUnique({ where: { metaId: "campaign-1" } })).lastSeenSyncRunId, first.runId);
+  assert.equal((await db.adSet.findUnique({ where: { metaId: "adset-1" } })).lastSeenSyncRunId, first.runId);
+  assert.equal((await db.ad.findUnique({ where: { metaId: "ad-1" } })).lastSeenSyncRunId, first.runId);
+  assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).lastSeenSyncRunId, first.runId);
   const stored = await db.dailyInsight.findUnique({
-    where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
+    where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
   assert.equal(stored.spendMinorUnits, null);
   assert.equal(stored.impressions, null);
@@ -557,6 +727,158 @@ test("preserves known metadata but clears omitted metrics after a partial provid
   assert.equal(stored.cplMinorUnits, null);
   assert.equal(stored.rawActions, "null");
   assert.equal(stored.raw.includes("12.34"), false);
+});
+
+test("clears explicitly null provider metadata while preserving fields omitted from a partial response", async () => {
+  const db = await createDatabase();
+  const source = {
+    campaigns: [...metadata.campaigns],
+    adSets: [...metadata.adSets],
+    ads: [...metadata.ads],
+    creatives: [...metadata.creatives],
+  };
+  const { client, rows } = fakeClient({ metadata: source });
+  await run(db, client, new Date("2026-09-04T12:00:00.000Z"));
+
+  source.campaigns[0] = {
+    ...metadata.campaigns[0],
+    objective: null,
+    status: null,
+    effective_status: null,
+    daily_budget: null,
+    lifetime_budget: null,
+    updated_time: null,
+  };
+  source.adSets[0] = {
+    ...metadata.adSets[0],
+    status: null,
+    effective_status: null,
+    daily_budget: null,
+    lifetime_budget: null,
+    learning_stage_info: null,
+    updated_time: null,
+  };
+  source.ads[0] = { ...metadata.ads[0], status: null, effective_status: null, updated_time: null };
+  source.creatives[0] = { ...metadata.creatives[0], title: null, object_url: null, updated_time: null };
+  const unchangedMetrics = insight("2026-09-04");
+  rows.account[0] = unchangedMetrics;
+  rows.campaign[0] = unchangedMetrics;
+  rows.adset[0] = unchangedMetrics;
+  rows.ad[0] = unchangedMetrics;
+  await run(db, client, new Date("2026-09-05T12:00:00.000Z"));
+
+  const campaign = await db.campaign.findUnique({ where: { metaId: "campaign-1" } });
+  const adSet = await db.adSet.findUnique({ where: { metaId: "adset-1" } });
+  const ad = await db.ad.findUnique({ where: { metaId: "ad-1" } });
+  const creative = await db.creative.findUnique({ where: { metaId: "creative-1" } });
+  assert.equal(campaign.objective, null);
+  assert.equal(campaign.configuredStatus, null);
+  assert.equal(campaign.effectiveStatus, null);
+  assert.equal(campaign.dailyBudgetMinor, null);
+  assert.equal(campaign.lifetimeBudgetMinor, null);
+  assert.equal(campaign.providerUpdatedAt, null);
+  assert.equal(adSet.configuredStatus, null);
+  assert.equal(adSet.effectiveStatus, null);
+  assert.equal(adSet.dailyBudgetMinor, null);
+  assert.equal(adSet.lifetimeBudgetMinor, null);
+  assert.equal(adSet.learningStage, null);
+  assert.equal(adSet.providerUpdatedAt, null);
+  assert.equal(ad.configuredStatus, null);
+  assert.equal(ad.effectiveStatus, null);
+  assert.equal(ad.providerUpdatedAt, null);
+  assert.equal(creative.title, null);
+  assert.equal(creative.destinationUrl, null);
+  assert.equal(creative.providerUpdatedAt, null);
+});
+
+test("scopes discovered metadata and insight rows to META_CAMPAIGN_ID", async () => {
+  const db = await createDatabase();
+  const previousCampaignId = process.env.META_CAMPAIGN_ID;
+  process.env.META_CAMPAIGN_ID = "campaign-1";
+  try {
+    const inScope = insight("2026-09-04");
+    const outOfScope = insight("2026-09-04", {
+      campaign_id: "campaign-2",
+      campaign_name: "Unrelated campaign",
+      adset_id: "adset-2",
+      adset_name: "Unrelated ad set",
+      ad_id: "ad-2",
+      ad_name: "Unrelated ad",
+    });
+    const { client } = fakeClient({
+      metadata: {
+        campaigns: [...metadata.campaigns, { ...metadata.campaigns[0], id: "campaign-2", name: "Unrelated campaign" }],
+        adSets: [...metadata.adSets, { ...metadata.adSets[0], id: "adset-2", campaign_id: "campaign-2", name: "Unrelated ad set" }],
+        ads: [...metadata.ads, { ...metadata.ads[0], id: "ad-2", campaign_id: "campaign-2", adset_id: "adset-2", creative_id: "creative-2" }],
+        creatives: [...metadata.creatives, { ...metadata.creatives[0], id: "creative-2", name: "Unrelated creative" }],
+      },
+      rows: {
+        account: [inScope],
+        campaign: [inScope, outOfScope],
+        adset: [inScope, outOfScope],
+        ad: [inScope, outOfScope],
+      },
+    });
+    await run(db, client);
+
+    assert.equal(await db.syncRun.findFirst({ orderBy: { startedAt: "desc" } }).then((row) => row.campaignId), "campaign-1");
+    assert.deepEqual(await db.campaign.findMany({ select: { metaId: true } }), [{ metaId: "campaign-1" }]);
+    assert.deepEqual(await db.adSet.findMany({ select: { metaId: true } }), [{ metaId: "adset-1" }]);
+    assert.deepEqual(await db.ad.findMany({ select: { metaId: true } }), [{ metaId: "ad-1" }]);
+    assert.deepEqual(await db.creative.findMany({ select: { metaId: true } }), [{ metaId: "creative-1" }]);
+    assert.equal(await db.dailyInsight.count(), 4);
+  } finally {
+    if (previousCampaignId === undefined) delete process.env.META_CAMPAIGN_ID;
+    else process.env.META_CAMPAIGN_ID = previousCampaignId;
+  }
+});
+
+test("marks historical metadata as not current when a later successful sync omits it", async () => {
+  const db = await createDatabase();
+  await run(db, fakeClient().client, new Date("2026-09-04T12:00:00.000Z"));
+  const empty = fakeClient({
+    metadata: { campaigns: [], adSets: [], ads: [], creatives: [] },
+    rows: { account: [], campaign: [], adset: [], ad: [] },
+  });
+  await run(db, empty.client, new Date("2026-09-05T12:00:00.000Z"));
+
+  const state = await buildDashboardState({ db, now: new Date("2026-09-05T12:30:00.000Z") });
+  assert.equal(state.meta.metadataStaleCount, 3);
+  assert.equal(state.campaigns[0].isCurrent, false);
+  assert.equal(state.adSets[0].isCurrent, false);
+  assert.equal(state.ads[0].isCurrent, false);
+  assert.equal(state.dataWarnings["7d"].some((warning) => warning.id === "metadata-not-current"), true);
+});
+
+test("marks omitted current-window insights unknown while retaining the historical source row", async () => {
+  const db = await createDatabase();
+  await run(db, fakeClient().client, new Date("2026-09-04T12:00:00.000Z"));
+  const empty = fakeClient({
+    metadata: { campaigns: [], adSets: [], ads: [], creatives: [] },
+    rows: { account: [], campaign: [], adset: [], ad: [] },
+  });
+  await run(db, empty.client, new Date("2026-09-05T12:00:00.000Z"));
+
+  const state = await buildDashboardState({ db, now: new Date("2026-09-05T12:30:00.000Z") });
+  const historical = await db.dailyInsight.findUnique({
+    where: {
+      date_level_entityId_attributionKey_scopeKey: {
+        date: "2026-09-04",
+        level: "account",
+        entityId: account.id,
+        attributionKey: "7d_click,1d_view",
+        scopeKey: "account",
+      },
+    },
+  });
+
+  assert.equal(state.scorecard.last7.spendCents, null);
+  assert.equal(state.scorecard.last7.leads, null);
+  assert.equal(state.ads[0].periods.last7.spendCents, null);
+  assert.equal(state.ads[0].isCurrent, false);
+  assert.equal(state.dataWarnings["7d"].some((warning) => warning.id === "metadata-not-current"), true);
+  assert.equal(historical.spendMinorUnits, 1234);
+  assert.equal(historical.leads, 2);
 });
 
 test("skips provider insight rows outside the requested range", async () => {

@@ -79,12 +79,49 @@ test("applies the PR03 schema through Prisma migrate deploy", async () => {
 
   const migrations = await db.$queryRawUnsafe('SELECT "migration_name" FROM "_prisma_migrations"');
   const tables = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type = 'table'");
+  const campaignColumns = await db.$queryRawUnsafe('PRAGMA table_info("Campaign")');
+  const adSetColumns = await db.$queryRawUnsafe('PRAGMA table_info("AdSet")');
+  const adColumns = await db.$queryRawUnsafe('PRAGMA table_info("Ad")');
+  const creativeColumns = await db.$queryRawUnsafe('PRAGMA table_info("Creative")');
+  const dailyInsightColumns = await db.$queryRawUnsafe('PRAGMA table_info("DailyInsight")');
+  const syncRunColumns = await db.$queryRawUnsafe('PRAGMA table_info("SyncRun")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard"]);
   for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
+  for (const [name, columns] of [["Campaign", campaignColumns], ["AdSet", adSetColumns], ["Ad", adColumns], ["Creative", creativeColumns]]) {
+    assert.ok(columns.some((column) => column.name === "providerUpdatedAt"), `${name} missing providerUpdatedAt`);
+    assert.ok(columns.some((column) => column.name === "lastSeenSyncRunId"), `${name} missing lastSeenSyncRunId`);
+  }
+  assert.ok(campaignColumns.some((column) => column.name === "dailyBudgetMinor"), "Campaign missing dailyBudgetMinor");
+  assert.ok(campaignColumns.some((column) => column.name === "lifetimeBudgetMinor"), "Campaign missing lifetimeBudgetMinor");
+  assert.ok(dailyInsightColumns.some((column) => column.name === "scopeKey"), "DailyInsight missing scopeKey");
+  assert.ok(syncRunColumns.some((column) => column.name === "campaignId"), "SyncRun missing campaignId");
   await db.$disconnect();
+});
+
+test("upgrades a populated PR03 database without dropping durable rows", async () => {
+  const { path } = await temporaryDatabase();
+  executeMigrationScript(path);
+  const legacy = createPrismaClient({ url: "file:" + path });
+  await legacy.$executeRawUnsafe("INSERT INTO \"Campaign\" (\"id\", \"metaId\", \"name\", \"raw\", \"createdAt\", \"updatedAt\") VALUES ('pr03-campaign', 'pr03-campaign', 'Existing campaign', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+  await legacy.$executeRawUnsafe("INSERT INTO \"SyncRun\" (\"id\", \"accountId\", \"trigger\", \"status\", \"attributionKey\", \"startedAt\", \"finishedAt\") VALUES ('pr03-run', 'act_pr03', 'manual', 'SUCCEEDED', '7d_click,1d_view', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+  await legacy.$executeRawUnsafe("INSERT INTO \"DailyInsight\" (\"id\", \"date\", \"level\", \"entityId\", \"attributionKey\", \"spendMinorUnits\", \"impressions\", \"syncRunId\") VALUES ('pr03-insight', '2026-09-04', 'account', 'act_pr03', '7d_click,1d_view', 1234, 1000, 'pr03-run')");
+  await legacy.$disconnect();
+
+  baselineMigration(path);
+  deploy(path);
+  const upgraded = createPrismaClient({ url: "file:" + path });
+  const campaign = await upgraded.campaign.findUnique({ where: { metaId: "pr03-campaign" } });
+  const insight = await upgraded.dailyInsight.findUnique({ where: { id: "pr03-insight" } });
+  const migrations = await upgraded.$queryRawUnsafe("SELECT \"migration_name\" FROM \"_prisma_migrations\"");
+
+  assert.equal(campaign.name, "Existing campaign");
+  assert.equal(insight.spendMinorUnits, 1234);
+  assert.equal(insight.scopeKey, "account");
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard"]);
+  await upgraded.$disconnect();
 });
 
 test("upgrades a legacy PR01/PR02 database without dropping stored rows", async () => {
