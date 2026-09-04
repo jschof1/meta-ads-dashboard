@@ -33,23 +33,23 @@ export function CreativeBriefGenerator({ state }: { state: DashboardState }) {
     const losers = ads.filter((a) => a.verdict === "cull" || a.verdict === "watch").slice(0, 3);
     const topAds = (winners.length > 0 ? winners : ads.slice(0, 3)).map((a) => ({
       adName: a.adName,
-      cprCents: a.cprCents,
+      cplCents: a.cplCents,
       spendCents: a.spendCents,
-      registrations: a.registrations,
+      leads: a.leads,
       ctrLink: a.ctrLink,
     }));
     const losingAds = losers.map((a) => ({
       adName: a.adName,
-      cprCents: a.cprCents,
+      cplCents: a.cplCents,
       spendCents: a.spendCents,
-      registrations: a.registrations,
+      leads: a.leads,
       ctrLink: a.ctrLink,
     }));
     try {
       const res = await fetch("/api/insights/brief", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topAds, losingAds }),
+        body: JSON.stringify({ currencyCode: state.meta.currencyCode, topAds, losingAds }),
       });
       const json = await res.json();
       setBrief(json);

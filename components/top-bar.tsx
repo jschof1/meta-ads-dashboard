@@ -123,10 +123,10 @@ export function TopBar() {
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-8 py-3 flex items-center gap-4">
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-semibold">Meta Ads Dashboard</h1>
+          <h1 className="text-sm sm:text-lg font-semibold whitespace-nowrap shrink-0">UK Trade Leads</h1>
         </div>
         <div className="text-xs text-muted-foreground hidden sm:block">
-          Cold campaign · Business Owners US · $50/day
+          Meta Ads Command Centre · UK trades acquisition
         </div>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5">

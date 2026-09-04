@@ -1,22 +1,18 @@
 "use client";
 
 import type { AdRow, DashboardState, AdVerdictTag } from "@/lib/state-types";
-import { classifyCpr } from "@/lib/targets";
+import { classifyCpl } from "@/lib/targets";
+import { formatMoney, formatPercent } from "@/lib/format";
 import { ExternalLink, Flame } from "lucide-react";
 
-function fmtMoney(cents: number | null | undefined) {
-  if (cents == null) return "-";
-  return `$${(cents / 100).toFixed(2)}`;
-}
-function fmtPct(v: number | null | undefined) {
-  if (v == null) return "-";
-  return `${(v * 100).toFixed(2)}%`;
+function fmtPct(value: number | null | undefined) {
+  return formatPercent(value);
 }
 
 function statusBadge(status: string) {
-  const s = status.toUpperCase();
-  if (s.includes("ACTIVE")) return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-  if (s.includes("PAUSED")) return "bg-muted text-muted-foreground border-border";
+  const value = status.toUpperCase();
+  if (value.includes("ACTIVE")) return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+  if (value.includes("PAUSED")) return "bg-muted text-muted-foreground border-border";
   return "bg-amber-500/10 text-amber-500 border-amber-500/20";
 }
 
@@ -26,16 +22,17 @@ const VERDICT_STYLES: Record<AdVerdictTag, { label: string; cls: string }> = {
   watch: { label: "Watch", cls: "bg-amber-500/10 text-amber-500 border-amber-500/30" },
   cull: { label: "Cull", cls: "bg-red-500/10 text-destructive border-destructive/30" },
   too_early: { label: "Too early", cls: "bg-muted text-muted-foreground border-border" },
+  unknown: { label: "Target not set", cls: "bg-muted text-muted-foreground border-border" },
 };
 
 function VerdictBadge({ ad }: { ad: AdRow }) {
-  const v = VERDICT_STYLES[ad.verdict];
+  const verdict = VERDICT_STYLES[ad.verdict];
   return (
     <span
       title={ad.verdictReason}
-      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${v.cls}`}
+      className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border ${verdict.cls}`}
     >
-      {v.label}
+      {verdict.label}
     </span>
   );
 }
@@ -59,16 +56,17 @@ function FatigueMeter({ score, reason }: { score: number; reason: string }) {
 
 export function CreativeLeaderboard({ state }: { state: DashboardState }) {
   const ads = state.ads;
+  const currencyCode = state.meta.currencyCode;
 
   return (
     <section className="rounded-xl border border-border bg-card mb-6">
       <div className="px-5 py-3 border-b border-border flex items-center justify-between">
         <h2 className="text-sm font-semibold">Creative leaderboard</h2>
-        <p className="text-xs text-muted-foreground">Sorted by CPR (lowest first). Hover verdict or fatigue for detail.</p>
+        <p className="text-xs text-muted-foreground">Sorted by CPL (lowest first). Hover verdict or fatigue for detail.</p>
       </div>
       {ads.length === 0 ? (
         <div className="px-5 py-8 text-sm text-muted-foreground">
-          No ads with insights yet. After the campaign is ACTIVE and Meta returns 1+ row, ads appear here.
+          No ads with insights yet. After the campaign is active and Meta returns a row, ads appear here.
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -81,8 +79,8 @@ export function CreativeLeaderboard({ state }: { state: DashboardState }) {
                 <th className="text-right px-3 py-2 font-medium">Spend</th>
                 <th className="text-right px-3 py-2 font-medium">Impr</th>
                 <th className="text-right px-3 py-2 font-medium">Link CTR</th>
-                <th className="text-right px-3 py-2 font-medium">Regs</th>
-                <th className="text-right px-3 py-2 font-medium">CPR</th>
+                <th className="text-right px-3 py-2 font-medium">Leads</th>
+                <th className="text-right px-3 py-2 font-medium">CPL</th>
                 <th className="text-right px-3 py-2 font-medium">Freq</th>
                 <th className="text-right px-3 py-2 font-medium">Days</th>
                 <th className="text-right px-3 py-2 font-medium" title="Fatigue: frequency growth + CTR decay">Fatigue</th>
@@ -90,45 +88,45 @@ export function CreativeLeaderboard({ state }: { state: DashboardState }) {
               </tr>
             </thead>
             <tbody>
-              {ads.map((a) => {
-                const cls = classifyCpr(a.cprCents);
-                const cprColor = cls === "green" ? "text-emerald-500" : cls === "yellow" ? "text-amber-500" : cls === "red" ? "text-destructive" : "text-muted-foreground";
+              {ads.map((ad) => {
+                const cls = classifyCpl(ad.cplCents);
+                const cplColor = cls === "green" ? "text-emerald-500" : cls === "yellow" ? "text-amber-500" : cls === "red" ? "text-destructive" : "text-muted-foreground";
                 const adsManagerUrl = state.meta.adAccountId
-                  ? `https://business.facebook.com/adsmanager/manage/ads?act=${state.meta.adAccountId.replace(/^act_/, "")}&selected_ad_ids=${a.adId}`
+                  ? `https://business.facebook.com/adsmanager/manage/ads?act=${state.meta.adAccountId.replace(/^act_/, "")}&selected_ad_ids=${ad.adId}`
                   : "#";
                 return (
-                  <tr key={a.adId} className="border-b border-border last:border-0 hover:bg-muted/40">
+                  <tr key={ad.adId} className="border-b border-border last:border-0 hover:bg-muted/40">
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
-                        {a.thumbnailUrl ? (
+                        {ad.thumbnailUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={a.thumbnailUrl} alt="" className="w-10 h-10 rounded object-cover bg-muted" />
+                          <img src={ad.thumbnailUrl} alt="" className="w-10 h-10 rounded object-cover bg-muted" />
                         ) : (
                           <div className="w-10 h-10 rounded bg-muted" />
                         )}
                         <div>
-                          <div className="font-medium">{a.adName}</div>
-                          <div className="text-xs text-muted-foreground">{a.adId}</div>
+                          <div className="font-medium">{ad.adName}</div>
+                          <div className="text-xs text-muted-foreground">{ad.adId}</div>
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-3"><VerdictBadge ad={a} /></td>
+                    <td className="px-3 py-3"><VerdictBadge ad={ad} /></td>
                     <td className="px-3 py-3 text-right">
-                      <span className={`text-xs px-2 py-0.5 rounded border ${statusBadge(a.status)}`}>
-                        {a.status.replace(/_/g, " ")}
+                      <span className={`text-xs px-2 py-0.5 rounded border ${statusBadge(ad.status)}`}>
+                        {ad.status.replace(/_/g, " ")}
                       </span>
                     </td>
-                    <td className="px-3 py-3 text-right tabular-nums">{fmtMoney(a.spendCents)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.impressions == null ? "-" : a.impressions.toLocaleString()}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{fmtPct(a.ctrLink)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.registrations == null ? "-" : a.registrations}</td>
-                    <td className={`px-3 py-3 text-right tabular-nums ${cprColor}`}>{fmtMoney(a.cprCents)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{a.frequency == null ? "-" : a.frequency.toFixed(2)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground" title={a.firstSeenDate ? `First impression on ${a.firstSeenDate}` : "Not yet seen"}>
-                      {a.daysActive == null ? "-" : a.daysActive}
+                    <td className="px-3 py-3 text-right tabular-nums">{formatMoney(ad.spendCents, currencyCode)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{ad.impressions == null ? "—" : ad.impressions.toLocaleString("en-GB")}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{fmtPct(ad.ctrLink)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{ad.leads == null ? "—" : ad.leads}</td>
+                    <td className={`px-3 py-3 text-right tabular-nums ${cplColor}`}>{formatMoney(ad.cplCents, currencyCode)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{ad.frequency == null ? "—" : ad.frequency.toFixed(2)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted-foreground" title={ad.firstSeenDate ? `First impression on ${ad.firstSeenDate}` : "Not yet seen"}>
+                      {ad.daysActive == null ? "—" : ad.daysActive}
                     </td>
                     <td className="px-3 py-3">
-                      <FatigueMeter score={a.fatigueScore} reason={a.fatigueReason} />
+                      <FatigueMeter score={ad.fatigueScore} reason={ad.fatigueReason} />
                     </td>
                     <td className="px-5 py-3 text-right">
                       <a href={adsManagerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-xs text-muted-foreground hover:text-foreground">

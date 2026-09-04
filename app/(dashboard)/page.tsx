@@ -10,9 +10,9 @@ import { CreativeLeaderboard } from "@/components/creative-leaderboard";
 import { CreativeBriefGenerator } from "@/components/creative-brief-generator";
 import { Funnel } from "@/components/funnel";
 import { ActionLog } from "@/components/action-log";
-import { BudgetSimulator } from "@/components/budget-simulator";
 import { PlanVisual } from "@/components/plan-visual";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { formatDateTime } from "@/lib/format";
 
 function SyncNotice({ state }: { state: DashboardState }) {
   const syncState = state.meta.syncState;
@@ -118,18 +118,17 @@ export default function DashboardHome() {
       <section className="flex items-center justify-between mb-3 mt-2">
         <div>
           <h2 className="text-base font-semibold">Creative leaderboard</h2>
-          <p className="text-xs text-muted-foreground">Sorted by CPR. Watch the fatigue column for ads about to die.</p>
+          <p className="text-xs text-muted-foreground">Sorted by CPL. Watch the fatigue column for diagnostic warnings.</p>
         </div>
         <CreativeBriefGenerator state={state} />
       </section>
       <CreativeLeaderboard state={state} />
 
       <ActionLog state={state} />
-      <BudgetSimulator state={state} />
       <PlanVisual state={state} />
 
       <footer className="text-xs text-muted-foreground py-6">
-        Last sync: {state.meta.lastSyncAt ? new Date(state.meta.lastSyncAt).toLocaleString() : "never"} ·
+        Last sync: {formatDateTime(state.meta.lastSyncAt, state.meta.timezoneName)} ·
         Campaign {state.meta.campaignId} · Account {state.meta.adAccountId}
       </footer>
     </>

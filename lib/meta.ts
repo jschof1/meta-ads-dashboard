@@ -3,6 +3,8 @@
 // Authentication, retries, pagination and result interpretation live here so
 // dashboard callers cannot accidentally implement a weaker API integration.
 
+import { currencyMinorUnitScale } from "./format";
+
 export const DEFAULT_GRAPH_VERSION = "v25.0";
 const GRAPH_HOST = "graph.facebook.com";
 const DEFAULT_PAGE_SIZE = 100;
@@ -777,7 +779,7 @@ export class MetaClient {
     return diagnostic;
   }
 
-  extractRegistrations(row: MetaInsightRow): number {
+  extractLeads(row: MetaInsightRow): number {
     return this.extractResultEvents(row).value ?? 0;
   }
 }
@@ -941,7 +943,7 @@ export function extractResultEvents(
   return diagnostic;
 }
 
-export function extractRegistrations(row: MetaInsightRow): number {
+export function extractLeads(row: MetaInsightRow): number {
   const diagnostic = extractResultEvents(row, {
     primaryActionType: process.env.META_PRIMARY_RESULT_ACTION_TYPE || undefined,
     customConversionId: process.env.META_CUSTOM_CONVERSION_ID || undefined,
@@ -962,9 +964,14 @@ export function toInt(value: string | number | undefined | null): number {
 }
 
 export function toOptionalCents(money: string | number | undefined | null): number | null {
+  return toOptionalMinorUnits(money, "GBP");
+}
+
+export function toOptionalMinorUnits(money: string | number | undefined | null, currencyCode: string | null | undefined): number | null {
   if (money === undefined || money === null || String(money).trim() === "") return null;
   const number = typeof money === "number" ? money : Number(money);
-  return Number.isFinite(number) && number >= 0 ? Math.round(number * 100) : null;
+  const scale = currencyMinorUnitScale(currencyCode) ?? 100;
+  return Number.isFinite(number) && number >= 0 ? Math.round(number * scale) : null;
 }
 
 export function toOptionalFloat(value: string | number | undefined | null): number | null {

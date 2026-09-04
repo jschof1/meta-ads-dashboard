@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import {
   createMetaClient,
-  toOptionalCents,
+  toOptionalMinorUnits,
   toOptionalFloat,
   toOptionalInt,
   type AdSummary,
@@ -202,7 +202,7 @@ function normalizeInsight(
   const entityId = entityIdFor(level, row, accountId);
   if (!date || !isDateInRange(date, range) || (row.date_stop !== undefined && row.date_stop !== date) || !entityId) return null;
 
-  const spendMinorUnits = toOptionalCents(row.spend);
+  const spendMinorUnits = toOptionalMinorUnits(row.spend, currencyCode);
   const impressions = toOptionalInt(row.impressions);
   const reach = toOptionalInt(row.reach);
   const clicks = toOptionalInt(row.clicks);
@@ -211,8 +211,8 @@ function normalizeInsight(
   const leads = diagnostic.needsConfiguration || diagnostic.value === null
     ? null
     : Math.max(0, Math.round(diagnostic.value));
-  const cpcMinorUnits = metricOrDerived(toOptionalCents(row.cpc), spendMinorUnits, clicks);
-  const cpmMinorUnits = metricOrDerived(toOptionalCents(row.cpm), spendMinorUnits, impressions, 1_000);
+  const cpcMinorUnits = metricOrDerived(toOptionalMinorUnits(row.cpc, currencyCode), spendMinorUnits, clicks);
+  const cpmMinorUnits = metricOrDerived(toOptionalMinorUnits(row.cpm, currencyCode), spendMinorUnits, impressions, 1_000);
   const ctrLink = linkClicks !== null && impressions !== null && impressions > 0
     ? linkClicks / impressions
     : toOptionalFloat(row.ctr);
@@ -686,19 +686,6 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
         });
       }
       for (const insight of normalized.rows) {
-        const hasMetricEvidence = [
-          insight.spendMinorUnits,
-          insight.impressions,
-          insight.reach,
-          insight.clicks,
-          insight.linkClicks,
-          insight.leads,
-          insight.cplMinorUnits,
-          insight.cpcMinorUnits,
-          insight.cpmMinorUnits,
-          insight.ctrLink,
-          insight.frequency,
-        ].some((value) => value !== null);
         await tx.dailyInsight.upsert({
           where: {
             date_level_entityId_attributionKey: {
@@ -713,22 +700,23 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
             syncRunId: run.id,
           },
           update: {
-            ...(insight.currencyCode !== null ? { currencyCode: insight.currencyCode } : {}),
-            ...(insight.spendMinorUnits !== null ? { spendMinorUnits: insight.spendMinorUnits } : {}),
-            ...(insight.impressions !== null ? { impressions: insight.impressions } : {}),
-            ...(insight.reach !== null ? { reach: insight.reach } : {}),
-            ...(insight.clicks !== null ? { clicks: insight.clicks } : {}),
-            ...(insight.linkClicks !== null ? { linkClicks: insight.linkClicks } : {}),
-            ...(insight.leads !== null ? { leads: insight.leads } : {}),
-            ...(insight.cplMinorUnits !== null ? { cplMinorUnits: insight.cplMinorUnits } : {}),
-            ...(insight.cpcMinorUnits !== null ? { cpcMinorUnits: insight.cpcMinorUnits } : {}),
-            ...(insight.cpmMinorUnits !== null ? { cpmMinorUnits: insight.cpmMinorUnits } : {}),
-            ...(insight.ctrLink !== null ? { ctrLink: insight.ctrLink } : {}),
-            ...(insight.frequency !== null ? { frequency: insight.frequency } : {}),
-            ...(insight.resultActionType !== null ? { resultActionType: insight.resultActionType } : {}),
-            ...(hasMetricEvidence || insight.rawActions !== "null" && insight.rawActions !== "[]"
-              ? { rawActions: insight.rawActions, raw: insight.raw }
-              : {}),
+            // A successful response is the source of truth for this date. Clear
+            // omitted fields rather than presenting a previous value as fresh.
+            currencyCode: insight.currencyCode,
+            spendMinorUnits: insight.spendMinorUnits,
+            impressions: insight.impressions,
+            reach: insight.reach,
+            clicks: insight.clicks,
+            linkClicks: insight.linkClicks,
+            leads: insight.leads,
+            cplMinorUnits: insight.cplMinorUnits,
+            cpcMinorUnits: insight.cpcMinorUnits,
+            cpmMinorUnits: insight.cpmMinorUnits,
+            ctrLink: insight.ctrLink,
+            frequency: insight.frequency,
+            resultActionType: insight.resultActionType,
+            rawActions: insight.rawActions,
+            raw: insight.raw,
             observedAt: now,
             syncRunId: run.id,
           },

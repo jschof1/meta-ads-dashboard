@@ -3,11 +3,7 @@
 import { CheckCircle2, Circle, AlertCircle, AlertTriangle, Clock, ClipboardList, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { DashboardState, DecisionTrigger } from "@/lib/state-types";
-
-function fmtMoney(cents: number | null) {
-  if (cents == null) return "-";
-  return `$${(cents / 100).toFixed(0)}`;
-}
+import { formatMoney } from "@/lib/format";
 
 const TRIGGER_STYLES: Record<DecisionTrigger["status"], { dot: string; bg: string; text: string; Icon: typeof AlertCircle }> = {
   ok: { dot: "bg-emerald-500", bg: "bg-emerald-500/5 border-emerald-500/20", text: "text-emerald-500", Icon: CheckCircle2 },
@@ -16,7 +12,7 @@ const TRIGGER_STYLES: Record<DecisionTrigger["status"], { dot: string; bg: strin
   pending: { dot: "bg-muted-foreground", bg: "bg-muted/40 border-border", text: "text-muted-foreground", Icon: Clock },
 };
 
-function PhaseCard({ phase }: { phase: DashboardState["phase"] }) {
+function PhaseCard({ phase, currencyCode }: { phase: DashboardState["phase"]; currencyCode: string | null }) {
   const pacePct = phase.spendPaceBudgetCents != null && phase.spendPaceBudgetCents > 0 && phase.spendPaceCents != null
     ? Math.min(100, (phase.spendPaceCents / phase.spendPaceBudgetCents) * 100)
     : 0;
@@ -46,7 +42,7 @@ function PhaseCard({ phase }: { phase: DashboardState["phase"] }) {
         <div>
           <div className="text-muted-foreground mb-1">MTD spend pace</div>
           <div className="text-lg font-semibold tabular-nums">
-            {fmtMoney(phase.spendPaceCents)} <span className="text-xs text-muted-foreground font-normal">/ {fmtMoney(phase.spendPaceBudgetCents)}</span>
+            {formatMoney(phase.spendPaceCents, currencyCode)} <span className="text-xs text-muted-foreground font-normal">/ {formatMoney(phase.spendPaceBudgetCents, currencyCode)}</span>
           </div>
           <div className="h-1.5 bg-muted rounded-full mt-2 overflow-hidden">
             <div className="h-full bg-emerald-500/70" style={{ width: `${pacePct}%` }} />
@@ -105,7 +101,7 @@ export function PlanVisual({ state }: { state: DashboardState }) {
     <section className="space-y-4 mb-6">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-1">
-          <PhaseCard phase={state.phase} />
+            <PhaseCard phase={state.phase} currencyCode={state.meta.currencyCode} />
         </div>
 
         <div className="lg:col-span-2">
@@ -130,8 +126,8 @@ export function PlanVisual({ state }: { state: DashboardState }) {
         >
           <ChevronRight className={`w-4 h-4 transition-transform ${planOpen ? "rotate-90" : ""}`} />
           <ClipboardList className="w-4 h-4 text-muted-foreground" />
-          <span>Full campaign plan (markdown)</span>
-          <span className="ml-auto text-xs text-muted-foreground">For the AI, not for you</span>
+          <span>UKTL operating brief (markdown)</span>
+          <span className="ml-auto text-xs text-muted-foreground">Source context for analysis</span>
         </button>
         {planOpen && (
           <pre className="px-5 pb-5 text-xs text-foreground/70 whitespace-pre-wrap font-mono leading-relaxed max-h-[50vh] overflow-y-auto border-t border-border pt-4">

@@ -1,145 +1,111 @@
-# Meta Ads Dashboard
+# UK Trade Leads Meta Ads Command Centre
 
-Private, opinionated dashboard for managing a Meta (Facebook + Instagram) ad campaign. Replaces Ads Manager for daily review. Layered with AI-generated daily briefings on top of live Meta data.
-
-Part of the Meta Ads + Claude Code system. See [github.com/bosar-academy/cc-meta-ads-system](https://github.com/bosar-academy/cc-meta-ads-system) for the master install (all 9 components in one paste).
+Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition data into a clear operator view without pretending that lead volume is the same as lead quality or customer value.
 
 ## What it shows
 
-- **AI Daily Briefing** - one paragraph each morning: what happened yesterday, the trend, ads to watch, recommended action, on-track call. Powered by Anthropic.
-- **Scorecard** - today's spend, MTD spend, 7d CPR with green/yellow/red bands, learning-phase progress, decision gate status.
-- **Sparklines** - CPR (with target band), CPM, link CTR, registrations, frequency, spend.
-- **Creative leaderboard** - your top ads ranked by CPR, with status, thumbnail, and direct link to Ads Manager.
-- **Full funnel** - impressions → link clicks → registrations → (optional Airtable) calls booked → enrollments.
-- **Inline campaign plan** - reads `public/plan.md` (you fill from `public/plan.md.template`).
-- **Decision triggers** - reads `lib/targets.ts` for your CPR bands and decision gates.
-- **Budget What-If Simulator** - project conversions at different daily budget levels using your current funnel metrics.
-- **Action log** - if Claude Code makes any changes via the Meta API on your behalf, they log here.
-- **Generate Next Creative Brief** - for winning ads, generates new angle variations.
+- AI daily briefing when an Anthropic key is configured. The deterministic stored metrics remain available without AI.
+- Scorecard for spend, CPL, learning evidence, link CTR, CPM, launch age, and configured decision gates.
+- Historical sparklines for CPL and CPM with matched-period comparisons.
+- Creative leaderboard sorted by CPL, with evidence-aware verdicts, fatigue diagnostics, and an Ads Manager link.
+- UKTL conversion path: impressions, link clicks, leads, contacted, qualified, call booked, call attended, and won customer. Lost is shown as a separate outcome.
+- Explicit CRM attribution state. Downstream counts stay unknown until a supported CRM integration supplies them.
+- A secret-free UKTL operating brief at `public/plan.md.template`, loaded by the operator brief panel when `public/plan.md` exists.
+- Recorded action log entries. Meta write helpers remain disabled until the later approval-gated delivery stage.
+
+Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
 ## Stack
 
-Next.js 16.2 · React 19 · Tailwind 4 · shadcn · recharts · Prisma + libsql (Turso or local SQLite) · Anthropic SDK · Vercel cron.
+Next.js 16.3 · React 19 · Tailwind 4 · shadcn · Recharts · Prisma with libSQL/local SQLite · Anthropic SDK · Vercel cron.
 
-## Quick install (recommended)
-
-Use the Gumroad install prompt to walk through the full setup interactively (Anthropic key, Meta token, ad account, targets, optional Airtable). See [INSTALL.md](./INSTALL.md).
-
-## Manual install (advanced)
+## Local install
 
 ```bash
-git clone https://github.com/bosar-academy/meta-ads-dashboard
+git clone https://github.com/jschof1/meta-ads-dashboard
 cd meta-ads-dashboard
-npm install
+npm ci
 cp .env.example .env.local
-# Fill in your values
+# Fill in private values in .env.local
 cp public/plan.md.template public/plan.md
-# Edit public/plan.md with your campaign details
 
-# Local SQLite (default - no Turso needed for dev)
 DATABASE_URL="file:./dev.db" npx prisma migrate deploy
-
 npm run dev
-# Visit http://localhost:3000
 ```
 
-To populate data locally, trigger a sync:
+Open `http://localhost:3000` and sign in with `DASHBOARD_PASSWORD`.
+
+To request a manual Meta sync after the server is running, sign in and use the authenticated `Sync now` dashboard control.
+
+The first successful sync stores the initial historical window. Later runs refresh recent days so delayed results can be incorporated. A dashboard page load reads the durable database and does not call Meta.
+
+## Environment
+
+Required:
+
+- `DASHBOARD_PASSWORD` - password for the private dashboard.
+- `AUTH_SECRET` - at least 32 random characters for signed sessions.
+- `CRON_SECRET` - at least 32 random characters for the protected cron endpoint.
+- `DATABASE_URL` - libSQL connection string, or `file:./dev.db` locally.
+- `META_MARKETING_TOKEN` - server-side Meta read token.
+- `META_AD_ACCOUNT_ID` - Meta account ID, with or without the `act_` prefix.
+
+Optional:
+
+- `META_CAMPAIGN_ID` - restricts the stored view to one campaign.
+- `META_CUSTOM_CONVERSION_ID` - private Meta result identifier when required by the account setup.
+- `META_PRIMARY_RESULT_ACTION_TYPE` - explicit Meta result action when more than one candidate is returned.
+- `META_ATTRIBUTION_WINDOWS` - comma-separated attribution windows, defaulting to `7d_click,1d_view`.
+- `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`.
+- `META_CAMPAIGN_LAUNCH_DATE` - `YYYY-MM-DD`, used for account-local phase context.
+- `ANTHROPIC_API_KEY` - enables the optional AI briefing and creative brief features.
+
+Targets and budgets are not environment defaults. They live in the typed UKTL configuration and remain `null` until supplied as an approved business input. Currency and timezone come from the Meta account and are formatted with `en-GB` rules.
+
+## Production deploy
+
+Use a private Vercel project and a production libSQL/Turso database. Apply the committed migrations before serving the app:
+
 ```bash
-curl -X POST http://localhost:3000/api/refresh
-```
-
-## Required env vars
-
-See [`.env.example`](./.env.example) for the full list with comments.
-
-**Required:**
-- `DASHBOARD_PASSWORD` - login password
-- `AUTH_SECRET` - at least 32 random characters for signed sessions
-- `CRON_SECRET` - at least 32 random characters for the protected cron endpoint
-- `DATABASE_URL` - libsql connection string (default `file:./dev.db` for local)
-- `META_MARKETING_TOKEN` - System User token from [cc-meta-tracking-setup](https://github.com/bosar-academy/cc-meta-tracking-setup)
-- `META_AD_ACCOUNT_ID` - format `act_XXXXXXXXX`
-
-**Optional:**
-- `META_CAMPAIGN_ID` - filter to a specific campaign (blank = full account rollup)
-- `META_CUSTOM_CONVERSION_ID` - the conversion the dashboard counts as "registration"
-- `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`
-- `META_PRIMARY_RESULT_ACTION_TYPE` - required when Meta returns more than one possible lead/result action
-- `META_ATTRIBUTION_WINDOWS` - explicit comma-separated attribution windows, defaulting to `7d_click,1d_view`
-- `META_CAMPAIGN_LAUNCH_DATE` - YYYY-MM-DD; powers "days since launch" + learning-phase status
-- `ANTHROPIC_API_KEY` - enables the optional AI Daily Briefing and creative brief features
-- `AIRTABLE_ENABLED` + `AIRTABLE_*` - if you track sales pipeline in Airtable, enable for deeper funnel attribution
-
-## Production deploy (Vercel + Turso)
-
-```bash
-# 1. Provision Turso DB
-turso db create meta-ads-dashboard
-turso db tokens create meta-ads-dashboard
-# Capture URL + token
-
-# 2. Apply the committed SQL migration to Turso.
-# Prisma Migrate does not deploy directly to a remote libSQL/Turso database.
 turso db shell meta-ads-dashboard < prisma/migrations/20260904170000_pr03_sync_data/migration.sql
-
-# 3. Push code to GitHub (your own repo)
-git remote add origin git@github.com:YOU/YOUR-REPO.git
-git push -u origin main
-
-# 4. Import to Vercel
-# - Set the env vars from .env.example
-# - Set DATABASE_URL = TURSO_DATABASE_URL
-# - Set CRON_SECRET to a random string
-# - Deploy
-
-# 5. Verify
-curl https://<your-vercel-url>/api/cron/sync-meta -H "Authorization: Bearer $CRON_SECRET"
-# Expected after a successful sync: { "ok": true, "status": "SUCCEEDED", ... }
 ```
+
+Set the environment values from `.env.example` in Vercel. Keep all tokens server-side. Configure the Vercel cron to call `/api/cron/sync-meta` with the bearer value represented by `CRON_SECRET`, then verify the response is a successful stored sync before treating the deployment as live.
+
+For an existing database created with an earlier schema workflow, take a recoverable backup, apply the migration SQL once, and record the migration as applied with Prisma. Do not overwrite a production database to repair drift.
+
+## Domain and evidence rules
+
+`lib/uktl-config.ts` is the single-business UKTL configuration. It defines the funnel vocabulary, optional targets, evidence minimums, frequency diagnostics, locale, and the private operating brief. It intentionally does not define a target CPL, budget, CAC, or revenue value.
+
+`lib/format.ts` formats minor units with the currency returned by Meta. If that currency is unavailable, the UI says `Currency pending`; it never silently applies a default currency.
+
+Missing provider fields remain `null`, while a real zero remains `0`. Failed syncs preserve the last successful stored read model and expose a redacted diagnostic state.
+
+`META_WRITES_ENABLED` must remain false. The later Meta-action delivery adds approval, authorization, audit, and fail-closed controls before any live mutation is considered.
 
 ## File map
 
-```
-app/
-  (public)/login/      # password gate
-  (dashboard)/page.tsx # main dashboard - client fetches /api/dashboard/state
-  api/
-    auth/              # password verification
-    cron/sync-meta/    # pulls Meta + (optional) Airtable, writes to Turso
-    dashboard/state/   # read endpoint
-    insights/summary/  # Anthropic-generated daily briefing (1h cache)
-    refresh/           # on-demand sync trigger from the UI
-lib/
-  meta.ts              # Graph API client (insights, ad metadata)
-  airtable.ts          # OPTIONAL - sales pipeline integration
-  targets.ts           # CPR bands, CAC range, decision gates (EDIT FOR YOUR CAMPAIGN)
-  plan-context.ts      # reads public/plan.md
-  funnel.ts            # funnel building + attribution
-  schema.prisma        # legacy tables plus Campaign, AdSet, Ad, Creative, DailyInsight, SyncRun
-public/
-  plan.md.template     # campaign brief template - copy to public/plan.md and fill in
+```text
+app/(dashboard)/page.tsx       authenticated operator surface
+app/api/dashboard/state        durable read endpoint
+app/api/cron/sync-meta         protected scheduled sync
+lib/meta.ts                    Meta read client and diagnostics
+lib/sync.ts                    transactional sync and leases
+lib/read-model.ts              database-backed dashboard state
+lib/uktl-config.ts             typed UKTL domain configuration
+lib/targets.ts                 target classification without defaults
+lib/format.ts                  account-currency and UK date formatting
+public/plan.md.template        secret-free operating brief template
+prisma/schema.prisma           durable read model plus retained legacy tables
 ```
 
-## Customizing for your campaign
+Run the full local gate suite with:
 
-The two files you edit per campaign:
-
-1. **`public/plan.md`** (copy from `public/plan.md.template`) - your campaign brief
-2. **`lib/targets.ts`** - your CPR bands, CAC range, decision gates
-
-Both are gitignored or marked as user-editable. The default targets in `lib/targets.ts` are placeholders for a typical $50/day cold lead-gen campaign - replace with your actual unit economics.
-
-## Data and safety notes
-
-- `/api/dashboard/state` reads only the durable database read model. It does not call Meta during page loads.
-- The first sync requests an inclusive 90-day history; later runs refresh the most recent seven days to capture delayed conversions.
-- Sync runs are account-scoped, idempotent and lease-protected. A failed run leaves the last successful data available and marks the dashboard stale/failed.
-- Missing provider metrics remain unavailable (`null`), distinct from a reported zero. Result/action configuration is reported as a warning instead of inventing leads.
-- Meta write helpers are approval-gated and disabled by default. `META_WRITES_ENABLED` must not be enabled without the explicit PR09 safety gate.
-- For a database created previously with `prisma db push`, apply the committed migration SQL once, then mark that migration applied in the local migration ledger with `prisma migrate resolve --applied 20260904170000_pr03_sync_data`. Preserve a backup before changing a production database.
-
-## Pairs with
-
-- [`cc-meta-tracking-setup`](https://github.com/bosar-academy/cc-meta-tracking-setup) - sets up the pixel + custom conversion + token this dashboard reads
-- [`cc-meta-ads`](https://github.com/bosar-academy/cc-meta-ads) - the Claude Code skill that creates the campaigns this dashboard tracks
-- [`cc-ad-strategy`](https://github.com/bosar-academy/cc-ad-strategy) - the skill that produces the campaign brief you paste into `public/plan.md`
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```

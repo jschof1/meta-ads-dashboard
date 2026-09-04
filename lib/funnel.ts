@@ -1,107 +1,98 @@
-// Centralized funnel logic: dedup, test-email filtering, status rollup, cross-table join.
-// This is the single source of truth for what counts as a "registration", "attended", etc.
+// Generic, provider-neutral UKTL funnel logic. A future CRM adapter can map
+// provider stages into this shape without changing the dashboard vocabulary.
 
 export type FunnelRow = {
   email: string;
   firstName?: string;
-  registrationTime?: string;
+  leadTime?: string;
   utmSource?: string;
   utmMedium?: string;
   utmCampaign?: string;
-  status?: string;             // Webinar Attendees Status
-  pipelineStatus?: string;     // Framework Leads Pipeline Status
-  source?: string;             // Framework Leads Source
+  stage?: string;
 };
 
 export type FunnelCounts = {
-  registrations: number;
-  attended: number;
+  leads: number;
+  contacted: number;
+  qualified: number;
   callsBooked: number;
-  enrollments: number;
-  // raw counters for transparency
-  metaPixelRegistrations?: number;
+  callsAttended: number;
+  wonCustomers: number;
+  lostCustomers: number;
+  metaPixelLeads?: number;
   testEmailsExcluded: number;
   duplicatesCollapsed: number;
 };
 
-// Add your own test addresses + substrings here so they're excluded from funnel attribution.
-// Edit lib/funnel.ts during onboarding to add your team's emails.
-const TEST_EMAILS = new Set<string>([
-  // "you@yourdomain.com",
-]);
-const TEST_SUBSTRINGS: string[] = [
-  "+test",
-  // "yourlastname",
-];
+const TEST_EMAILS = new Set<string>();
+const TEST_SUBSTRINGS = ["+test"];
+
+const STATUS_RANK: Record<string, number> = {
+  lead: 10,
+  contacted: 20,
+  qualified: 30,
+  "call booked": 40,
+  "call attended": 50,
+  show: 50,
+  "won customer": 60,
+  won: 60,
+  // Lost is a terminal outcome. It must win deduplication over an earlier
+  // lead row, while rollup handles it separately from the linear stages.
+  lost: 70,
+};
+
+function normaliseStage(stage: string | undefined): string {
+  return (stage || "").trim().toLowerCase();
+}
+
+function rank(stage: string | undefined): number {
+  return STATUS_RANK[normaliseStage(stage)] ?? 0;
+}
 
 export function isTestEmail(rawEmail: string | undefined | null): boolean {
-  if (!rawEmail) return true; // empty email is unusable
-  const e = rawEmail.trim().toLowerCase();
-  if (TEST_EMAILS.has(e)) return true;
-  return TEST_SUBSTRINGS.some((s) => e.includes(s));
+  if (!rawEmail) return true;
+  const email = rawEmail.trim().toLowerCase();
+  return TEST_EMAILS.has(email) || TEST_SUBSTRINGS.some((part) => email.includes(part));
 }
 
 export function normalizeEmail(rawEmail: string | undefined | null): string {
   return (rawEmail || "").trim().toLowerCase();
 }
 
-// Status rollup priority. Higher = deeper in funnel.
-// Rolls UP: Enrolled also counts as Attended + Registered.
-const STATUS_RANK: Record<string, number> = {
-  enrolled: 60,
-  purchased: 55,
-  "call completed": 50,
-  "call booked": 45,
-  show: 45,
-  "no show": 30, // they registered but did not attend
-  attended: 40,
-  "reminder sent": 20,
-  registered: 10,
-};
-
-function rank(s: string | undefined): number {
-  if (!s) return 0;
-  return STATUS_RANK[s.trim().toLowerCase()] ?? 0;
+function pickBest(left: FunnelRow, right: FunnelRow): FunnelRow {
+  const leftRank = rank(left.stage);
+  const rightRank = rank(right.stage);
+  if (leftRank !== rightRank) return leftRank > rightRank ? left : right;
+  const leftTime = left.leadTime ? Date.parse(left.leadTime) : 0;
+  const rightTime = right.leadTime ? Date.parse(right.leadTime) : 0;
+  return leftTime >= rightTime ? left : right;
 }
 
-// Pick the row with the deepest funnel status. Tie-breaks by registration time (most recent).
-function pickBest(a: FunnelRow, b: FunnelRow): FunnelRow {
-  const aRank = Math.max(rank(a.status), rank(a.pipelineStatus));
-  const bRank = Math.max(rank(b.status), rank(b.pipelineStatus));
-  if (aRank !== bRank) return aRank > bRank ? a : b;
-  const aTime = a.registrationTime ? Date.parse(a.registrationTime) : 0;
-  const bTime = b.registrationTime ? Date.parse(b.registrationTime) : 0;
-  return aTime >= bTime ? a : b;
-}
-
-// Merge two rows for the same email (one from each table). Carry over deepest signal.
-function merge(a: FunnelRow, b: FunnelRow): FunnelRow {
+function merge(left: FunnelRow, right: FunnelRow): FunnelRow {
+  const best = pickBest(left, right);
   return {
-    email: a.email,
-    firstName: a.firstName || b.firstName,
-    registrationTime: a.registrationTime || b.registrationTime,
-    utmSource: a.utmSource || b.utmSource,
-    utmMedium: a.utmMedium || b.utmMedium,
-    utmCampaign: a.utmCampaign || b.utmCampaign,
-    status: rank(a.status) >= rank(b.status) ? a.status : b.status,
-    pipelineStatus: rank(a.pipelineStatus) >= rank(b.pipelineStatus) ? a.pipelineStatus : b.pipelineStatus,
-    source: a.source || b.source,
+    email: left.email,
+    firstName: left.firstName || right.firstName,
+    leadTime: left.leadTime || right.leadTime,
+    utmSource: left.utmSource || right.utmSource,
+    utmMedium: left.utmMedium || right.utmMedium,
+    utmCampaign: left.utmCampaign || right.utmCampaign,
+    stage: best.stage,
   };
 }
 
-// Reduce many rows (potentially across tables) into one row per normalized email.
 export function dedupe(rows: FunnelRow[]): { rows: FunnelRow[]; collapsed: number } {
   const byEmail = new Map<string, FunnelRow>();
   let collapsed = 0;
-  for (const r of rows) {
-    const e = normalizeEmail(r.email);
-    if (!e) continue;
-    const existing = byEmail.get(e);
+  for (const row of rows) {
+    const email = normalizeEmail(row.email);
+    if (!email) continue;
+    const existing = byEmail.get(email);
     if (existing) {
       collapsed += 1;
-      byEmail.set(e, merge(pickBest(existing, r), r));
+      byEmail.set(email, merge(existing, { ...row, email }));
     } else {
-      byEmail.set(e, { ...r, email: e });
+      byEmail.set(email, { ...row, email });
     }
   }
   return { rows: Array.from(byEmail.values()), collapsed };
@@ -110,53 +101,55 @@ export function dedupe(rows: FunnelRow[]): { rows: FunnelRow[]; collapsed: numbe
 export function filterTest(rows: FunnelRow[]): { rows: FunnelRow[]; excluded: number } {
   const kept: FunnelRow[] = [];
   let excluded = 0;
-  for (const r of rows) {
-    if (isTestEmail(r.email)) excluded += 1;
-    else kept.push(r);
+  for (const row of rows) {
+    if (isTestEmail(row.email)) excluded += 1;
+    else kept.push(row);
   }
   return { rows: kept, excluded };
 }
 
-// Only rows attributable to paid Meta.
-export function isPaidMeta(r: FunnelRow): boolean {
-  const src = (r.utmSource || "").toLowerCase();
-  const med = (r.utmMedium || "").toLowerCase();
-  return src === "meta" || med === "paid_social";
+export function isPaidMeta(row: FunnelRow): boolean {
+  const source = (row.utmSource || "").toLowerCase();
+  const medium = (row.utmMedium || "").toLowerCase();
+  return source === "meta" || medium === "paid_social";
 }
 
-// Compute the funnel counts from a clean, deduped row set.
-// Rules:
-//   registrations = every row (each unique person who registered)
-//   attended      = status in [attended, purchased, enrolled, show, call booked, call completed]
-//   callsBooked   = status in [call booked, show, call completed, enrolled, purchased]
-//   enrollments   = status in [enrolled, purchased]
-export function rollup(rows: FunnelRow[]): Pick<FunnelCounts, "registrations" | "attended" | "callsBooked" | "enrollments"> {
-  let registrations = 0;
-  let attended = 0;
-  let callsBooked = 0;
-  let enrollments = 0;
-  for (const r of rows) {
-    registrations += 1;
-    const top = Math.max(rank(r.status), rank(r.pipelineStatus));
-    if (top >= 40) attended += 1;       // attended floor
-    if (top >= 45) callsBooked += 1;    // call booked floor
-    if (top >= 55) enrollments += 1;    // purchased floor (Enrolled or Purchased)
+export function rollup(rows: FunnelRow[]): Omit<FunnelCounts, "metaPixelLeads" | "testEmailsExcluded" | "duplicatesCollapsed"> {
+  const counts = {
+    leads: rows.length,
+    contacted: 0,
+    qualified: 0,
+    callsBooked: 0,
+    callsAttended: 0,
+    wonCustomers: 0,
+    lostCustomers: 0,
+  };
+  for (const row of rows) {
+    const stage = normaliseStage(row.stage);
+    if (stage === "lost") {
+      counts.lostCustomers += 1;
+      continue;
+    }
+    const value = rank(stage);
+    if (value >= STATUS_RANK.contacted) counts.contacted += 1;
+    if (value >= STATUS_RANK.qualified) counts.qualified += 1;
+    if (value >= STATUS_RANK["call booked"]) counts.callsBooked += 1;
+    if (value >= STATUS_RANK["call attended"]) counts.callsAttended += 1;
+    if (value >= STATUS_RANK.won) counts.wonCustomers += 1;
   }
-  return { registrations, attended, callsBooked, enrollments };
+  return counts;
 }
 
-// Full pipeline: filter test emails, dedupe, rollup. Returns enriched counts + the clean rows.
-export function buildFunnel(rawRows: FunnelRow[], options?: { metaPixelRegistrations?: number }): { counts: FunnelCounts; rows: FunnelRow[] } {
-  const f1 = filterTest(rawRows);
-  const f2 = dedupe(f1.rows);
-  const counts = rollup(f2.rows);
+export function buildFunnel(rawRows: FunnelRow[], options?: { metaPixelLeads?: number }): { counts: FunnelCounts; rows: FunnelRow[] } {
+  const filtered = filterTest(rawRows);
+  const clean = dedupe(filtered.rows);
   return {
     counts: {
-      ...counts,
-      metaPixelRegistrations: options?.metaPixelRegistrations,
-      testEmailsExcluded: f1.excluded,
-      duplicatesCollapsed: f2.collapsed,
+      ...rollup(clean.rows),
+      metaPixelLeads: options?.metaPixelLeads,
+      testEmailsExcluded: filtered.excluded,
+      duplicatesCollapsed: clean.collapsed,
     },
-    rows: f2.rows,
+    rows: clean.rows,
   };
 }

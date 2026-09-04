@@ -176,7 +176,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
 
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
   assert.equal(state.ads[0].verdict, "too_early");
-  assert.match(state.ads[0].verdictReason, /Insufficient stored evidence/);
+  assert.match(state.ads[0].verdictReason, /need 3\+ stored leads/);
 
   const runRow = await db.syncRun.findUnique({ where: { id: result.runId } });
   assert.equal(runRow.status, "SUCCEEDED");
@@ -301,7 +301,7 @@ test("marks a failed refresh without discarding the last successful read model",
   assert.equal(state.meta.lastAttemptStatus, "FAILED");
   assert.equal(state.meta.lastSyncError.includes("provider unavailable"), false);
   assert.match(state.meta.lastSyncError, /redacted provider diagnostic/);
-  assert.equal(state.scorecard.last30.registrations, 2);
+  assert.equal(state.scorecard.last30.leads, 2);
 });
 
 test("loads dashboard state from stored data with no Meta client and reports stale data honestly", async () => {
@@ -315,11 +315,68 @@ test("loads dashboard state from stored data with no Meta client and reports sta
   assert.equal(fresh.meta.syncState, "fresh");
   assert.equal(fresh.meta.currencyCode, "GBP");
   assert.equal(fresh.scorecard.last7.spendCents, 1234);
-  assert.equal(fresh.scorecard.last7.registrations, 2);
-  assert.equal(fresh.funnel.attended, null);
+  assert.equal(fresh.scorecard.last7.leads, 2);
+  assert.equal(fresh.funnel.callsAttended, null);
   assert.equal(fresh.funnel.crmConfigured, false);
   assert.equal(stale.meta.syncState, "stale");
   assert.equal(stale.meta.lastSuccessfulSyncAt, "2026-09-04T12:00:00.000Z");
+});
+
+test("scopes the dashboard read model to the active account's successful sync history", async () => {
+  const db = await createDatabase();
+  const previousAccountId = process.env.META_AD_ACCOUNT_ID;
+  process.env.META_AD_ACCOUNT_ID = "act_current";
+  try {
+    await db.syncRun.create({
+      data: {
+        id: "run-old-account",
+        accountId: "act_old",
+        currencyCode: "USD",
+        timezoneName: "America/New_York",
+        trigger: "manual",
+        status: "SUCCEEDED",
+        attributionKey: "7d_click,1d_view",
+        startedAt: new Date("2026-09-03T12:00:00.000Z"),
+        finishedAt: new Date("2026-09-03T12:01:00.000Z"),
+      },
+    });
+    await db.syncRun.create({
+      data: {
+        id: "run-current-account",
+        accountId: "act_current",
+        currencyCode: "GBP",
+        timezoneName: "Europe/London",
+        trigger: "manual",
+        status: "SUCCEEDED",
+        attributionKey: "7d_click,1d_view",
+        startedAt: new Date("2026-09-04T12:00:00.000Z"),
+        finishedAt: new Date("2026-09-04T12:01:00.000Z"),
+      },
+    });
+    await db.ad.createMany({
+      data: [
+        { metaId: "ad-old", name: "Old account ad" },
+        { metaId: "ad-current", name: "Current account ad" },
+      ],
+    });
+    await db.dailyInsight.createMany({
+      data: [
+        { date: "2026-09-04", level: "account", entityId: "act_old", attributionKey: "7d_click,1d_view", currencyCode: "USD", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-old-account" },
+        { date: "2026-09-04", level: "ad", entityId: "ad-old", attributionKey: "7d_click,1d_view", currencyCode: "USD", spendMinorUnits: 9900, impressions: 1000, leads: 9, syncRunId: "run-old-account" },
+        { date: "2026-09-04", level: "account", entityId: "act_current", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-current-account" },
+        { date: "2026-09-04", level: "ad", entityId: "ad-current", attributionKey: "7d_click,1d_view", currencyCode: "GBP", spendMinorUnits: 900, impressions: 100, leads: 1, syncRunId: "run-current-account" },
+      ],
+    });
+
+    const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:30:00.000Z") });
+    assert.equal(state.meta.adAccountId, "act_current");
+    assert.equal(state.meta.currencyCode, "GBP");
+    assert.equal(state.scorecard.today.spendCents, 900);
+    assert.deepEqual(state.ads.map((ad) => ad.adId), ["ad-current"]);
+  } finally {
+    if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = previousAccountId;
+  }
 });
 
 test("deduplicates repeated provider rows and accepts a delayed null-to-known result", async () => {
@@ -452,13 +509,13 @@ test("handles an empty account without manufacturing zero performance", async ()
   assert.equal(state.meta.syncState, "fresh");
   assert.equal(state.scorecard.today.spendCents, null);
   assert.equal(state.scorecard.today.impressions, null);
-  assert.equal(state.scorecard.today.registrations, null);
-  assert.equal(state.scorecard.today.cprCents, null);
+  assert.equal(state.scorecard.today.leads, null);
+  assert.equal(state.scorecard.today.cplCents, null);
   assert.equal(state.trend.length, 30);
   assert.equal(state.trend.at(-1).spendCents, null);
 });
 
-test("preserves known metadata and metrics when a later provider response is partial", async () => {
+test("preserves known metadata but clears omitted metrics after a partial provider response", async () => {
   const db = await createDatabase();
   const source = {
     campaigns: [...metadata.campaigns],
@@ -494,11 +551,12 @@ test("preserves known metadata and metrics when a later provider response is par
   const stored = await db.dailyInsight.findUnique({
     where: { date_level_entityId_attributionKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view" } },
   });
-  assert.equal(stored.spendMinorUnits, 1234);
-  assert.equal(stored.impressions, 1000);
-  assert.equal(stored.leads, 2);
-  assert.match(stored.raw, /12\.34/);
-  assert.match(stored.rawActions, /offsite_conversion\.custom\.lead/);
+  assert.equal(stored.spendMinorUnits, null);
+  assert.equal(stored.impressions, null);
+  assert.equal(stored.leads, null);
+  assert.equal(stored.cplMinorUnits, null);
+  assert.equal(stored.rawActions, "null");
+  assert.equal(stored.raw.includes("12.34"), false);
 });
 
 test("skips provider insight rows outside the requested range", async () => {

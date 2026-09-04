@@ -1,8 +1,10 @@
-// Reads the campaign plan markdown copied to public/plan.md at deploy time.
-// Used by the "Plan inline" panel and as context to the AI summary call.
+// Reads the operator plan copied to public/plan.md at deploy time. The proxy
+// protects that static path; this server-side reader never exposes the file
+// without the authenticated API/page boundary.
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { UKTL_CONFIG } from "./uktl-config";
 
 let cached: string | null = null;
 let cachedAt = 0;
@@ -18,6 +20,6 @@ export async function readPlan(): Promise<string> {
     cachedAt = now;
     return txt;
   } catch {
-    return "No campaign plan loaded yet. Copy public/plan.md.template to public/plan.md and fill in your campaign details (or run the install prompt to do this interactively).";
+    return UKTL_CONFIG.brief;
   }
 }

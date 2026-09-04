@@ -2,6 +2,7 @@
 
 import { AlertTriangle, AlertCircle, TrendingDown, TrendingUp, CheckCircle2 } from "lucide-react";
 import type { Anomaly, DashboardState } from "@/lib/state-types";
+import { formatDateLabel } from "@/lib/format";
 
 const STYLES: Record<Anomaly["severity"], { bg: string; text: string; Icon: typeof AlertTriangle; label: string }> = {
   alert: { bg: "bg-destructive/10 border-destructive/30", text: "text-destructive", Icon: AlertTriangle, label: "Alert" },
@@ -10,18 +11,12 @@ const STYLES: Record<Anomaly["severity"], { bg: string; text: string; Icon: type
 };
 
 const METRIC_LABEL: Record<Anomaly["metric"], string> = {
-  cpr: "CPR",
+  cpl: "CPL",
   cpm: "CPM",
   ctr: "Link CTR",
   spend: "Spend",
-  regs: "Registrations",
+  leads: "Leads",
 };
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
 
 export function AnomalyBanner({ state }: { state: DashboardState }) {
   const anomalies = state.anomalies || [];
@@ -42,7 +37,7 @@ export function AnomalyBanner({ state }: { state: DashboardState }) {
                 <span className="text-foreground">{METRIC_LABEL[a.metric]}</span>
                 <DirIcon className={`w-3 h-3 ${s.text}`} />
                 <span className={`tabular-nums ${s.text}`}>{Math.abs(a.changePct)}%</span>
-                <span className="text-muted-foreground font-normal">on {fmtDate(a.date)}</span>
+                <span className="text-muted-foreground font-normal">on {formatDateLabel(a.date, state.meta.timezoneName)}</span>
               </div>
               <p className="text-xs text-foreground/85 leading-relaxed">{a.message}</p>
             </div>
