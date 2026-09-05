@@ -12,6 +12,7 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 - Explicit CRM attribution state. Downstream counts stay unknown until a supported CRM integration supplies them.
 - A secret-free UKTL operating brief at `public/plan.md.template`, loaded by the operator brief panel when `public/plan.md` exists.
 - Recorded action log entries. Meta write helpers remain disabled until the later approval-gated delivery stage.
+- Deterministic recommendations computed after a successful sync, persisted with a versioned evidence snapshot, and read back by the authenticated dashboard. They remain suggestions: pause, scale and creative changes require the later approval-gated action stage.
 
 Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
@@ -39,6 +40,8 @@ To request a manual Meta sync after the server is running, sign in and use the a
 
 The first successful sync stores the initial historical window. Later runs refresh recent days so delayed results can be incorporated. A dashboard page load reads the durable database and does not call Meta.
 
+Recommendation lifecycle rows are materialised only after a complete, warning-free successful sync. A warning-bearing or metadata-incomplete sync leaves the last complete recommendation set intact, so an incomplete observation cannot create contradictory active advice or resolve an older row. The dashboard only exposes validated active rows in the configured account/campaign/attribution scope; malformed evidence is omitted rather than treated as empty data.
+
 ## Environment
 
 Required:
@@ -56,6 +59,7 @@ Optional:
 - `META_CUSTOM_CONVERSION_ID` - private Meta result identifier when required by the account setup.
 - `META_PRIMARY_RESULT_ACTION_TYPE` - explicit Meta result action when more than one candidate is returned.
 - `META_ATTRIBUTION_WINDOWS` - comma-separated attribution windows, defaulting to `7d_click,1d_view`.
+- `META_RECOMMENDATION_COMPARISON_DAYS` - recommendation comparison window: `3`, `7`, `14` or `30`; defaults to `7`.
 - `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`.
 - `META_CAMPAIGN_LAUNCH_DATE` - `YYYY-MM-DD`, used for account-local phase context.
 - `ANTHROPIC_API_KEY` - enables the optional AI briefing and creative brief features.
@@ -93,6 +97,8 @@ app/api/cron/sync-meta         protected scheduled sync
 lib/meta.ts                    Meta read client and diagnostics
 lib/sync.ts                    transactional sync and leases
 lib/read-model.ts              database-backed dashboard state
+lib/recommendations.ts         pure evidence analysis and deterministic rules
+lib/recommendation-store.ts    validated persistence and lifecycle reads
 lib/uktl-config.ts             typed UKTL domain configuration
 lib/targets.ts                 target classification without defaults
 lib/format.ts                  account-currency and UK date formatting

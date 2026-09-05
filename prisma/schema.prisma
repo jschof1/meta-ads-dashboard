@@ -215,6 +215,39 @@ model SyncRun {
   @@index([accountId, startedAt])
 }
 
+// Deterministic analysis output. A fingerprint identifies one recommendation
+// type for one target in one account/campaign/attribution scope; repeated syncs
+// update that row instead of creating a new copy.
+model Recommendation {
+  id              String   @id @default(cuid())
+  fingerprint     String   @unique
+  accountId       String
+  campaignId      String?
+  attributionKey  String
+  type            String
+  analysisWindowDays Int
+  ruleVersion     String   @default("pr06.v1")
+  targetType      String
+  targetId        String
+  targetName      String
+  severity        String
+  confidence      String
+  lifecycle       String   @default("OPEN")
+  reason          String
+  evidence        String   @default("{}")
+  proposedAction  String
+  sourceSyncRunId String?
+  firstSeenAt     DateTime @default(now())
+  lastSeenAt      DateTime @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([accountId, campaignId, attributionKey, lifecycle])
+  @@index([targetId, lastSeenAt])
+  @@index([sourceSyncRunId])
+}
+
 // v2+ audit trail. Keep this model available for the approval-gated action
 // work; PR03 does not create Meta mutations.
 model ActionLog {

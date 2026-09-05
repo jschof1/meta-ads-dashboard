@@ -1,5 +1,13 @@
 // Shape returned by /api/dashboard/state. Keep in sync with route.ts.
 import type { UKTLConfig } from "./uktl-config";
+import type {
+  RecommendationConfidence,
+  RecommendationEvidence,
+  RecommendationLifecycle,
+  RecommendationSeverity,
+  RecommendationTargetType,
+  RecommendationType,
+} from "./recommendation-types";
 
 export type Bucket = {
   // Values are nullable because Meta may omit a field or no stored row may
@@ -172,6 +180,33 @@ export type ActionLogEntry = {
   result?: string | null;
 };
 
+/** Persisted, server-validated recommendation data exposed to the dashboard. */
+export type RecommendationView = {
+  id: string;
+  fingerprint: string;
+  accountId: string;
+  campaignId: string | null;
+  attributionKey: string;
+  type: RecommendationType;
+  analysisWindowDays: number;
+  ruleVersion: string;
+  target: {
+    type: RecommendationTargetType;
+    id: string;
+    name: string;
+  };
+  severity: RecommendationSeverity;
+  confidence: RecommendationConfidence;
+  lifecycle: RecommendationLifecycle;
+  reason: string;
+  evidence: RecommendationEvidence;
+  proposedAction: string;
+  sourceSyncRunId: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  resolvedAt: string | null;
+};
+
 export type DecisionTrigger = {
   id: string;
   label: string;
@@ -236,5 +271,6 @@ export type DashboardState = {
   actionLog: ActionLogEntry[];
   phase: CampaignPhase;
   triggers: DecisionTrigger[];
+  recommendations: RecommendationView[];
   targets: UKTLConfig;
 };

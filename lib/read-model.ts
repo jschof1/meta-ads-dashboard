@@ -15,6 +15,8 @@ import { UKTL_CONFIG, classifyAd } from "@/lib/targets";
 import { DASHBOARD_PERIODS, periodDefinition } from "@/lib/dashboard-periods";
 import { buildSpendStatus } from "@/lib/spend-status";
 import { evidenceByPeriod, evidenceForBucket } from "@/lib/dashboard-metrics";
+import { analyseRecommendations, isValidComparisonWindow, metricsFromBucket } from "@/lib/recommendations";
+import { readActiveRecommendationViews } from "@/lib/recommendation-store";
 import type {
   ActionLogEntry,
   AdRow,
@@ -27,6 +29,7 @@ import type {
   PeriodDataWarnings,
   TrendPoint,
 } from "@/lib/state-types";
+import type { ComparisonWindow, RecommendationCandidate, RecommendationSeriesPoint } from "@/lib/recommendation-types";
 
 const STALE_AFTER_MS = 26 * 60 * 60 * 1_000;
 const PERIODS: ReportingPeriod[] = [
@@ -274,6 +277,7 @@ function adRows(
   return Array.from(grouped.entries()).map(([adId, adInsightRows]) => {
     const periods = periodBuckets(adInsightRows, timeZone, now);
     const bucket = periods.last30;
+    const previousBucket = periods.previous30;
     const ad = metadata.get(adId);
     const creative = ad?.creativeMetaId ? creativeMetadata.get(ad.creativeMetaId) : undefined;
     const evidence = currentPeriodEvidence(periods);
@@ -286,6 +290,12 @@ function adRows(
       leads: bucket.leads,
       daysActive: daysBetween(firstSeenDate, today),
       spendCents: bucket.spendCents,
+      previousFrequency: previousBucket.frequency,
+      previousCtrLink: previousBucket.ctrLink,
+      previousCplCents: previousBucket.cplCents,
+      previousImpressions: previousBucket.impressions,
+      previousLeads: previousBucket.leads,
+      previousSpendCents: previousBucket.spendCents,
     });
     const verdict = classifyStoredAd(bucket);
     return {
@@ -383,6 +393,152 @@ function adSetRows(rows: StoredInsight[], adSets: AdSet[], timeZone: string, now
   }).sort((left, right) => left.adSetName.localeCompare(right.adSetName));
 }
 
+function entityInsightRows(rows: StoredInsight[], level: string, entityId: string): StoredInsight[] {
+  return rows.filter((row) => row.level === level && row.entityId === entityId);
+}
+
+function recommendationSeries(rows: StoredInsight[]): RecommendationSeriesPoint[] {
+  const byDate = new Map<string, StoredInsight[]>();
+  for (const row of rows) {
+    const current = byDate.get(row.date) ?? [];
+    current.push(row);
+    byDate.set(row.date, current);
+  }
+  return Array.from(byDate.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, dateRows]) => ({ date, metrics: metricsFromBucket(aggregateInsights(dateRows)) }));
+}
+
+function configuredRecommendationComparisonDays(): ComparisonWindow {
+  const raw = process.env.META_RECOMMENDATION_COMPARISON_DAYS?.trim();
+  const value = raw && /^\d+$/.test(raw) ? Number(raw) : 7;
+  return Number.isInteger(value) && isValidComparisonWindow(value) ? value : 7;
+}
+
+function recommendationRanges(comparisonDays: ComparisonWindow, timeZone: string, now: Date) {
+  const today = accountLocalDate(now, timeZone);
+  return {
+    current: { since: addCalendarDays(today, -(comparisonDays - 1)), until: today },
+    previous: { since: addCalendarDays(today, -((comparisonDays * 2) - 1)), until: addCalendarDays(today, -comparisonDays) },
+    cumulative: dateRangeForPeriod("30d", timeZone, now),
+  };
+}
+
+function rowsInRange(rows: StoredInsight[], range: { since: string; until: string }): StoredInsight[] {
+  return rows.filter((row) => row.date >= range.since && row.date <= range.until);
+}
+
+function buildRecommendationCandidates(input: {
+  accountId: string | null;
+  accountName: string | null;
+  accountRows: StoredInsight[];
+  campaigns: CampaignRow[];
+  adSets: AdSetRow[];
+    ads: AdRow[];
+    readableRows: StoredInsight[];
+    daysSinceLaunch: number | null;
+    today: string;
+    timeZone: string;
+    now: Date;
+  }): RecommendationCandidate[] {
+  if (!input.accountId) return [];
+
+  const candidates: RecommendationCandidate[] = [];
+  const learningByAdSetId = new Map(input.adSets.map((adSet) => [adSet.adSetId, adSet.learningStage]));
+  const add = (result: RecommendationCandidate[]) => candidates.push(...result);
+  const comparisonDays = configuredRecommendationComparisonDays();
+  const analyseEntity = (entity: {
+    target: { type: "account" | "campaign" | "adset" | "ad"; id: string; name: string };
+    rows: StoredInsight[];
+    status: string | null;
+    learningState: string | null;
+    daysActive: number | null;
+    budgetCents?: number | null;
+  }) => {
+    const ranges = recommendationRanges(comparisonDays, input.timeZone, input.now);
+    const currentRows = rowsInRange(entity.rows, ranges.current);
+    const previousRows = rowsInRange(entity.rows, ranges.previous);
+    const cumulativeRows = rowsInRange(entity.rows, ranges.cumulative);
+    add(analyseRecommendations({
+      config: UKTL_CONFIG,
+      target: entity.target,
+      comparisonDays,
+      ranges,
+      current: metricsFromBucket(aggregateInsights(currentRows)),
+      previous: previousRows.length > 0 ? metricsFromBucket(aggregateInsights(previousRows)) : null,
+      cumulative: cumulativeRows.length > 0 ? metricsFromBucket(aggregateInsights(cumulativeRows)) : null,
+      status: entity.status,
+      learningState: entity.learningState,
+      series: recommendationSeries(entity.rows),
+      sampleSize: currentRows.length,
+      daysActive: entity.daysActive,
+      budgetCents: entity.budgetCents,
+    }).recommendations);
+  };
+
+  analyseEntity({
+    target: { type: "account", id: input.accountId, name: cleanName(input.accountName, "UK Trade Leads") },
+    rows: input.accountRows,
+    status: null,
+    learningState: null,
+    daysActive: input.daysSinceLaunch,
+    budgetCents: UKTL_CONFIG.targets.monthlyBudgetMinorUnits,
+  });
+
+  for (const campaign of input.campaigns) {
+    const rows = entityInsightRows(input.readableRows, "campaign", campaign.campaignId);
+    analyseEntity({
+      target: { type: "campaign", id: campaign.campaignId, name: campaign.campaignName },
+      rows,
+      status: campaign.status,
+      learningState: null,
+      daysActive: daysBetween(firstSeen(rows), input.today),
+      budgetCents: campaign.dailyBudgetMinor == null ? null : campaign.dailyBudgetMinor * 30,
+    });
+  }
+
+  for (const adSet of input.adSets) {
+    const rows = entityInsightRows(input.readableRows, "adset", adSet.adSetId);
+    analyseEntity({
+      target: { type: "adset", id: adSet.adSetId, name: adSet.adSetName },
+      rows,
+      status: adSet.status,
+      learningState: adSet.learningStage,
+      daysActive: daysBetween(firstSeen(rows), input.today),
+      budgetCents: adSet.dailyBudgetMinor == null ? null : adSet.dailyBudgetMinor * 30,
+    });
+  }
+
+  for (const ad of input.ads) {
+    const rows = entityInsightRows(input.readableRows, "ad", ad.adId);
+    analyseEntity({
+      target: { type: "ad", id: ad.adId, name: ad.adName },
+      rows,
+      status: ad.status,
+      learningState: ad.adSetId ? learningByAdSetId.get(ad.adSetId) ?? null : null,
+      daysActive: ad.daysActive,
+    });
+  }
+
+  return candidates;
+}
+
+function cleanName(value: string | null, fallback: string): string {
+  const normalised = value?.trim().replace(/\s+/g, " ");
+  return (normalised || fallback).slice(0, 240);
+}
+
+type DashboardStateOptions = {
+  db?: PrismaClient;
+  now?: Date;
+  /** Sync uses derived candidates before lifecycle persistence; readers use stored views. */
+  recommendationMode?: "persisted" | "derived";
+};
+
+type DerivedDashboardState = Omit<DashboardState, "recommendations"> & {
+  recommendations: RecommendationCandidate[];
+};
+
 export function buildDataWarnings(input: {
   state: DashboardState["meta"]["syncState"];
   current: Bucket;
@@ -449,7 +605,9 @@ export function buildDataWarningsByPeriod(input: {
   return warnings;
 }
 
-export async function buildDashboardState(options: { db?: PrismaClient; now?: Date } = {}): Promise<DashboardState> {
+export function buildDashboardState(options: DashboardStateOptions & { recommendationMode: "derived" }): Promise<DerivedDashboardState>;
+export function buildDashboardState(options?: DashboardStateOptions): Promise<DashboardState>;
+export async function buildDashboardState(options: DashboardStateOptions = {}): Promise<DashboardState | DerivedDashboardState> {
   const db = options.db ?? defaultPrisma;
   const now = options.now ?? new Date();
   const accountId = configuredAccountId();
@@ -457,8 +615,12 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
   const attributionKey = configuredAttributionKey();
   const runScope = { attributionKey, campaignId, ...(accountId ? { accountId } : {}) };
   const [latestAttempt, latestSuccess, logs] = await Promise.all([
-    db.syncRun.findFirst({ where: runScope, orderBy: { startedAt: "desc" } }),
-    db.syncRun.findFirst({ where: { ...runScope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
+    accountId
+      ? db.syncRun.findFirst({ where: runScope, orderBy: { startedAt: "desc" } })
+      : Promise.resolve(null),
+    accountId
+      ? db.syncRun.findFirst({ where: { ...runScope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } })
+      : Promise.resolve(null),
     db.actionLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
   ]);
   const timeZone = latestSuccess?.timezoneName || "UTC";
@@ -534,6 +696,30 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
     mtdComparisonComparable,
     metadataStaleCount,
   });
+  const derivedRecommendations = options.recommendationMode === "derived"
+    ? buildRecommendationCandidates({
+      accountId: storedAccountId,
+      accountName: latestSuccess?.accountName ?? null,
+      accountRows,
+      campaigns: campaignState,
+      adSets: adSetState,
+      ads: adsState,
+      readableRows,
+      daysSinceLaunch: dsl,
+      today: todayRange.until,
+      timeZone,
+      now,
+    })
+    : [];
+  const recommendations = options.recommendationMode === "derived"
+    ? derivedRecommendations
+    : storedAccountId
+      ? await readActiveRecommendationViews(db, {
+        accountId: storedAccountId,
+        campaignId,
+        attributionKey,
+      })
+      : [];
   return {
     meta: {
       adAccountId: storedAccountId,
@@ -600,8 +786,9 @@ export async function buildDashboardState(options: { db?: PrismaClient; now?: Da
       daysSinceLaunch: dsl,
       ads: adsState.map((ad) => ({ fatigueScore: ad.fatigueScore, adName: ad.adName, evidenceStatus: ad.evidence["30d"].status })),
     }),
+    recommendations,
     targets: UKTL_CONFIG,
-  };
+  } as DashboardState | DerivedDashboardState;
 }
 
 export function periodRanges(timeZone: string, now = new Date()): Record<ReportingPeriod, { since: string; until: string }> {

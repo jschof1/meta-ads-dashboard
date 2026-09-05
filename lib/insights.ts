@@ -25,8 +25,28 @@ export function scoreFatigue(input: {
   leads: number | null;
   daysActive: number | null;
   spendCents: number | null;
+  previousFrequency: number | null;
+  previousCtrLink: number | null;
+  previousCplCents: number | null;
+  previousImpressions: number | null;
+  previousLeads: number | null;
+  previousSpendCents: number | null;
 }): { score: number; reason: string } {
-  const { frequency, ctrLink, cplCents, impressions, leads, daysActive, spendCents } = input;
+  const {
+    frequency,
+    ctrLink,
+    cplCents,
+    impressions,
+    leads,
+    daysActive,
+    spendCents,
+    previousFrequency,
+    previousCtrLink,
+    previousCplCents,
+    previousImpressions,
+    previousLeads,
+    previousSpendCents,
+  } = input;
   const minimumSpend = UKTL_CONFIG.evidence.minSpendMinorUnits;
 
   if (
@@ -39,34 +59,72 @@ export function scoreFatigue(input: {
     || frequency == null
     || ctrLink == null
     || (minimumSpend != null && spendCents < minimumSpend)
+    || previousSpendCents == null
+    || previousSpendCents <= 0
+    || previousImpressions == null
+    || previousImpressions < UKTL_CONFIG.evidence.minImpressionsForRate
+    || previousLeads == null
+    || previousLeads < UKTL_CONFIG.evidence.minLeadsForVerdict
+    || previousFrequency == null
+    || previousCtrLink == null
+    || (minimumSpend != null && previousSpendCents < minimumSpend)
   ) {
-    return { score: 0, reason: "Not enough stored evidence to read fatigue yet" };
+    return { score: 0, reason: "Not enough matched stored evidence to read fatigue yet" };
+  }
+
+  const frequencyChange = previousFrequency === 0 ? null : ((frequency - previousFrequency) / Math.abs(previousFrequency)) * 100;
+  const ctrChange = previousCtrLink === 0 ? null : ((ctrLink - previousCtrLink) / Math.abs(previousCtrLink)) * 100;
+  const cplChange = previousCplCents == null || previousCplCents === 0 || cplCents == null
+    ? null
+    : ((cplCents - previousCplCents) / Math.abs(previousCplCents)) * 100;
+  const leadsChange = previousLeads === 0 || leads == null
+    ? null
+    : ((leads - previousLeads) / Math.abs(previousLeads)) * 100;
+  const frequencyRising = frequency >= UKTL_CONFIG.frequency.watchAbove
+    && frequencyChange != null
+    && frequencyChange >= 20;
+  const ctrDeteriorating = ctrChange != null && ctrChange <= -20;
+  const cplDeteriorating = cplChange != null && cplChange >= 20;
+  const leadsDeteriorating = leadsChange != null && leadsChange <= -20;
+  const deteriorationCount = [ctrDeteriorating, cplDeteriorating, leadsDeteriorating].filter(Boolean).length;
+
+  if (!frequencyRising || deteriorationCount === 0) {
+    return {
+      score: 0,
+      reason: frequency >= UKTL_CONFIG.frequency.watchAbove
+        ? "Frequency is elevated, but no combined matched-period deterioration is evidenced"
+        : "No combined frequency-and-performance deterioration is evidenced",
+    };
   }
 
   let score = 0;
   const reasons: string[] = [];
   const frequencyRules = UKTL_CONFIG.frequency;
 
-  if (frequency >= frequencyRules.alertAbove) {
+  if (frequency >= frequencyRules.alertAbove && frequencyRising) {
     score += 0.5;
-    reasons.push(`frequency ${frequency.toFixed(2)}`);
-  } else if (frequency >= frequencyRules.watchAbove) {
+    reasons.push(`frequency ${frequency.toFixed(2)} rising ${Math.round(Math.abs(frequencyChange ?? 0))}%`);
+  } else if (frequencyRising) {
     score += 0.25;
     reasons.push(`frequency ${frequency.toFixed(2)} (warming)`);
   }
 
-  if (ctrLink < frequencyRules.ctrAlertBelow) {
+  if (ctrDeteriorating && ctrLink < frequencyRules.ctrAlertBelow) {
     score += 0.3;
-    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% below diagnostic floor`);
-  } else if (ctrLink < frequencyRules.ctrWatchBelow) {
+    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% down ${Math.round(Math.abs(ctrChange ?? 0))}%`);
+  } else if (ctrDeteriorating) {
     score += 0.15;
-    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% soft`);
+    reasons.push(`CTR ${(ctrLink * 100).toFixed(2)}% down ${Math.round(Math.abs(ctrChange ?? 0))}%`);
   }
 
-  const cplMaximum = UKTL_CONFIG.targets.cpl.maximumMinorUnits;
-  if (cplCents != null && cplMaximum != null && cplCents > cplMaximum) {
+  if (cplDeteriorating) {
     score += 0.2;
-    reasons.push("CPL above configured maximum");
+    reasons.push(`CPL up ${Math.round(Math.abs(cplChange ?? 0))}%`);
+  }
+
+  if (leadsDeteriorating) {
+    score += 0.2;
+    reasons.push(`leads down ${Math.round(Math.abs(leadsChange ?? 0))}%`);
   }
 
   if (daysActive != null && daysActive >= 7) {
@@ -80,8 +138,9 @@ export function scoreFatigue(input: {
 }
 
 // ---------- Anomalies ----------
-// Compare the latest day to the trailing 7-day mean. This is a historical
-// comparison and does not require a business target to be configured.
+// Compare the latest day to a trailing baseline whose ratios are derived from
+// aggregated numerators. This is a historical comparison and does not require
+// a business target to be configured.
 export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
   if (trend.length < 4) return [];
   const out: Anomaly[] = [];
@@ -89,10 +148,51 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
   const baseline = trend.slice(Math.max(0, trend.length - 8), trend.length - 1);
   if (baseline.length < 3) return [];
 
-  function avg(pick: (p: TrendPoint) => number | null): number | null {
-    const vals = baseline.map(pick).filter((v): v is number => v != null && v > 0);
-    if (vals.length === 0) return null;
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  function totalFor(points: TrendPoint[], value: (point: TrendPoint) => number | null): number | null {
+    if (points.length === 0) return null;
+    const values = points.map(value);
+    if (values.some((item) => item == null)) return null;
+    return values.reduce<number>((total, item) => total + (item ?? 0), 0);
+  }
+
+  function hasMinimumEvidence(points: TrendPoint[], metric: "cpm" | "cpl" | "ctr"): boolean {
+    const spend = totalFor(points, (point) => point.spendCents);
+    const impressions = totalFor(points, (point) => point.impressions);
+    const leads = totalFor(points, (point) => point.leads);
+    if (UKTL_CONFIG.evidence.minSpendMinorUnits != null
+      && (spend == null || spend < UKTL_CONFIG.evidence.minSpendMinorUnits)) return false;
+    if (metric === "cpl" && (spend == null || leads == null || leads < UKTL_CONFIG.evidence.minLeadsForVerdict)) return false;
+    if (metric === "cpm" && (spend == null || impressions == null || impressions < UKTL_CONFIG.evidence.minImpressionsForRate)) return false;
+    if (metric === "ctr" && (impressions == null || impressions < UKTL_CONFIG.evidence.minImpressionsForRate)) return false;
+    return true;
+  }
+
+  function aggregateRate(
+    points: TrendPoint[],
+    numerator: (point: TrendPoint) => number | null,
+    denominator: (point: TrendPoint) => number | null,
+    multiplier = 1,
+  ): number | null {
+    if (points.length === 0) return null;
+    const numerators = points.map(numerator);
+    const denominators = points.map(denominator);
+    if (numerators.some((value) => value == null) || denominators.some((value) => value == null)) return null;
+    const totalNumerator = numerators.reduce<number>((total, value) => total + (value ?? 0), 0);
+    const totalDenominator = denominators.reduce<number>((total, value) => total + (value ?? 0), 0);
+    if (totalDenominator <= 0) return null;
+    return (totalNumerator / totalDenominator) * multiplier;
+  }
+
+  function pointRate(
+    point: TrendPoint,
+    numerator: (point: TrendPoint) => number | null,
+    denominator: (point: TrendPoint) => number | null,
+    multiplier = 1,
+  ): number | null {
+    const numeratorValue = numerator(point);
+    const denominatorValue = denominator(point);
+    if (numeratorValue == null || denominatorValue == null || denominatorValue <= 0) return null;
+    return (numeratorValue / denominatorValue) * multiplier;
   }
 
   function delta(latestVal: number | null, baseVal: number | null): number | null {
@@ -102,7 +202,12 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
 
   // For CPM and CPL, lower is better, so drops are positive information and
   // spikes are warnings.
-  const cpmDelta = delta(latest.cpmCents, avg((p) => p.cpmCents));
+  const cpmDelta = hasMinimumEvidence([latest], "cpm") && hasMinimumEvidence(baseline, "cpm")
+    ? delta(
+      pointRate(latest, (point) => point.spendCents, (point) => point.impressions, 1_000),
+      aggregateRate(baseline, (point) => point.spendCents, (point) => point.impressions, 1_000),
+    )
+    : null;
   if (cpmDelta != null && Math.abs(cpmDelta) >= 0.2) {
     const isPositive = cpmDelta < 0;
     out.push({
@@ -117,7 +222,12 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
     });
   }
 
-  const cplDelta = delta(latest.cplCents, avg((p) => p.cplCents));
+  const cplDelta = hasMinimumEvidence([latest], "cpl") && hasMinimumEvidence(baseline, "cpl")
+    ? delta(
+      pointRate(latest, (point) => point.spendCents, (point) => point.leads),
+      aggregateRate(baseline, (point) => point.spendCents, (point) => point.leads),
+    )
+    : null;
   if (cplDelta != null && Math.abs(cplDelta) >= 0.2) {
     const isPositive = cplDelta < 0;
     out.push({
@@ -134,7 +244,12 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
 
   // For CTR, higher is better. Jumps are positive information and falls are
   // warnings.
-  const ctrDelta = delta(latest.ctrLink, avg((p) => p.ctrLink));
+  const ctrDelta = hasMinimumEvidence([latest], "ctr") && hasMinimumEvidence(baseline, "ctr")
+    ? delta(
+      pointRate(latest, (point) => point.linkClicks, (point) => point.impressions),
+      aggregateRate(baseline, (point) => point.linkClicks, (point) => point.impressions),
+    )
+    : null;
   if (ctrDelta != null && Math.abs(ctrDelta) >= 0.25) {
     const isPositive = ctrDelta > 0;
     out.push({

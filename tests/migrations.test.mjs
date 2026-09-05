@@ -72,7 +72,7 @@ afterEach(async () => {
   }
 });
 
-test("applies the PR03 schema through Prisma migrate deploy", async () => {
+test("applies the committed schema through Prisma migrate deploy", async () => {
   const { path } = await temporaryDatabase();
   deploy(path);
   const db = createPrismaClient({ url: `file:${path}` });
@@ -85,9 +85,10 @@ test("applies the PR03 schema through Prisma migrate deploy", async () => {
   const creativeColumns = await db.$queryRawUnsafe('PRAGMA table_info("Creative")');
   const dailyInsightColumns = await db.$queryRawUnsafe('PRAGMA table_info("DailyInsight")');
   const syncRunColumns = await db.$queryRawUnsafe('PRAGMA table_info("SyncRun")');
+  const recommendationColumns = await db.$queryRawUnsafe('PRAGMA table_info("Recommendation")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard"]);
-  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun"]) {
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine"]);
+  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
   for (const [name, columns] of [["Campaign", campaignColumns], ["AdSet", adSetColumns], ["Ad", adColumns], ["Creative", creativeColumns]]) {
@@ -98,6 +99,9 @@ test("applies the PR03 schema through Prisma migrate deploy", async () => {
   assert.ok(campaignColumns.some((column) => column.name === "lifetimeBudgetMinor"), "Campaign missing lifetimeBudgetMinor");
   assert.ok(dailyInsightColumns.some((column) => column.name === "scopeKey"), "DailyInsight missing scopeKey");
   assert.ok(syncRunColumns.some((column) => column.name === "campaignId"), "SyncRun missing campaignId");
+  for (const column of ["fingerprint", "accountId", "campaignId", "attributionKey", "type", "analysisWindowDays", "ruleVersion", "targetId", "lifecycle", "evidence", "proposedAction"]) {
+    assert.ok(recommendationColumns.some((candidate) => candidate.name === column), `Recommendation missing ${column}`);
+  }
   await db.$disconnect();
 });
 
@@ -120,7 +124,7 @@ test("upgrades a populated PR03 database without dropping durable rows", async (
   assert.equal(campaign.name, "Existing campaign");
   assert.equal(insight.spendMinorUnits, 1234);
   assert.equal(insight.scopeKey, "account");
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine"]);
   await upgraded.$disconnect();
 });
 
