@@ -4,7 +4,8 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 
 ## What it shows
 
-- AI daily briefing when an Anthropic key is configured. The deterministic stored metrics remain available without AI.
+- Optional persisted AI daily briefing when an Anthropic key is configured. It explains stored deterministic evidence; the dashboard and recommendations remain available without AI.
+- An explicit creative brief generator that uses stored headline, body, CTA, destination, format and media identifiers. Images and video are not inspected, so creative explanations are labelled hypotheses.
 - Scorecard for spend, CPL, learning evidence, link CTR, CPM, launch age, and configured decision gates.
 - Historical sparklines for CPL and CPM with matched-period comparisons.
 - Creative leaderboard sorted by CPL, with evidence-aware verdicts, fatigue diagnostics, and an Ads Manager link.
@@ -40,6 +41,10 @@ To request a manual Meta sync after the server is running, sign in and use the a
 
 The first successful sync stores the initial historical window. Later runs refresh recent days so delayed results can be incorporated. A dashboard page load reads the durable database and does not call Meta.
 
+When `ANTHROPIC_API_KEY` is configured, a complete warning-free sync makes a best-effort persisted summary snapshot. The authenticated insights `GET` routes read that snapshot; the dashboard never calls Anthropic during render. The summary and creative `POST` routes explicitly regenerate a snapshot from server-side stored data, ignore browser-supplied metrics, and leave the last valid snapshot intact when the provider or validation fails. Repeated automatic generation is deduplicated by a hash of the supplied evidence; an older snapshot is marked stale after the stored data changes.
+
+AI output is schema-validated and every displayed claim must reference an evidence ID from the same stored context. The AI may explain or propose hypotheses, but it does not perform arithmetic, infer lead quality/customer value, execute Meta changes, or turn recommendations into actions. The creative boundary is deliberately metadata-only: no image or video bytes are supplied or inspected.
+
 Recommendation lifecycle rows are materialised only after a complete, warning-free successful sync. A warning-bearing or metadata-incomplete sync leaves the last complete recommendation set intact, so an incomplete observation cannot create contradictory active advice or resolve an older row. The dashboard only exposes validated active rows in the configured account/campaign/attribution scope; malformed evidence is omitted rather than treated as empty data.
 
 ## Environment
@@ -62,7 +67,8 @@ Optional:
 - `META_RECOMMENDATION_COMPARISON_DAYS` - recommendation comparison window: `3`, `7`, `14` or `30`; defaults to `7`.
 - `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`.
 - `META_CAMPAIGN_LAUNCH_DATE` - `YYYY-MM-DD`, used for account-local phase context.
-- `ANTHROPIC_API_KEY` - enables the optional AI briefing and creative brief features.
+- `ANTHROPIC_API_KEY` - enables the optional persisted AI briefing and creative brief features.
+- `ANTHROPIC_MODEL` - optional Anthropic model identifier; the application uses its dated default when omitted.
 
 Targets and budgets are not environment defaults. They live in the typed UKTL configuration and remain `null` until supplied as an approved business input. Currency and timezone come from the Meta account and are formatted with `en-GB` rules.
 
@@ -99,11 +105,14 @@ lib/sync.ts                    transactional sync and leases
 lib/read-model.ts              database-backed dashboard state
 lib/recommendations.ts         pure evidence analysis and deterministic rules
 lib/recommendation-store.ts    validated persistence and lifecycle reads
+lib/ai-briefings.ts            evidence context, schemas, prompts and grounding
+lib/ai-briefing-store.ts       scoped durable AI snapshot persistence/readback
+lib/ai-service.ts              optional Anthropic generation and fail-closed errors
 lib/uktl-config.ts             typed UKTL domain configuration
 lib/targets.ts                 target classification without defaults
 lib/format.ts                  account-currency and UK date formatting
 public/plan.md.template        secret-free operating brief template
-prisma/schema.prisma           durable read model plus retained legacy tables
+prisma/schema.prisma           durable read model plus AI snapshots and legacy tables
 ```
 
 Run the full local gate suite with:

@@ -44,6 +44,7 @@ async function startServer() {
       CRON_SECRET: cronSecret,
       META_MARKETING_TOKEN: "",
       META_AD_ACCOUNT_ID: "",
+      ANTHROPIC_API_KEY: "",
       AIRTABLE_ENABLED: "false",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -125,6 +126,8 @@ test("protected APIs reject requests without a session", async () => {
     ["GET", "/api/dashboard/state"],
     ["GET", "/api/health"],
     ["GET", "/api/meta/diagnostic"],
+    ["GET", "/api/insights/summary"],
+    ["GET", "/api/insights/brief"],
     ["POST", "/api/insights/summary"],
     ["POST", "/api/insights/brief"],
     ["POST", "/api/refresh"],
@@ -170,6 +173,28 @@ test("authenticated dashboard, health, manual refresh, cron POST, and diagnostic
   const state = await stateResponse.json();
   assert.equal(state.meta.syncState, "never");
   assert.equal(state.scorecard.today.spendCents, null);
+
+  for (const path of ["/api/insights/summary", "/api/insights/brief"]) {
+    const read = await get(path, { headers: { cookie } });
+    assert.equal(read.status, 200);
+    assert.equal(read.headers.get("cache-control"), "private, no-store");
+    const readPayload = await read.json();
+    assert.equal(readPayload.enabled, false);
+    assert.equal(readPayload.status, "not_generated");
+    assert.equal(readPayload.briefing, null);
+    const generated = await get(path, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      body: JSON.stringify({ forgedMetrics: { leads: 999_999 }, currencyCode: "USD", creative: "forged" }),
+    });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.headers.get("cache-control"), "private, no-store");
+    const generatedPayload = await generated.json();
+    assert.equal(generatedPayload.enabled, false);
+    assert.equal(generatedPayload.status, "disabled");
+    assert.equal(generatedPayload.briefing, null);
+    assert.doesNotMatch(JSON.stringify(generatedPayload), /999999|USD|forged/);
+  }
 
   const healthResponse = await get("/api/health", { headers: { cookie } });
   assert.equal(healthResponse.status, 200);

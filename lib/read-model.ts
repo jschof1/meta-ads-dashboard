@@ -311,6 +311,9 @@ function adRows(
       body: creative?.body ?? null,
       callToAction: creative?.callToActionType ?? null,
       destinationUrl: creative?.destinationUrl ?? null,
+      imageHash: creative?.imageHash ?? null,
+      objectId: creative?.objectId ?? null,
+      urlTags: creative?.urlTags ?? null,
       lastChangeAt: latestProviderChange(ad?.providerUpdatedAt, creative?.providerUpdatedAt),
       campaignId: ad?.campaignMetaId ?? null,
       adSetId: ad?.adSetMetaId ?? null,
@@ -732,6 +735,7 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
       lastSyncAt: latestSuccessAt,
       lastSyncAgeMs: lastSuccessfulAgeMs,
       lastSuccessfulSyncAt: latestSuccessAt,
+      lastSuccessfulSyncRunId: latestSuccess?.id ?? null,
       lastAttemptAt: latestAttemptAt,
       lastAttemptStatus: latestAttempt?.status ?? null,
       lastSyncError: latestAttempt?.status === "FAILED"

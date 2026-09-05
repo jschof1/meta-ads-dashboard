@@ -19,6 +19,7 @@ import { chooseSyncRange, isDateInRange, isValidTimeZone, type SyncRange } from 
 import { safeJson } from "@/lib/safe-json";
 import { buildDashboardState } from "@/lib/read-model";
 import { persistRecommendationLifecycle } from "@/lib/recommendation-store";
+import { generateAndPersistAiBriefing } from "@/lib/ai-service";
 
 export type SyncTrigger = "cron" | "manual";
 
@@ -889,6 +890,22 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
           recommendations: state.recommendations,
           now: completedAt,
         });
+        try {
+          // AI is optional and advisory. A provider outage must never turn a
+          // committed Meta sync into a failed run or erase the last briefing.
+          if (process.env.ANTHROPIC_API_KEY?.trim()) {
+            const persistedState = await buildDashboardState({ db, now: completedAt });
+            await generateAndPersistAiBriefing({
+              db,
+              state: persistedState,
+              kind: "summary",
+              apiKey: process.env.ANTHROPIC_API_KEY,
+              sourceSyncRunId: run.id,
+            });
+          }
+        } catch (aiError) {
+          console.error("Unable to persist AI briefing after Meta sync:", safeErrorMessage(aiError));
+        }
       }
     } catch (recommendationError) {
       finalWarning = [warning, "Recommendation lifecycle persistence failed; stored metrics remain available."]
