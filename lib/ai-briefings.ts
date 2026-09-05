@@ -25,6 +25,7 @@ export const AI_EVIDENCE_SOURCES = [
   "meta",
   "metric",
   "funnel",
+  "crm",
   "ad",
   "recommendation",
   "warning",
@@ -424,6 +425,7 @@ function commonEvidence(state: DashboardState, plan: string, items: AiEvidenceIt
   });
   metricEvidence(state, items);
   addEvidence(items, { id: "funnel:30d", source: "funnel", label: "Stored UKTL funnel values for the current 30d view", value: jsonValue(state.funnel) });
+  addEvidence(items, { id: "crm:30d", source: "crm", label: "Stored HighLevel attribution and customer-outcome evidence for the current 30d view", value: jsonValue(state.crm) });
   addEvidence(items, { id: "metric:phase", source: "metric", label: "Stored campaign phase and spend status", value: jsonValue({ phase: state.phase, spendStatus: state.scorecard.spendStatus }) });
   warningEvidence(state, items);
   for (const [index, anomaly] of state.anomalies.entries()) {

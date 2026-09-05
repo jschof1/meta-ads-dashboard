@@ -4,6 +4,9 @@ import type {
   ActionLog,
   Campaign,
   Creative,
+  CrmContact,
+  CrmOpportunity,
+  CrmSyncRun,
   DailyInsight,
   SyncRun,
 } from "@prisma/client";
@@ -17,6 +20,8 @@ import { buildSpendStatus } from "@/lib/spend-status";
 import { evidenceByPeriod, evidenceForBucket } from "@/lib/dashboard-metrics";
 import { analyseRecommendations, isValidComparisonWindow, metricsFromBucket } from "@/lib/recommendations";
 import { readActiveRecommendationViews } from "@/lib/recommendation-store";
+import { loadHighLevelSettings, type HighLevelSettings } from "@/lib/highlevel-config";
+import { buildCrmMetrics, emptyCrmMetrics } from "@/lib/crm-metrics";
 import type {
   ActionLogEntry,
   AdRow,
@@ -28,6 +33,7 @@ import type {
   PeriodBuckets,
   PeriodDataWarnings,
   TrendPoint,
+  CrmDashboardState,
 } from "@/lib/state-types";
 import type { ComparisonWindow, RecommendationCandidate, RecommendationSeriesPoint } from "@/lib/recommendation-types";
 
@@ -531,6 +537,180 @@ function cleanName(value: string | null, fallback: string): string {
   return (normalised || fallback).slice(0, 240);
 }
 
+const CRM_STALE_AFTER_MS = 26 * 60 * 60 * 1_000;
+
+type CrmRunLookup = {
+  schemaAvailable: boolean;
+  latestAttempt: CrmSyncRun | null;
+  latestSuccess: CrmSyncRun | null;
+  latestAnySuccess: CrmSyncRun | null;
+};
+
+async function readCrmRuns(db: PrismaClient, settings: HighLevelSettings): Promise<CrmRunLookup> {
+  if (!settings.locationId || !settings.pipelineId || !settings.mappingReady) {
+    return { schemaAvailable: true, latestAttempt: null, latestSuccess: null, latestAnySuccess: null };
+  }
+  try {
+    const [latestAttempt, latestSuccess, latestAnySuccess] = await Promise.all([
+      db.crmSyncRun.findFirst({ where: { locationId: settings.locationId, pipelineId: settings.pipelineId }, orderBy: { startedAt: "desc" } }),
+      db.crmSyncRun.findFirst({ where: { locationId: settings.locationId, pipelineId: settings.pipelineId, mappingHash: settings.mappingHash as string, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
+      db.crmSyncRun.findFirst({ where: { locationId: settings.locationId, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
+    ]);
+    return { schemaAvailable: true, latestAttempt, latestSuccess, latestAnySuccess };
+  } catch {
+    // Older local fixtures and databases may predate PR08. A missing CRM table
+    // is represented as unavailable configuration rather than a dashboard 503.
+    return { schemaAvailable: false, latestAttempt: null, latestSuccess: null, latestAnySuccess: null };
+  }
+}
+
+type CrmRows = { available: boolean; contacts: CrmContact[]; opportunities: CrmOpportunity[] };
+
+async function readCrmRows(db: PrismaClient, settings: HighLevelSettings, run: CrmSyncRun | null): Promise<CrmRows> {
+  if (!run || !settings.locationId || !settings.pipelineId) return { available: true, contacts: [], opportunities: [] };
+  try {
+    const [contacts, opportunities] = await Promise.all([
+      db.crmContact.findMany({ where: { sourceSyncRunId: run.id, locationId: settings.locationId } }),
+      db.crmOpportunity.findMany({ where: { sourceSyncRunId: run.id, locationId: settings.locationId, pipelineId: settings.pipelineId } }),
+    ]);
+    return { available: true, contacts, opportunities };
+  } catch {
+    return { available: false, contacts: [], opportunities: [] };
+  }
+}
+
+function crmState(input: {
+  settings: HighLevelSettings;
+  runs: CrmRunLookup;
+  rows: CrmRows;
+  now: Date;
+  timeZone: string;
+  metaSpendMinorUnits: number | null;
+  metaLeads: number | null;
+  metaCurrencyCode: string | null;
+  campaigns: CampaignRow[];
+  ads: AdRow[];
+}): CrmDashboardState {
+  const periodRange = dateRangeForPeriod("30d", input.timeZone, input.now);
+  const period = { ...periodRange, label: "Last 30 days" };
+  const empty = emptyCrmMetrics(input.metaLeads, input.metaCurrencyCode);
+  const base = {
+    configured: input.settings.mappingReady,
+    syncEnabled: input.settings.providerReady,
+    locationId: input.settings.locationId,
+    pipelineId: input.settings.pipelineId,
+    mappingReady: input.settings.mappingReady,
+    mappingHash: input.settings.mappingHash,
+    lastSyncAt: input.runs.latestSuccess?.finishedAt?.toISOString() ?? null,
+    lastAttemptAt: input.runs.latestAttempt?.finishedAt?.toISOString() ?? input.runs.latestAttempt?.startedAt?.toISOString() ?? null,
+    lastAttemptStatus: input.runs.latestAttempt?.status ?? null,
+    lastError: input.runs.latestAttempt?.status === "FAILED"
+      ? "HighLevel sync failed; the last successful CRM snapshot remains available."
+      : null,
+    period,
+  };
+  const configWarnings = input.settings.errors.length > 0 ? input.settings.errors.slice(0, 3) : [];
+  if (!input.settings.providerReady && input.settings.mappingReady) {
+    configWarnings.push("HighLevel polling is disabled until HIGHLEVEL_SYNC_ENABLED=true and a server-side token is configured.");
+  }
+  if (input.settings.mappingReady && input.runs.latestAnySuccess && !input.runs.latestSuccess) {
+    return {
+      ...base,
+      status: "misconfigured",
+      ...empty,
+      warnings: [...configWarnings, "Stored HighLevel data uses a different location, pipeline or stage mapping; it was not used for current metrics."],
+    };
+  }
+  if (!input.settings.mappingReady) {
+    return {
+      ...base,
+      status: input.settings.status === "not_configured" ? "not_configured" : "misconfigured",
+      ...empty,
+      warnings: configWarnings.length > 0 ? configWarnings : ["HighLevel location, pipeline and every funnel stage must be configured explicitly."],
+    };
+  }
+  if (!input.runs.schemaAvailable) {
+    return {
+      ...base,
+      status: "misconfigured",
+      ...empty,
+      warnings: ["HighLevel storage migration is not available; apply the committed PR08 migration before enabling polling."],
+    };
+  }
+  if (!input.runs.latestSuccess) {
+    return {
+      ...base,
+      status: input.runs.latestAttempt?.status === "RUNNING"
+        ? "running"
+        : input.settings.status === "disabled" ? "disabled" : "never",
+      ...empty,
+      warnings: [...configWarnings, "No successful HighLevel snapshot is stored yet; CRM outcomes remain unknown."],
+    };
+  }
+  if (!input.rows.available) {
+    return {
+      ...base,
+      status: "misconfigured",
+      ...empty,
+      warnings: [...configWarnings, "The successful HighLevel run exists, but its normalized CRM snapshot could not be read; no CRM zeroes were manufactured."],
+    };
+  }
+
+  const metrics = buildCrmMetrics({
+    scope: { locationId: input.settings.locationId as string, pipelineId: input.settings.pipelineId as string },
+    contacts: input.rows.contacts,
+    opportunities: input.rows.opportunities,
+    period: { ...period, timeZone: input.timeZone },
+    meta: {
+      spendMinorUnits: input.metaSpendMinorUnits,
+      leads: input.metaLeads,
+      currencyCode: input.metaCurrencyCode,
+      entities: [
+        ...input.campaigns.map((campaign) => ({
+          granularity: "campaign" as const,
+          id: campaign.campaignId,
+          name: campaign.campaignName,
+          spendMinorUnits: campaign.periods.last30.spendCents,
+          leads: campaign.periods.last30.leads,
+        })),
+        ...input.ads.map((ad) => ({
+          granularity: "ad" as const,
+          id: ad.adId,
+          name: ad.adName,
+          spendMinorUnits: ad.periods.last30.spendCents,
+          leads: ad.periods.last30.leads,
+        })),
+      ],
+    },
+    highLevelCurrencyCode: input.settings.currencyCode,
+  });
+  const snapshotWarning = input.runs.latestSuccess.warning?.trim() || null;
+  const snapshotDataQuality = metrics.dataQuality === "unknown"
+    ? "unknown" as const
+    : snapshotWarning
+      ? "partial" as const
+      : metrics.dataQuality;
+  const successAge = input.runs.latestSuccess.finishedAt
+    ? Math.max(0, input.now.getTime() - input.runs.latestSuccess.finishedAt.getTime())
+    : null;
+  const failedAfterSuccess = input.runs.latestAttempt?.status === "FAILED"
+    && input.runs.latestAttempt.startedAt > (input.runs.latestSuccess.finishedAt ?? input.runs.latestSuccess.startedAt);
+  const status = failedAfterSuccess
+    ? "failed" as const
+    : input.runs.latestAttempt?.status === "RUNNING"
+      ? "running" as const
+      : successAge != null && successAge > CRM_STALE_AFTER_MS
+      ? "stale" as const
+      : "fresh" as const;
+  return {
+    ...base,
+    status,
+    ...metrics,
+    dataQuality: snapshotDataQuality,
+    warnings: [...configWarnings, ...(snapshotWarning ? [snapshotWarning] : []), ...(failedAfterSuccess ? ["The latest HighLevel attempt failed; displayed CRM metrics come from the last successful snapshot."] : []), ...metrics.warnings],
+  };
+}
+
 type DashboardStateOptions = {
   db?: PrismaClient;
   now?: Date;
@@ -687,6 +867,21 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
   const adSetState = adSetRows(readableRows, adSets, timeZone, now, metadataRunId, latestSuccess);
   const currentState = syncState(latestAttempt, latestSuccess, lastSuccessfulAgeMs);
   const metadataStaleCount = [...campaignState, ...adSetState, ...adsState].filter((row) => !row.isCurrent).length;
+  const highLevelSettings = loadHighLevelSettings();
+  const highLevelRuns = await readCrmRuns(db, highLevelSettings);
+  const highLevelRows = await readCrmRows(db, highLevelSettings, highLevelRuns.latestSuccess);
+  const crm = crmState({
+    settings: highLevelSettings,
+    runs: highLevelRuns,
+    rows: highLevelRows,
+    now,
+    timeZone,
+    metaSpendMinorUnits: buckets.last30.spendCents,
+    metaLeads: buckets.last30.leads,
+    metaCurrencyCode: latestSuccess?.currencyCode ?? null,
+    campaigns: campaignState,
+    ads: adsState,
+  });
   const localToday = accountLocalDate(now, timeZone);
   const spendStatus = buildSpendStatus({
     spendCents: buckets.mtd.spendCents,
@@ -768,17 +963,18 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
       metaPixelImpressions: buckets.last30.impressions,
       metaPixelLinkClicks: buckets.last30.linkClicks,
       leads: buckets.last30.leads,
-      contacted: null,
-      qualified: null,
-      callsBooked: null,
-      callsAttended: null,
-      wonCustomers: null,
-      lostCustomers: null,
+      contacted: crm.counts.contacted,
+      qualified: crm.counts.qualified,
+      callsBooked: crm.counts.callsBooked,
+      callsAttended: crm.counts.callsAttended,
+      wonCustomers: crm.counts.wonCustomers,
+      lostCustomers: crm.counts.lostCustomers,
       metaPixelLeads: buckets.last30.leads,
       testEmailsExcluded: 0,
       duplicatesCollapsed: 0,
-      crmConfigured: false,
+      crmConfigured: ["fresh", "stale", "failed", "running"].includes(crm.status),
     },
+    crm,
     anomalies: detectAnomalies(trend),
     actionLog: actionLog(logs),
     phase,

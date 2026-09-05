@@ -1,3 +1,5 @@
+import { loadHighLevelSettings, type HighLevelConfigStatus } from "@/lib/highlevel-config";
+
 type Environment = Record<string, string | undefined>;
 
 const MIN_SECRET_LENGTH = 32;
@@ -8,6 +10,7 @@ export type SafeEnvironmentStatus = {
   database: "configured" | "misconfigured";
   meta: "configured" | "not_configured";
   ai: "configured" | "not_configured";
+  crm: HighLevelConfigStatus;
 };
 
 function hasStrongSecret(value: string | undefined): boolean {
@@ -34,5 +37,6 @@ export function getSafeEnvironmentStatus(env: Environment = process.env): SafeEn
     database: env.DATABASE_URL || env.TURSO_DATABASE_URL ? "configured" : "misconfigured",
     meta: env.META_MARKETING_TOKEN && env.META_AD_ACCOUNT_ID ? "configured" : "not_configured",
     ai: env.ANTHROPIC_API_KEY ? "configured" : "not_configured",
+    crm: loadHighLevelSettings(env).status,
   };
 }

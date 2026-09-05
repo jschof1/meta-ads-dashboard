@@ -45,6 +45,8 @@ async function startServer() {
       META_MARKETING_TOKEN: "",
       META_AD_ACCOUNT_ID: "",
       ANTHROPIC_API_KEY: "",
+      HIGHLEVEL_TOKEN: "",
+      HIGHLEVEL_SYNC_ENABLED: "false",
       AIRTABLE_ENABLED: "false",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -156,6 +158,16 @@ test("cron route requires its bearer secret", async () => {
   const payload = await valid.json();
   assert.equal(payload.error, "Meta sync failed; the last successful data remains available.");
   assert.equal(JSON.stringify(payload).includes("META_MARKETING_TOKEN"), false);
+
+  const highLevelMissing = await get("/api/cron/sync-highlevel");
+  assert.equal(highLevelMissing.status, 401);
+  const highLevelWrong = await get("/api/cron/sync-highlevel", { headers: { authorization: "Bearer wrong-secret" } });
+  assert.equal(highLevelWrong.status, 401);
+  const highLevelDisabled = await get("/api/cron/sync-highlevel", { headers: { authorization: `Bearer ${cronSecret}` } });
+  assert.equal(highLevelDisabled.status, 200);
+  const highLevelPayload = await highLevelDisabled.json();
+  assert.equal(highLevelPayload.status, "DISABLED");
+  assert.equal(JSON.stringify(highLevelPayload).includes("HIGHLEVEL_TOKEN"), false);
 });
 
 test("authenticated dashboard, health, manual refresh, cron POST, and diagnostics use durable safe contracts", async () => {

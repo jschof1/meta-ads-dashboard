@@ -26,6 +26,7 @@ const migrationPaths = [
   new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260905120000_pr07_ai_briefings/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260905133000_pr08_highlevel_attribution/migration.sql", import.meta.url),
 ];
 const fixtures = [];
 
@@ -228,6 +229,28 @@ function makeState() {
       duplicatesCollapsed: 0,
       crmConfigured: false,
     },
+    crm: {
+      status: "not_configured",
+      configured: false,
+      syncEnabled: false,
+      locationId: null,
+      pipelineId: null,
+      mappingReady: false,
+      mappingHash: null,
+      lastSyncAt: null,
+      lastAttemptAt: null,
+      lastAttemptStatus: null,
+      lastError: null,
+      period: { since: "2026-08-06", until: "2026-09-04", label: "Last 30 days" },
+      counts: { crmRecords: null, attributedRecords: null, paidMetaRecords: null, metaLeads: current.leads, contacted: null, qualified: null, callsBooked: null, callsAttended: null, wonCustomers: null, lostCustomers: null },
+      rates: { leadToContacted: null, contactedToQualified: null, qualifiedToBooked: null, bookedToAttended: null, attendedToWon: null, showRate: null, closeRate: null },
+      costs: { qualifiedLeadCostMinorUnits: null, bookedCallCostMinorUnits: null, customerCacMinorUnits: null },
+      revenue: { minorUnits: null, currencyCode: null, status: "unknown", roas: null },
+      attributionBreakdown: [],
+      performanceByEntity: [],
+      warnings: ["HighLevel is not configured in this fixture."],
+      dataQuality: "unknown",
+    },
     anomalies: [{ metric: "cpl", direction: "down", changePct: -0.02, date: "2026-09-04", message: "CPL is lower than the matched period.", severity: "info" }],
     actionLog: [],
     phase: { label: "Learning", daysIn: 15, totalDays: null, spendPaceCents: current.spendCents, spendPaceBudgetCents: null, exitCriteria: [] },
@@ -309,6 +332,7 @@ test("the AI context carries UKTL configuration, matched metrics, warnings, dete
     assert.match(promptData, /image-hash-1/);
     assert.match(promptData, /object-1/);
     assert.match(promptData, /metadata_only/);
+    assert.match(promptData, /HighLevel attribution/);
     assert.doesNotMatch(promptData, /should-not-be-forwarded/);
     assert.doesNotMatch(promptData, /secret-token-that-must-not-be-forwarded/);
   } finally {

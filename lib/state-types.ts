@@ -155,6 +155,103 @@ export type FunnelData = {
   crmConfigured: boolean;
 };
 
+export type CrmStatus = "not_configured" | "disabled" | "misconfigured" | "never" | "running" | "fresh" | "stale" | "failed";
+export type CrmDataQuality = "complete" | "partial" | "unknown";
+export type CrmAttributionGranularity = "ad" | "campaign" | "paid-meta" | "unattributed";
+export type CrmRevenueStatus = "complete" | "incomplete" | "unknown";
+
+export type CrmCounts = {
+  /** Distinct HighLevel contacts in the 30-day contact-created cohort. */
+  crmRecords: number | null;
+  /** Contacts with an explicit ad, campaign or paid-Meta attribution. */
+  attributedRecords: number | null;
+  /** All contacts classified as paid Meta, including explicit id matches. */
+  paidMetaRecords: number | null;
+  /** Meta-reported lead results; deliberately kept separate from CRM contacts. */
+  metaLeads: number | null;
+  contacted: number | null;
+  qualified: number | null;
+  callsBooked: number | null;
+  callsAttended: number | null;
+  wonCustomers: number | null;
+  lostCustomers: number | null;
+};
+
+export type CrmRates = {
+  leadToContacted: number | null;
+  contactedToQualified: number | null;
+  qualifiedToBooked: number | null;
+  bookedToAttended: number | null;
+  attendedToWon: number | null;
+  showRate: number | null;
+  closeRate: number | null;
+};
+
+export type CrmCosts = {
+  qualifiedLeadCostMinorUnits: number | null;
+  bookedCallCostMinorUnits: number | null;
+  customerCacMinorUnits: number | null;
+};
+
+export type CrmRevenue = {
+  minorUnits: number | null;
+  currencyCode: string | null;
+  status: CrmRevenueStatus;
+  roas: number | null;
+};
+
+export type CrmAttributionBreakdown = {
+  granularity: CrmAttributionGranularity;
+  records: number | null;
+  contacted: number | null;
+  qualified: number | null;
+  callsBooked: number | null;
+  callsAttended: number | null;
+  wonCustomers: number | null;
+  lostCustomers: number | null;
+  attributedRevenueMinorUnits: number | null;
+  revenueStatus: CrmRevenueStatus;
+};
+
+export type CrmPerformanceByEntity = {
+  granularity: "campaign" | "ad";
+  id: string;
+  name: string;
+  metaSpendMinorUnits: number | null;
+  metaLeads: number | null;
+  metaCplMinorUnits: number | null;
+  qualifiedLeads: number | null;
+  qualifiedLeadCostMinorUnits: number | null;
+  wonCustomers: number | null;
+  customerCacMinorUnits: number | null;
+  attributedRevenueMinorUnits: number | null;
+  revenueStatus: CrmRevenueStatus;
+  roas: number | null;
+};
+
+export type CrmDashboardState = {
+  status: CrmStatus;
+  configured: boolean;
+  syncEnabled: boolean;
+  locationId: string | null;
+  pipelineId: string | null;
+  mappingReady: boolean;
+  mappingHash: string | null;
+  lastSyncAt: string | null;
+  lastAttemptAt: string | null;
+  lastAttemptStatus: string | null;
+  lastError: string | null;
+  period: { since: string; until: string; label: string };
+  counts: CrmCounts;
+  rates: CrmRates;
+  costs: CrmCosts;
+  revenue: CrmRevenue;
+  attributionBreakdown: CrmAttributionBreakdown[];
+  performanceByEntity: CrmPerformanceByEntity[];
+  warnings: string[];
+  dataQuality: CrmDataQuality;
+};
+
 export type Anomaly = {
   metric: "cpl" | "cpm" | "ctr" | "spend" | "leads";
   direction: "up" | "down";
@@ -271,6 +368,7 @@ export type DashboardState = {
   adSets: AdSetRow[];
   dataWarnings: PeriodDataWarnings;
   funnel: FunnelData;
+  crm: CrmDashboardState;
   anomalies: Anomaly[];
   actionLog: ActionLogEntry[];
   phase: CampaignPhase;

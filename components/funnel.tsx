@@ -37,16 +37,22 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
   const metaImpressions = period === "30d" ? f.metaPixelImpressions : periodBucket.impressions;
   const metaLinkClicks = period === "30d" ? f.metaPixelLinkClicks : periodBucket.linkClicks;
   const metaLeads = period === "30d" ? f.leads : periodBucket.leads;
-  const crmNote = f.crmConfigured ? "CRM" : "CRM data not configured";
+  const showCrmCohort = period === "30d";
+  const crmNote = !f.crmConfigured
+    ? "CRM data not configured"
+    : showCrmCohort
+      ? "CRM · 30d cohort"
+      : "CRM · select 30d";
+  const crmValue = (value: number | null) => showCrmCohort ? value : null;
   const steps: Step[] = [
     { key: "lead", label: "Impressions", value: metaImpressions, base: metaImpressions, icon: Eye, sourceNote: "Meta" },
     { key: "lead", label: "Link clicks", value: metaLinkClicks, base: metaImpressions, icon: MousePointerClick, sourceNote: "Meta" },
     { key: "lead", label: stageLabel("lead"), value: metaLeads, base: metaLinkClicks, icon: UserRound, sourceNote: "Meta lead result" },
-    { key: "contacted", label: stageLabel("contacted"), value: period === "30d" ? f.contacted : null, base: metaLeads, icon: UserCheck, sourceNote: crmNote },
-    { key: "qualified", label: stageLabel("qualified"), value: f.qualified, base: f.contacted, icon: UserCheck, sourceNote: crmNote },
-    { key: "callBooked", label: stageLabel("callBooked"), value: f.callsBooked, base: f.qualified, icon: Phone, sourceNote: crmNote },
-    { key: "callAttended", label: stageLabel("callAttended"), value: f.callsAttended, base: f.callsBooked, icon: Phone, sourceNote: crmNote },
-    { key: "wonCustomer", label: stageLabel("wonCustomer"), value: f.wonCustomers, base: f.callsAttended, icon: Trophy, sourceNote: crmNote },
+    { key: "contacted", label: stageLabel("contacted"), value: crmValue(f.contacted), base: showCrmCohort ? metaLeads : null, icon: UserCheck, sourceNote: crmNote },
+    { key: "qualified", label: stageLabel("qualified"), value: crmValue(f.qualified), base: crmValue(f.contacted), icon: UserCheck, sourceNote: crmNote },
+    { key: "callBooked", label: stageLabel("callBooked"), value: crmValue(f.callsBooked), base: crmValue(f.qualified), icon: Phone, sourceNote: crmNote },
+    { key: "callAttended", label: stageLabel("callAttended"), value: crmValue(f.callsAttended), base: crmValue(f.callsBooked), icon: Phone, sourceNote: crmNote },
+    { key: "wonCustomer", label: stageLabel("wonCustomer"), value: crmValue(f.wonCustomers), base: crmValue(f.callsAttended), icon: Trophy, sourceNote: crmNote },
   ];
 
   const max = Math.max(...steps.map((step) => step.value ?? 0), 1);
@@ -106,8 +112,9 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
         })}
       </div>
       <div className="px-5 pb-4 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-        <span>{lostLabel}: {f.lostCustomers == null ? "CRM data not configured" : f.lostCustomers.toLocaleString("en-GB")}</span>
+        <span>{lostLabel}: {!f.crmConfigured ? "CRM data not configured" : !showCrmCohort ? "Select 30d for CRM cohort" : f.lostCustomers == null ? "Unknown" : f.lostCustomers.toLocaleString("en-GB")}</span>
         {!f.crmConfigured && <span>Downstream stages stay unknown until CRM attribution is configured.</span>}
+        {f.crmConfigured && !showCrmCohort && <span>Downstream CRM counts use the separate last-30-day contact-created cohort.</span>}
       </div>
     </section>
   );

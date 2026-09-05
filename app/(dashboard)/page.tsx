@@ -9,6 +9,7 @@ import { MetricHeroCards } from "@/components/metric-hero-cards";
 import { CreativeLeaderboard } from "@/components/creative-leaderboard";
 import { CreativeBriefGenerator } from "@/components/creative-brief-generator";
 import { Funnel } from "@/components/funnel";
+import { CrmAttributionPanel } from "@/components/crm-attribution-panel";
 import { ActionLog } from "@/components/action-log";
 import { PlanVisual } from "@/components/plan-visual";
 import { CampaignDrilldown } from "@/components/campaign-drilldown";
@@ -127,6 +128,7 @@ export default function DashboardHome() {
       <Scorecard state={state} period={period} />
       <MetricHeroCards state={state} period={period} />
       <Funnel state={state} period={period} />
+      <CrmAttributionPanel state={state} />
       <CampaignDrilldown state={state} period={period} />
 
       <section className="flex items-center justify-between mb-3 mt-2">
