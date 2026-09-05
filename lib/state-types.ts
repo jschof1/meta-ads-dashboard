@@ -8,6 +8,7 @@ import type {
   RecommendationTargetType,
   RecommendationType,
 } from "./recommendation-types";
+import type { MetaActionGate, MetaActionView } from "./meta-action-types";
 
 export type Bucket = {
   // Values are nullable because Meta may omit a field or no stored row may
@@ -353,6 +354,7 @@ export type DashboardState = {
     mtdComparisonComparable: boolean;
     metadataStaleCount: number;
     syncState: "never" | "running" | "fresh" | "stale" | "failed";
+    actionGate: MetaActionGate;
   };
   scorecard: PeriodBuckets & {
     leadsThisWeek: number | null;
@@ -371,6 +373,7 @@ export type DashboardState = {
   crm: CrmDashboardState;
   anomalies: Anomaly[];
   actionLog: ActionLogEntry[];
+  metaActions: MetaActionView[];
   phase: CampaignPhase;
   triggers: DecisionTrigger[];
   recommendations: RecommendationView[];

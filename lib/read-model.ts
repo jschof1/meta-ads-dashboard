@@ -22,6 +22,8 @@ import { analyseRecommendations, isValidComparisonWindow, metricsFromBucket } fr
 import { readActiveRecommendationViews } from "@/lib/recommendation-store";
 import { loadHighLevelSettings, type HighLevelSettings } from "@/lib/highlevel-config";
 import { buildCrmMetrics, emptyCrmMetrics } from "@/lib/crm-metrics";
+import { metaActionGate, readMetaActionViews } from "@/lib/meta-actions";
+import type { MetaActionGate } from "@/lib/meta-action-types";
 import type {
   ActionLogEntry,
   AdRow,
@@ -130,7 +132,9 @@ function trendPoint(date: string, rows: StoredInsight[]): TrendPoint {
   return { date, ...aggregateInsights(rows) };
 }
 
-function actionLog(rows: ActionLog[]): ActionLogEntry[] {
+type ReadableActionLog = Pick<ActionLog, "id" | "createdAt" | "action" | "targetId" | "reasoning" | "executor" | "result">;
+
+function actionLog(rows: ReadableActionLog[]): ActionLogEntry[] {
   return rows.map((row) => ({
     id: row.id,
     createdAt: new Date(row.createdAt).toISOString(),
@@ -797,15 +801,24 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
   const campaignId = process.env.META_CAMPAIGN_ID?.trim() || null;
   const attributionKey = configuredAttributionKey();
   const runScope = { attributionKey, campaignId, ...(accountId ? { accountId } : {}) };
-  const [latestAttempt, latestSuccess, logs] = await Promise.all([
+  const [latestAttempt, latestSuccess, logs, metaActions] = await Promise.all([
     accountId
       ? db.syncRun.findFirst({ where: runScope, orderBy: { startedAt: "desc" } })
       : Promise.resolve(null),
     accountId
       ? db.syncRun.findFirst({ where: { ...runScope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } })
       : Promise.resolve(null),
-    db.actionLog.findMany({ orderBy: { createdAt: "desc" }, take: 20 }),
+    // Select the legacy columns explicitly so a dashboard can still read a
+    // database during the PR09 migration rollout. The action service itself
+    // requires the committed MetaAction migration before it can write.
+    db.actionLog.findMany({
+      select: { id: true, createdAt: true, action: true, targetId: true, reasoning: true, executor: true, result: true },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    }),
+    readMetaActionViews(db, accountId ?? null, { campaignId, attributionKey }),
   ]);
+  const actionGate: MetaActionGate = metaActionGate();
   const timeZone = latestSuccess?.timezoneName || "UTC";
   const mtdComparisonComparable = isPreviousMtdComparable(now, timeZone);
   const todayRange = dateRangeForPeriod("today", timeZone, now);
@@ -939,6 +952,7 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
       mtdComparisonComparable,
       metadataStaleCount,
       syncState: currentState,
+      actionGate,
     },
     scorecard: {
       ...buckets,
@@ -977,6 +991,7 @@ export async function buildDashboardState(options: DashboardStateOptions = {}): 
     crm,
     anomalies: detectAnomalies(trend),
     actionLog: actionLog(logs),
+    metaActions,
     phase,
     triggers: buildTriggers({
       cplCentsLast7: last7.cplCents,

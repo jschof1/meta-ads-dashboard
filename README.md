@@ -12,8 +12,8 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 - UKTL conversion path: impressions, link clicks, leads, contacted, qualified, call booked, call attended, and won customer. Lost is shown as a separate outcome.
 - Explicit HighLevel CRM attribution state. Meta-reported leads, CRM contacts, qualified leads and customer outcomes remain separate; unmapped and unattributed records stay visible.
 - A secret-free UKTL operating brief at `public/plan.md.template`, loaded by the operator brief panel when `public/plan.md` exists.
-- Recorded action log entries. Meta write helpers remain disabled until the later approval-gated delivery stage.
-- Deterministic recommendations computed after a successful sync, persisted with a versioned evidence snapshot, and read back by the authenticated dashboard. They remain suggestions: pause, scale and creative changes require the later approval-gated action stage.
+- Recorded action log entries and an approval-gated Meta action panel. Recommendations remain suggestions until an operator prepares the exact change, approves it, and submits a separate execution request.
+- Deterministic recommendations computed after a successful sync, persisted with a versioned evidence snapshot, and read back by the authenticated dashboard. Only an open `pause_candidate` for an ad or `scale_candidate` for an ad set can prepare the narrow allowlisted actions.
 
 Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
@@ -47,6 +47,18 @@ AI output is schema-validated and every displayed claim must reference an eviden
 
 Recommendation lifecycle rows are materialised only after a complete, warning-free successful sync. A warning-bearing or metadata-incomplete sync leaves the last complete recommendation set intact, so an incomplete observation cannot create contradictory active advice or resolve an older row. The dashboard only exposes validated active rows in the configured account/campaign/attribution scope; malformed evidence is omitted rather than treated as empty data.
 
+## Approval-gated Meta actions
+
+`META_WRITES_ENABLED` defaults to `false`. In that state the application can display and persist proposals, but the execute route returns a safe disabled response before constructing a provider or making a network call. No AI output has an action endpoint.
+
+The supported changes are `pause_ad`, `resume_ad`, and the measured increase form of `set_adset_daily_budget`. Only an open `pause_candidate` for an ad, an explicitly reactivation-oriented `hold` for a paused ad, or an open `scale_candidate` for an ad set can prepare one. A proposal is bound to a validated stored recommendation, its campaign/attribution scope, and the latest successful durable metadata snapshot. The server copies the recommendation's reason, confidence and evidence; it does not trust browser-supplied reasoning, target IDs or target names. An operator must move the row through `PROPOSED → APPROVED → EXECUTING → EXECUTED` or `FAILED` (or explicitly `REJECTED`). Approval and execution are separate authenticated requests.
+
+Execution rechecks the feature flag, allowlist, recommendation snapshot, stored campaign/attribution scope, durable target state, live Meta account/object identity, requested value and budget bounds. A database target lock prevents two approved actions from applying to the same target. It captures the live old value, issues at most one Meta POST with no automatic retry, reads the object again, and records the verified old/new values, safe object/trace reference and `ActionLog` row. A provider or verification failure is terminal for that action; prepare a fresh proposal after checking Meta. Duplicate payloads remain unique even when callers choose different idempotency keys, and duplicate execution never issues a second POST. Interrupted executions are reaped as terminal, reference-free audit failures on the next safe read; they are never retried automatically.
+
+The Meta Graph update endpoints do not provide an application-visible compare-and-swap or `If-Match` precondition. The executor therefore treats the immediate live read as an optimistic precondition, uses a bounded no-retry read window, makes one POST, and requires read-after-write verification. An external Ads Manager change in the small read-to-POST window cannot be atomically prevented by this API; keep the gate disabled by default and perform any future live validation in a controlled operator window.
+
+Live writes are not enabled or validated against a real account in this repository. Enabling them requires Jack's explicit safety approval, a suitable server-side Meta token with the relevant advertiser access/permissions, and both `META_ACTION_MAX_DAILY_BUDGET_MINOR` and the percentage bound to be configured. Budget actions only increase the daily budget: this keeps the narrow `scale_candidate` mapping away from Meta's additional lower-budget/already-spent constraint until a spend-aware policy exists. The implementation follows Meta's current Graph shape: `POST /{ad_id}` with `status=PAUSED|ACTIVE`, or `POST /{adset_id}` with integer `daily_budget` in account minor units, followed by read-after-write verification. See Meta's [Ad reference](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/adgroup/v25.0.md), [Ad Set reference](https://developers.facebook.com/documentation/ads-commerce/marketing-api/reference/ad-campaign/v25.0.md), and [official Marketing API collection](https://www.postman.com/meta/facebook-marketing-api/documentation/0zr4mes/facebook-marketing-api-mapi).
+
 ## Environment
 
 Required:
@@ -67,6 +79,9 @@ Optional:
 - `META_RECOMMENDATION_COMPARISON_DAYS` - recommendation comparison window: `3`, `7`, `14` or `30`; defaults to `7`.
 - `META_GRAPH_VERSION` - Graph API version, defaulting to `v25.0`.
 - `META_CAMPAIGN_LAUNCH_DATE` - `YYYY-MM-DD`, used for account-local phase context.
+- `META_WRITES_ENABLED` - exact `true` is required before a server-side Meta mutation is even considered; keep `false` by default.
+- `META_ACTION_MAX_DAILY_BUDGET_MINOR` - required when writes are enabled; positive absolute daily-budget cap in the Meta account's minor units.
+- `META_ACTION_MAX_BUDGET_CHANGE_PERCENT` - optional positive bound, default `20`; it limits the absolute ad-set budget delta from the approved live value.
 - `ANTHROPIC_API_KEY` - enables the optional persisted AI briefing and creative brief features.
 - `ANTHROPIC_MODEL` - optional Anthropic model identifier; the application uses its dated default when omitted.
 
@@ -107,7 +122,7 @@ For an existing database created with an earlier schema workflow, take a recover
 
 Missing provider fields remain `null`, while a real zero remains `0`. Failed syncs preserve the last successful stored read model and expose a redacted diagnostic state.
 
-`META_WRITES_ENABLED` must remain false. The later Meta-action delivery adds approval, authorization, audit, and fail-closed controls before any live mutation is considered.
+`META_WRITES_ENABLED` remains false until the explicit PR09 safety gate is met. Even when enabled, Meta writes require an authenticated operator's separate approval and execution requests, current live-state verification, and the configured budget bounds. Never treat an approved proposal or a successful HTTP response as proof of execution without the read-after-write verification and durable audit row.
 
 ## File map
 
@@ -121,6 +136,8 @@ lib/sync.ts                    transactional sync and leases
 lib/read-model.ts              database-backed dashboard state
 lib/recommendations.ts         pure evidence analysis and deterministic rules
 lib/recommendation-store.ts    validated persistence and lifecycle reads
+lib/meta-action-types.ts       allowlisted Meta action and dashboard view types
+lib/meta-actions.ts            recommendation-bound action state machine and one-shot provider boundary
 lib/ai-briefings.ts            evidence context, schemas, prompts and grounding
 lib/ai-briefing-store.ts       scoped durable AI snapshot persistence/readback
 lib/highlevel.ts               bounded HighLevel v3 read client

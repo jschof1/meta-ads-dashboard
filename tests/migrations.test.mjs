@@ -90,11 +90,14 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   const crmSyncRunColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmSyncRun")');
   const crmContactColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmContact")');
   const crmOpportunityColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmOpportunity")');
+  const metaActionColumns = await db.$queryRawUnsafe('PRAGMA table_info("MetaAction")');
+  const actionLogColumns = await db.$queryRawUnsafe('PRAGMA table_info("ActionLog")');
   const crmContactIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmContact")');
   const crmOpportunityIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmOpportunity")');
+  const metaActionIndexes = await db.$queryRawUnsafe('PRAGMA index_list("MetaAction")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution"]);
-  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity"]) {
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions"]);
+  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity", "MetaAction"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
   for (const [name, columns] of [["Campaign", campaignColumns], ["AdSet", adSetColumns], ["Ad", adColumns], ["Creative", creativeColumns]]) {
@@ -120,8 +123,17 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   for (const column of ["highLevelId", "locationId", "contactId", "pipelineId", "pipelineStageId", "status", "semanticStage", "valueMajorUnits", "sourceSyncRunId"]) {
     assert.ok(crmOpportunityColumns.some((candidate) => candidate.name === column), `CrmOpportunity missing ${column}`);
   }
+  for (const column of ["idempotencyKey", "actionFingerprint", "targetLockKey", "accountId", "campaignId", "attributionKey", "action", "targetType", "targetId", "status", "requestedChange", "expectedState", "oldValue", "newValue", "reasoning", "evidence", "confidence", "source", "metaTraceId", "approvedAt", "executingAt", "executedAt", "failedAt"]) {
+    assert.ok(metaActionColumns.some((candidate) => candidate.name === column), `MetaAction missing ${column}`);
+  }
+  for (const column of ["metaActionId", "oldValue", "newValue", "metaReference"]) {
+    assert.ok(actionLogColumns.some((candidate) => candidate.name === column), `ActionLog missing ${column}`);
+  }
   assert.ok(crmContactIndexes.some((index) => index.name === "CrmContact_locationId_highLevelId_key"), "CrmContact missing location-scoped uniqueness");
   assert.ok(crmOpportunityIndexes.some((index) => index.name === "CrmOpportunity_locationId_pipelineId_highLevelId_key"), "CrmOpportunity missing location/pipeline-scoped uniqueness");
+  assert.ok(metaActionIndexes.some((index) => index.name === "MetaAction_idempotencyKey_key"), "MetaAction missing idempotency uniqueness");
+  assert.ok(metaActionIndexes.some((index) => index.name === "MetaAction_actionFingerprint_key"), "MetaAction missing target/change uniqueness");
+  assert.ok(metaActionIndexes.some((index) => index.name === "MetaAction_targetLockKey_key"), "MetaAction missing target lock uniqueness");
   await db.$disconnect();
 });
 
@@ -144,7 +156,7 @@ test("upgrades a populated PR03 database without dropping durable rows", async (
   assert.equal(campaign.name, "Existing campaign");
   assert.equal(insight.spendMinorUnits, 1234);
   assert.equal(insight.scopeKey, "account");
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions"]);
   await upgraded.$disconnect();
 });
 
