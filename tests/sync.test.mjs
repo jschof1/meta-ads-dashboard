@@ -13,6 +13,7 @@ const migrationPaths = [
   new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260905120000_pr07_ai_briefings/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260905133000_pr08_highlevel_attribution/migration.sql", import.meta.url),
 ];
 const databases = [];
 const originalAccountId = process.env.META_AD_ACCOUNT_ID;

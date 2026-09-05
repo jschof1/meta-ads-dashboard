@@ -277,6 +277,91 @@ model AiBriefing {
   @@index([sourceSyncRunId])
 }
 
+// Read-only HighLevel snapshots. A sync writes a new audit row and points each
+// normalized contact/opportunity at that row. Failed runs never replace the
+// last successful snapshot, and provider payloads are deliberately not stored.
+model CrmSyncRun {
+  id                    String   @id @default(cuid())
+  provider              String   @default("highlevel")
+  locationId            String
+  pipelineId            String
+  apiVersion            String
+  mappingHash           String
+  status                String
+  trigger               String
+  startedAt             DateTime @default(now())
+  finishedAt            DateTime?
+  contactsFetched       Int      @default(0)
+  opportunitiesFetched  Int      @default(0)
+  contactsWritten       Int      @default(0)
+  opportunitiesWritten  Int      @default(0)
+  warning               String?
+  error                 String?
+  traceId               String?
+  lockKey               String?  @unique
+  lockOwner             String?
+  lockExpiresAt         DateTime?
+
+  contacts      CrmContact[]
+  opportunities CrmOpportunity[]
+
+  @@index([locationId, status, finishedAt])
+  @@index([locationId, startedAt])
+  @@index([locationId, mappingHash, status, finishedAt])
+}
+
+model CrmContact {
+  id                     String   @id @default(cuid())
+  highLevelId            String
+  locationId             String
+  dateAdded              String?
+  dateUpdated            String?
+  attributionGranularity String
+  metaAdId               String?
+  metaCampaignId         String?
+  utmSource              String?
+  utmMedium              String?
+  utmCampaign            String?
+  utmContent             String?
+  clickIds               String   @default("{}")
+  attribution            String   @default("{}")
+  sourceSyncRunId        String
+  sourceSyncRun          CrmSyncRun @relation(fields: [sourceSyncRunId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([locationId, attributionGranularity])
+  @@index([sourceSyncRunId])
+  @@index([locationId, metaCampaignId])
+  @@index([locationId, metaAdId])
+  @@unique([locationId, highLevelId])
+}
+
+model CrmOpportunity {
+  id                  String   @id @default(cuid())
+  highLevelId         String
+  locationId          String
+  contactId           String?
+  pipelineId          String
+  pipelineStageId     String?
+  status              String
+  semanticStage       String?
+  valueMajorUnits     Float?
+  createdAtProvider   String?
+  updatedAtProvider   String?
+  lastStageChangeAt   String?
+  lastStatusChangeAt  String?
+  sourceSyncRunId     String
+  sourceSyncRun       CrmSyncRun @relation(fields: [sourceSyncRunId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([locationId, contactId])
+  @@index([pipelineId, semanticStage])
+  @@index([sourceSyncRunId])
+  @@unique([locationId, pipelineId, highLevelId])
+}
+
 // v2+ audit trail. Keep this model available for the approval-gated action
 // work; PR03 does not create Meta mutations.
 model ActionLog {

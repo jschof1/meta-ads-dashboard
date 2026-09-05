@@ -1,6 +1,7 @@
 {
   "functions": { "app/api/**/*.ts": { "maxDuration": 60 } },
   "crons": [
-    { "path": "/api/cron/sync-meta", "schedule": "0 6 * * *" }
+    { "path": "/api/cron/sync-meta", "schedule": "0 6 * * *" },
+    { "path": "/api/cron/sync-highlevel", "schedule": "30 6 * * *" }
   ]
 }

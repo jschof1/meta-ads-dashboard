@@ -87,9 +87,14 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   const syncRunColumns = await db.$queryRawUnsafe('PRAGMA table_info("SyncRun")');
   const recommendationColumns = await db.$queryRawUnsafe('PRAGMA table_info("Recommendation")');
   const aiBriefingColumns = await db.$queryRawUnsafe('PRAGMA table_info("AiBriefing")');
+  const crmSyncRunColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmSyncRun")');
+  const crmContactColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmContact")');
+  const crmOpportunityColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmOpportunity")');
+  const crmContactIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmContact")');
+  const crmOpportunityIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmOpportunity")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings"]);
-  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "AiBriefing"]) {
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution"]);
+  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
   for (const [name, columns] of [["Campaign", campaignColumns], ["AdSet", adSetColumns], ["Ad", adColumns], ["Creative", creativeColumns]]) {
@@ -106,6 +111,17 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   for (const column of ["kind", "accountId", "campaignId", "attributionKey", "period", "dataHash", "output", "evidence", "provider", "model", "sourceSyncRunId", "snapshotKey", "generatedAt"]) {
     assert.ok(aiBriefingColumns.some((candidate) => candidate.name === column), `AiBriefing missing ${column}`);
   }
+  for (const column of ["locationId", "pipelineId", "mappingHash", "contactsFetched", "opportunitiesFetched", "lockKey"]) {
+    assert.ok(crmSyncRunColumns.some((candidate) => candidate.name === column), `CrmSyncRun missing ${column}`);
+  }
+  for (const column of ["highLevelId", "locationId", "attributionGranularity", "metaAdId", "metaCampaignId", "clickIds", "sourceSyncRunId"]) {
+    assert.ok(crmContactColumns.some((candidate) => candidate.name === column), `CrmContact missing ${column}`);
+  }
+  for (const column of ["highLevelId", "locationId", "contactId", "pipelineId", "pipelineStageId", "status", "semanticStage", "valueMajorUnits", "sourceSyncRunId"]) {
+    assert.ok(crmOpportunityColumns.some((candidate) => candidate.name === column), `CrmOpportunity missing ${column}`);
+  }
+  assert.ok(crmContactIndexes.some((index) => index.name === "CrmContact_locationId_highLevelId_key"), "CrmContact missing location-scoped uniqueness");
+  assert.ok(crmOpportunityIndexes.some((index) => index.name === "CrmOpportunity_locationId_pipelineId_highLevelId_key"), "CrmOpportunity missing location/pipeline-scoped uniqueness");
   await db.$disconnect();
 });
 
@@ -128,7 +144,7 @@ test("upgrades a populated PR03 database without dropping durable rows", async (
   assert.equal(campaign.name, "Existing campaign");
   assert.equal(insight.spendMinorUnits, 1234);
   assert.equal(insight.scopeKey, "account");
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution"]);
   await upgraded.$disconnect();
 });
 

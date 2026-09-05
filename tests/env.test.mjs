@@ -25,6 +25,7 @@ test("safe status reports presence without exposing configuration values", () =>
     database: "configured",
     meta: "configured",
     ai: "not_configured",
+    crm: "not_configured",
   });
   assert.equal(JSON.stringify(status).includes("private-token"), false);
 });
