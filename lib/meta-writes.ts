@@ -1,13 +1,14 @@
-// Meta mutations are intentionally unavailable until PR09's explicit approval
-// architecture is implemented and enabled. Keeping these guards separate from
-// the read client prevents accidental POST calls from ingestion code.
+// Legacy low-level helpers stay as hard guards. All supported mutations now go
+// through lib/meta-actions.ts, which binds them to a stored recommendation,
+// explicit approval, live-state checks and a one-shot audited execution. No
+// ingestion or dashboard read path can call these helpers to issue a POST.
 
 export class MetaWritesDisabledError extends Error {
   readonly name = "MetaWritesDisabledError";
 }
 
 function disabled(): never {
-  throw new MetaWritesDisabledError("Meta write functionality is disabled until PR09 and explicit approval");
+  throw new MetaWritesDisabledError("Use the approval-gated Meta action service; direct Meta writes are unavailable");
 }
 
 export async function pauseAd(adId: string): Promise<never> {

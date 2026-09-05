@@ -365,11 +365,61 @@ model CrmOpportunity {
 // v2+ audit trail. Keep this model available for the approval-gated action
 // work; PR03 does not create Meta mutations.
 model ActionLog {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
-  action    String
-  targetId  String
-  reasoning String
-  executor  String
-  result    String?
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  action        String
+  targetId      String
+  reasoning     String
+  executor      String
+  result        String?
+  metaActionId  String?
+  oldValue      String?
+  newValue      String?
+  metaReference String?
+
+  @@index([metaActionId])
+}
+
+// A recommendation-bound, operator-approved Meta mutation. The state machine
+// is enforced by the action service with conditional updates; the database
+// keeps the complete proposal, approval, execution and verification audit.
+model MetaAction {
+  id                         String   @id @default(cuid())
+  idempotencyKey             String   @unique
+  actionFingerprint          String   @unique
+  targetLockKey              String?  @unique
+  accountId                  String
+  campaignId                 String?
+  attributionKey             String
+  action                     String
+  targetType                 String
+  targetId                   String
+  targetName                 String
+  status                     String
+  requestedChange            String
+  expectedState              String
+  oldValue                   String?
+  newValue                   String?
+  reasoning                 String
+  evidence                  String
+  confidence                String
+  source                    String
+  recommendationFingerprint String?
+  sourceSyncRunId           String?
+  metaObjectId              String?
+  metaTraceId               String?
+  error                     String?
+  createdAt                 DateTime @default(now())
+  approvedAt                DateTime?
+  approvedBy                String?
+  rejectedAt                DateTime?
+  rejectedBy                String?
+  executingAt               DateTime?
+  executedAt                DateTime?
+  failedAt                  DateTime?
+  updatedAt                 DateTime @updatedAt
+
+  @@index([accountId, campaignId, attributionKey, status, createdAt])
+  @@index([targetId, status])
+  @@index([recommendationFingerprint])
 }

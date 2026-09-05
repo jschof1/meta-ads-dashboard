@@ -17,6 +17,7 @@ import { DataQualityPanel } from "@/components/data-quality-panel";
 import { OperatorHeader } from "@/components/operator-header";
 import { PeriodSelector } from "@/components/period-selector";
 import { RecommendationPanel } from "@/components/recommendation-panel";
+import { MetaActionPanel } from "@/components/meta-action-panel";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 
@@ -123,6 +124,7 @@ export default function DashboardHome() {
       <SyncNotice state={state} />
       <DataQualityPanel state={state} period={period} />
       <RecommendationPanel state={state} />
+      <MetaActionPanel state={state} />
       <AISummaryPanel state={state} />
       <AnomalyBanner state={state} />
       <Scorecard state={state} period={period} />

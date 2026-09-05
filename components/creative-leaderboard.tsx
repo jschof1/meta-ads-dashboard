@@ -32,11 +32,11 @@ function FatigueMeter({ score, reason }: { score: number; reason: string }) {
       : score > 0 ? "text-emerald-500 bg-emerald-500/20"
         : "text-muted-foreground bg-muted";
   return (
-    <div className="flex items-center gap-1.5" title={reason}>
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"><div className={`h-full ${color.split(" ")[1]}`} style={{ width: `${pct}%` }} /></div>
+    <span className="flex items-center gap-1.5" title={reason}>
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted"><span className={`block h-full ${color.split(" ")[1]}`} style={{ width: `${pct}%` }} /></span>
       {score >= 0.5 && <Flame className={`h-3.5 w-3.5 ${color.split(" ")[0]}`} />}
       <span className="text-[11px] text-muted-foreground">{pct}%</span>
-    </div>
+    </span>
   );
 }
 
