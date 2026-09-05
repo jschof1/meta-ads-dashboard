@@ -63,6 +63,9 @@ export type AdRow = {
   body: string | null;
   callToAction: string | null;
   destinationUrl: string | null;
+  imageHash: string | null;
+  objectId: string | null;
+  urlTags: string | null;
   lastChangeAt: string | null;
   campaignId: string | null;
   adSetId: string | null;
@@ -246,6 +249,7 @@ export type DashboardState = {
     lastSyncAt: string | null;
     lastSyncAgeMs: number | null;
     lastSuccessfulSyncAt: string | null;
+    lastSuccessfulSyncRunId: string | null;
     lastAttemptAt: string | null;
     lastAttemptStatus: string | null;
     lastSyncError: string | null;

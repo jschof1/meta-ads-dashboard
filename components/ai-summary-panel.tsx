@@ -1,29 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Loader2, Volume2, RotateCw } from "lucide-react";
+import type { AiBriefingView, AiSummaryOutput } from "@/lib/ai-briefings";
 import type { DashboardState } from "@/lib/state-types";
 
-type Summary = {
-  headline?: string;
-  yesterday_line?: string;
-  trend_line?: string;
-  funnel_insight?: string;
-  ads_to_watch?: string[];
-  recommended_action?: string;
-  on_track?: "yes" | "no" | "too early" | string;
-  on_track_reason?: string;
+type SummaryResponse = {
+  briefing: AiBriefingView | null;
+  enabled?: boolean;
+  message?: string;
 };
 
-function tryParse(text: string | null): Summary | null {
-  if (!text) return null;
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    return JSON.parse(m[0]) as Summary;
-  } catch {
-    return null;
-  }
+function summaryOutput(briefing: AiBriefingView | null): AiSummaryOutput | null {
+  if (!briefing || briefing.kind !== "summary" || !("headline" in briefing.output)) return null;
+  return briefing.output;
 }
 
 function speak(text: string) {
@@ -35,42 +25,88 @@ function speak(text: string) {
   window.speechSynthesis.speak(utter);
 }
 
+function ClaimList({
+  title,
+  claims,
+  evidence,
+}: {
+  title: string;
+  claims: AiSummaryOutput["changes"];
+  evidence: AiBriefingView["evidence"];
+}) {
+  if (claims.length === 0) return null;
+  const labels = new Map(evidence.map((item) => [item.id, item.label]));
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">{title}</div>
+      {claims.map((claim, index) => (
+        <div key={`${claim.text}-${index}`} className="text-sm leading-relaxed">
+          <p>{claim.text}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Evidence: {claim.evidenceIds.map((id) => labels.get(id) ?? id).join(" · ")}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AISummaryPanel({ state }: { state: DashboardState | null }) {
-  const [text, setText] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState<AiBriefingView | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function reload(forceState: DashboardState | null) {
-    if (!forceState) return;
+  const loadStored = useCallback(async () => {
+    if (!state) return;
     setLoading(true);
     setErr(null);
-    fetch("/api/insights/summary", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(forceState),
-    })
-      .then((r) => r.json())
-      .then((json) => {
-        setText(json.summary || null);
-        if (json.error) setErr(json.summary);
-      })
-      .catch((e) => setErr(String(e)))
-      .finally(() => setLoading(false));
+    try {
+      const response = await fetch("/api/insights/summary", { cache: "no-store" });
+      const json = (await response.json()) as SummaryResponse & { error?: string };
+      if (!response.ok) throw new Error(json.error || `Summary read failed (${response.status})`);
+      setBriefing(json.briefing ?? null);
+      setMessage(json.message || null);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "AI summary unavailable");
+    } finally {
+      setLoading(false);
+    }
+  }, [state]);
+
+  async function regenerate() {
+    if (!state) return;
+    setLoading(true);
+    setErr(null);
+    try {
+      const response = await fetch("/api/insights/summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const json = (await response.json()) as SummaryResponse & { error?: string };
+      if (!response.ok) throw new Error(json.error || `Summary generation failed (${response.status})`);
+      setBriefing(json.briefing ?? null);
+      setMessage(json.message || null);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "AI summary unavailable");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    if (!state) return;
+    // The effect starts an external read; its state updates happen when the
+    // fetch resolves rather than as part of rendering.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    reload(state);
-  }, [state]);
+    void loadStored();
+  }, [loadStored]);
 
-  const parsed = tryParse(text);
-
-  const fullSpoken = parsed
-    ? [parsed.headline, parsed.yesterday_line, parsed.trend_line, parsed.funnel_insight, parsed.recommended_action]
-        .filter(Boolean)
-        .join(" ")
+  const output = summaryOutput(briefing);
+  const fullSpoken = output
+    ? [output.headline.text, ...output.changes.map((claim) => claim.text), output.mainRecommendation?.text]
+      .filter(Boolean)
+      .join(" ")
     : "";
+  const evidenceLabels = briefing?.evidence ?? [];
 
   return (
     <section className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 via-card to-card p-6 mb-6 relative overflow-hidden">
@@ -83,13 +119,13 @@ export function AISummaryPanel({ state }: { state: DashboardState | null }) {
           </div>
           <div>
             <div className="text-xs uppercase tracking-wider text-muted-foreground font-medium">AI Daily Briefing</div>
-            <div className="text-[10px] text-muted-foreground">Generated by Claude from today&apos;s campaign state</div>
+            <div className="text-[10px] text-muted-foreground">Persisted, evidence-grounded explanation</div>
           </div>
           {loading && <Loader2 className="w-3.5 h-3.5 animate-spin ml-2 text-primary" />}
         </div>
 
         <div className="flex items-center gap-1.5">
-          {parsed && fullSpoken && (
+          {output && fullSpoken && (
             <button
               onClick={() => speak(fullSpoken)}
               className="text-xs px-2.5 py-1.5 rounded-md border border-border bg-card hover:bg-muted/60 flex items-center gap-1.5 transition-colors"
@@ -100,68 +136,44 @@ export function AISummaryPanel({ state }: { state: DashboardState | null }) {
             </button>
           )}
           <button
-            onClick={() => reload(state)}
+            onClick={regenerate}
             className="text-xs p-1.5 rounded-md border border-border bg-card hover:bg-muted/60 transition-colors"
             title="Regenerate briefing"
-            disabled={loading}
+            disabled={loading || !state}
           >
             <RotateCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
           </button>
         </div>
       </div>
 
-      {err && !parsed && <p className="text-sm text-destructive relative">{err}</p>}
+      {err && <p className="text-sm text-destructive relative">{err}</p>}
+      {message && !err && <p className="text-sm text-muted-foreground relative">{message}</p>}
 
-      {!loading && !parsed && !err && (
-        <p className="text-sm text-muted-foreground relative">No AI briefing yet. Hit refresh after the campaign goes live.</p>
-      )}
+      {output && (
+        <div className="space-y-4 relative mt-4">
+          <div>
+            <h2 className="text-xl font-semibold leading-snug">{output.headline.text}</h2>
+            <p className="text-[10px] text-muted-foreground mt-1">Evidence: {output.headline.evidenceIds.map((id) => evidenceLabels.find((item) => item.id === id)?.label ?? id).join(" · ")}</p>
+          </div>
+          <ClaimList title="Changes" claims={output.changes} evidence={evidenceLabels} />
+          <ClaimList title="Known" claims={output.known} evidence={evidenceLabels} />
+          <ClaimList title="Uncertain" claims={output.uncertain} evidence={evidenceLabels} />
+          <ClaimList title="Possible causes (hypotheses)" claims={output.possibleCauses} evidence={evidenceLabels} />
+          <ClaimList title="What to watch" claims={output.whatToWatch} evidence={evidenceLabels} />
 
-      {parsed && (
-        <div className="space-y-4 relative">
-          {parsed.headline && (
-            <h2 className="text-xl font-semibold leading-snug">{parsed.headline}</h2>
-          )}
-
-          <div className="grid sm:grid-cols-2 gap-3 text-sm">
-            {parsed.yesterday_line && <p className="text-foreground/90 leading-relaxed">{parsed.yesterday_line}</p>}
-            {parsed.trend_line && <p className="text-foreground/90 leading-relaxed">{parsed.trend_line}</p>}
-            {parsed.funnel_insight && <p className="text-foreground/90 leading-relaxed sm:col-span-2">{parsed.funnel_insight}</p>}
+          <div className="rounded-xl bg-primary/10 border border-primary/30 p-4">
+            <div className="text-[10px] uppercase tracking-wider text-primary mb-1 font-semibold">Main recommendation</div>
+            <p className="text-sm font-medium">{output.mainRecommendation?.text || "No action supported by the supplied evidence."}</p>
+            {output.mainRecommendation && <p className="text-[10px] text-muted-foreground mt-1">Operator approval is required. Evidence: {output.mainRecommendation.evidenceIds.join(" · ")}</p>}
           </div>
 
-          {parsed.ads_to_watch && parsed.ads_to_watch.length > 0 && (
-            <div className="text-sm">
-              <span className="text-muted-foreground text-xs uppercase tracking-wide mr-2">Watch</span>
-              {parsed.ads_to_watch.map((a, i) => (
-                <span key={i} className="inline-block bg-muted/60 rounded px-2 py-0.5 text-xs mr-1.5 mb-1">{a}</span>
-              ))}
-            </div>
-          )}
-
-          {parsed.recommended_action && (
-            <div className="rounded-xl bg-primary/10 border border-primary/30 p-4">
-              <div className="text-[10px] uppercase tracking-wider text-primary mb-1 font-semibold">Action today</div>
-              <p className="text-sm font-medium">{parsed.recommended_action}</p>
-            </div>
-          )}
-
-          {parsed.on_track && (
-            <div className="flex items-center gap-2 text-xs pt-1 border-t border-border">
-              <span className="text-muted-foreground">On track?</span>
-              <span
-                className={
-                  parsed.on_track === "yes"
-                    ? "text-emerald-500 font-medium"
-                    : parsed.on_track === "no"
-                    ? "text-destructive font-medium"
-                    : "text-amber-500 font-medium"
-                }
-              >
-                {parsed.on_track}
-              </span>
-              {parsed.on_track_reason && <span className="text-muted-foreground">- {parsed.on_track_reason}</span>}
-            </div>
-          )}
+          {briefing?.stale && <p className="text-xs text-amber-600 dark:text-amber-400">This briefing is older than the current stored data. Regenerate it before relying on the explanation.</p>}
+          <p className="text-[10px] text-muted-foreground border-t border-border pt-2">Generated {new Date(briefing?.generatedAt ?? "").toLocaleString("en-GB")} · provider: {briefing?.provider} · model: {briefing?.model}</p>
         </div>
+      )}
+
+      {!loading && !output && !err && !message && (
+        <p className="text-sm text-muted-foreground relative">No persisted AI briefing yet. Generate one after the campaign goes live.</p>
       )}
     </section>
   );

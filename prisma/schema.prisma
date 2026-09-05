@@ -211,6 +211,8 @@ model SyncRun {
   lockOwner          String?
   lockExpiresAt      DateTime?
 
+  aiBriefings AiBriefing[]
+
   @@index([accountId, status, finishedAt])
   @@index([accountId, startedAt])
 }
@@ -245,6 +247,33 @@ model Recommendation {
 
   @@index([accountId, campaignId, attributionKey, lifecycle])
   @@index([targetId, lastSeenAt])
+  @@index([sourceSyncRunId])
+}
+
+// AI output is a durable, scoped snapshot of an explanation generated from
+// stored evidence. The output and evidence are validated before they are
+// written and validated again before they are exposed to the dashboard.
+model AiBriefing {
+  id              String   @id @default(cuid())
+  kind            String
+  accountId       String
+  campaignId      String?
+  attributionKey  String
+  period          String
+  dataHash        String
+  output          String
+  evidence        String   @default("[]")
+  provider        String
+  model           String
+  sourceSyncRunId String
+  snapshotKey     String   @unique
+  generatedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  sourceSyncRun SyncRun @relation(fields: [sourceSyncRunId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([kind, accountId, campaignId, attributionKey, generatedAt])
+  @@index([dataHash])
   @@index([sourceSyncRunId])
 }
 

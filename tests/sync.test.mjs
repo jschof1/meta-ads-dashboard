@@ -12,9 +12,11 @@ const migrationPaths = [
   new URL("../prisma/migrations/20260904170000_pr03_sync_data/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260905120000_pr07_ai_briefings/migration.sql", import.meta.url),
 ];
 const databases = [];
 const originalAccountId = process.env.META_AD_ACCOUNT_ID;
+const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
 const account = {
   id: "act_uktl-test",
   name: "UK Trade Leads",
@@ -26,11 +28,15 @@ before(() => {
   // Read-model tests need an explicit account scope; production code fails
   // closed when this configuration is absent.
   process.env.META_AD_ACCOUNT_ID = account.id;
+  // Sync tests must never inherit a developer key or make a provider call.
+  process.env.ANTHROPIC_API_KEY = "";
 });
 
 after(() => {
   if (originalAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
   else process.env.META_AD_ACCOUNT_ID = originalAccountId;
+  if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+  else process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
 });
 
 async function createDatabase() {
