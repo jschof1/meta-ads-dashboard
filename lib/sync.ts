@@ -17,6 +17,8 @@ import {
 } from "@/lib/meta";
 import { chooseSyncRange, isDateInRange, isValidTimeZone, type SyncRange } from "@/lib/periods";
 import { safeJson } from "@/lib/safe-json";
+import { buildDashboardState } from "@/lib/read-model";
+import { persistRecommendationLifecycle } from "@/lib/recommendation-store";
 
 export type SyncTrigger = "cron" | "manual";
 
@@ -634,6 +636,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       + discovery.creatives.length
       + normalized.rows.length;
 
+    const completedAt = options.clock?.() ?? new Date();
     await db.$transaction(async (tx) => {
       for (const campaign of discovery.campaigns) {
         const campaignHasProviderFields = hasProviderFields(campaign);
@@ -837,7 +840,6 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
           },
         });
       }
-      const completedAt = options.clock?.() ?? new Date();
       const committed = await tx.syncRun.updateMany({
         where: {
           id: run.id,
@@ -871,6 +873,32 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       });
       if (committed.count !== 1) throw new SyncLeaseLostError();
     }, { maxWait: 5_000, timeout: SYNC_TRANSACTION_TIMEOUT_MS });
+
+    let finalWarning = warning;
+    try {
+      // Recommendations are derived only after the successful read-model
+      // commit. This keeps provider ingestion and deterministic analysis
+      // separate while making a retry idempotent through the fingerprint.
+      const state = await buildDashboardState({ db, now: completedAt, recommendationMode: "derived" });
+      if (warning == null && state.meta.metadataStaleCount === 0) {
+        await persistRecommendationLifecycle(db, {
+          accountId,
+          campaignId: runCampaignId,
+          attributionKey,
+          syncRunId: run.id,
+          recommendations: state.recommendations,
+          now: completedAt,
+        });
+      }
+    } catch (recommendationError) {
+      finalWarning = [warning, "Recommendation lifecycle persistence failed; stored metrics remain available."]
+        .filter(Boolean)
+        .join(" ");
+      console.error("Unable to persist Meta recommendations:", safeErrorMessage(recommendationError));
+    }
+    if (finalWarning !== warning) {
+      await db.syncRun.update({ where: { id: run.id }, data: { warning: finalWarning } });
+    }
     await heartbeat?.stop();
 
     return {
@@ -881,7 +909,7 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       until: range.until,
       rowsFetched,
       rowsWritten,
-      warning,
+      warning: finalWarning,
     };
   } catch (error) {
     await heartbeat?.stop();

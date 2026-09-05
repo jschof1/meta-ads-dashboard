@@ -15,6 +15,7 @@ import { CampaignDrilldown } from "@/components/campaign-drilldown";
 import { DataQualityPanel } from "@/components/data-quality-panel";
 import { OperatorHeader } from "@/components/operator-header";
 import { PeriodSelector } from "@/components/period-selector";
+import { RecommendationPanel } from "@/components/recommendation-panel";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 
@@ -120,6 +121,7 @@ export default function DashboardHome() {
       </div>
       <SyncNotice state={state} />
       <DataQualityPanel state={state} period={period} />
+      <RecommendationPanel state={state} />
       <AISummaryPanel state={state} />
       <AnomalyBanner state={state} />
       <Scorecard state={state} period={period} />

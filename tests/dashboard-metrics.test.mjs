@@ -12,6 +12,7 @@ import { buildSpendStatus } from "../lib/spend-status.ts";
 const migrationPaths = [
   new URL("../prisma/migrations/20260904170000_pr03_sync_data/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
 ];
 const fixtures = [];
 
@@ -220,6 +221,39 @@ test("builds a durable state with matched MTD, entity drill-downs, budgets and p
     const monthEndState = await buildDashboardState({ db, now: new Date("2026-03-31T12:30:00.000Z") });
     assert.equal(monthEndState.meta.mtdComparisonComparable, false);
     assert.equal(monthEndState.dataWarnings.mtd.some((warning) => warning.id === "mtd-shorter-comparison"), true);
+  } finally {
+    if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = previousAccountId;
+    if (previousCampaignId === undefined) delete process.env.META_CAMPAIGN_ID;
+    else process.env.META_CAMPAIGN_ID = previousCampaignId;
+  }
+});
+
+test("fails closed instead of selecting another account when the dashboard account is not configured", async () => {
+  const db = await createDatabase();
+  const previousAccountId = process.env.META_AD_ACCOUNT_ID;
+  const previousCampaignId = process.env.META_CAMPAIGN_ID;
+  delete process.env.META_AD_ACCOUNT_ID;
+  delete process.env.META_CAMPAIGN_ID;
+  try {
+    await db.syncRun.create({
+      data: {
+        accountId: "act_other-account",
+        accountName: "Other business",
+        currencyCode: "GBP",
+        timezoneName: "Europe/London",
+        trigger: "manual",
+        status: "SUCCEEDED",
+        attributionKey: "7d_click,1d_view",
+        startedAt: new Date("2026-09-04T12:00:00.000Z"),
+        finishedAt: new Date("2026-09-04T12:01:00.000Z"),
+      },
+    });
+    const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:30:00.000Z") });
+    assert.equal(state.meta.syncState, "never");
+    assert.equal(state.meta.adAccountId, null);
+    assert.equal(state.scorecard.last7.spendCents, null);
+    assert.equal(state.recommendations.length, 0);
   } finally {
     if (previousAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
     else process.env.META_AD_ACCOUNT_ID = previousAccountId;

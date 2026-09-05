@@ -9,7 +9,7 @@ Source of truth: [MASTER_PLAN.md](./MASTER_PLAN.md) and the linked GitHub issues
 | [03](https://github.com/jschof1/meta-ads-dashboard/pull/13) | Durable sync and historical data model | COMPLETE | `codex/implement-pr03-from-main/03-sync-data-model` | PR02 | Meta credentials for end-to-end validation |
 | [04](https://github.com/jschof1/meta-ads-dashboard/pull/14) | Convert product to UK Trade Leads | COMPLETE | `codex/implement-pr04-from-main/04-uktl-domain-model` | PR03 | Targets optional |
 | [05](https://github.com/jschof1/meta-ads-dashboard/pull/15) | Operator dashboard v2 | COMPLETE | `codex/implement-pr05-from-main/05-operator-dashboard` | PR04 | Live Meta account/token validation remains pending |
-| [06](https://github.com/jschof1/meta-ads-dashboard/pull/6) | Evidence-based recommendation engine | NOT STARTED | `feat/06-recommendation-engine` | PR05 | Targets improve recommendations but may be unknown |
+| [06](https://github.com/jschof1/meta-ads-dashboard/pull/6) | Evidence-based recommendation engine | IN REVIEW | `codex/implement-pr06-from-main/06-recommendation-engine` | PR05 | Targets improve recommendations but may be unknown |
 | [07](https://github.com/jschof1/meta-ads-dashboard/pull/7) | Trustworthy AI analyst | NOT STARTED | `feat/07-ai-analyst` | PR06 | Anthropic key for live validation |
 | [08](https://github.com/jschof1/meta-ads-dashboard/pull/8) | HighLevel CRM attribution | NOT STARTED | `feat/08-highlevel-attribution` | PR07 | HighLevel access and stage mapping |
 | [09](https://github.com/jschof1/meta-ads-dashboard/pull/9) | Approval-gated Meta actions | NOT STARTED | `feat/09-approved-meta-actions` | PR01, PR02, PR06, explicit approval | Meta write permission; disabled by default |

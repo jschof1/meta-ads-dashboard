@@ -1,4 +1,4 @@
-import test, { afterEach } from "node:test";
+import test, { after, afterEach, before } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -11,8 +11,27 @@ import { SyncAlreadyRunningError, syncMeta } from "../lib/sync.ts";
 const migrationPaths = [
   new URL("../prisma/migrations/20260904170000_pr03_sync_data/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260904193000_pr05_operator_dashboard/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
 ];
 const databases = [];
+const originalAccountId = process.env.META_AD_ACCOUNT_ID;
+const account = {
+  id: "act_uktl-test",
+  name: "UK Trade Leads",
+  currency: "GBP",
+  timezone_name: "Europe/London",
+};
+
+before(() => {
+  // Read-model tests need an explicit account scope; production code fails
+  // closed when this configuration is absent.
+  process.env.META_AD_ACCOUNT_ID = account.id;
+});
+
+after(() => {
+  if (originalAccountId === undefined) delete process.env.META_AD_ACCOUNT_ID;
+  else process.env.META_AD_ACCOUNT_ID = originalAccountId;
+});
 
 async function createDatabase() {
   const directory = await mkdtemp(join(tmpdir(), "meta-ads-pr03-"));
@@ -37,13 +56,6 @@ afterEach(async () => {
     await rm(current.directory, { recursive: true, force: true });
   }
 });
-
-const account = {
-  id: "act_uktl-test",
-  name: "UK Trade Leads",
-  currency: "GBP",
-  timezone_name: "Europe/London",
-};
 
 const metadata = {
   campaigns: [{ id: "campaign-1", name: "UKTL Leads", objective: "OUTCOME_LEADS", status: "ACTIVE", effective_status: "ACTIVE", daily_budget: "10000", lifetime_budget: "250000", updated_time: "2026-09-04T10:00:00+0000" }],
@@ -192,6 +204,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:03:00.000Z");
   assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).lastSeenSyncRunId, result.runId);
   assert.equal(await db.dailyInsight.count(), 4);
+  assert.equal(await db.recommendation.count(), 0);
   const accountRow = await db.dailyInsight.findUnique({
     where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
@@ -200,6 +213,12 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal(accountRow.leads, null);
 
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+  assert.equal(state.recommendations.length, 0);
+
+  const derived = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z"), recommendationMode: "derived" });
+  const adRecommendation = derived.recommendations.find((recommendation) => recommendation.target.type === "ad");
+  assert.equal(adRecommendation.evidence.learningState, "LEARNING");
+  assert.equal(["scale_candidate", "pause_candidate", "creative_refresh"].includes(adRecommendation.type), false);
   assert.equal(state.ads[0].verdict, "too_early");
   assert.match(state.ads[0].verdictReason, /need 3\+ stored leads/);
   assert.equal(state.ads[0].lastChangeAt, "2026-09-04T10:03:00.000Z");
@@ -235,6 +254,9 @@ test("is idempotent and overwrites delayed conversion updates during the recent 
   assert.equal(second.until, "2026-09-05");
   assert.equal(calls[4].range.since, "2026-08-30");
   assert.equal(await db.dailyInsight.count(), 4);
+  const recommendations = await db.recommendation.findMany({ select: { fingerprint: true } });
+  assert.ok(recommendations.length >= 4);
+  assert.equal(new Set(recommendations.map((row) => row.fingerprint)).size, recommendations.length);
   const row = await db.dailyInsight.findUnique({
     where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
@@ -242,6 +264,44 @@ test("is idempotent and overwrites delayed conversion updates during the recent 
   assert.equal(row.leads, 4);
   assert.equal(row.cplMinorUnits, 500);
   assert.equal(await db.syncRun.count({ where: { status: "SUCCEEDED" } }), 2);
+});
+
+test("does not publish a contradictory recommendation set from a warning-bearing sync", async () => {
+  const db = await createDatabase();
+  const first = await run(db, fakeClient().client, new Date("2026-09-04T12:00:00.000Z"));
+  const before = await db.recommendation.findMany({ orderBy: { fingerprint: "asc" } });
+  assert.ok(before.length > 0);
+
+  const warningClient = fakeClient({ rows: {
+    account: [insight("2026-09-05", { actions: [] })],
+    campaign: [insight("2026-09-05", { actions: [] })],
+    adset: [insight("2026-09-05", { actions: [] })],
+    ad: [insight("2026-09-05", { actions: [] })],
+  } });
+  const second = await run(db, warningClient.client, new Date("2026-09-05T12:00:00.000Z"));
+  assert.match(second.warning, /leads remain missing/);
+
+  const after = await db.recommendation.findMany({ orderBy: { fingerprint: "asc" } });
+  assert.deepEqual(after.map((row) => ({ fingerprint: row.fingerprint, sourceSyncRunId: row.sourceSyncRunId, lifecycle: row.lifecycle })), before.map((row) => ({ fingerprint: row.fingerprint, sourceSyncRunId: row.sourceSyncRunId, lifecycle: row.lifecycle })));
+  assert.ok(after.every((row) => row.sourceSyncRunId === first.runId));
+});
+
+test("supports every valid configured recommendation comparison window", async () => {
+  const db = await createDatabase();
+  const originalWindow = process.env.META_RECOMMENDATION_COMPARISON_DAYS;
+  try {
+    process.env.META_RECOMMENDATION_COMPARISON_DAYS = "7";
+    await run(db, fakeClient().client, new Date("2026-09-04T12:00:00.000Z"));
+    for (const window of [3, 7, 14, 30]) {
+      process.env.META_RECOMMENDATION_COMPARISON_DAYS = String(window);
+      const derived = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z"), recommendationMode: "derived" });
+      assert.ok(derived.recommendations.length > 0);
+      assert.ok(derived.recommendations.every((recommendation) => recommendation.evidence.comparisonDays === window));
+    }
+  } finally {
+    if (originalWindow === undefined) delete process.env.META_RECOMMENDATION_COMPARISON_DAYS;
+    else process.env.META_RECOMMENDATION_COMPARISON_DAYS = originalWindow;
+  }
 });
 
 test("starts a fresh backfill when the attribution configuration changes", async () => {
