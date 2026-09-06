@@ -8,5 +8,7 @@ export async function GET(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
   const plan = await readPlan();
-  return NextResponse.json({ plan });
+  return NextResponse.json({ plan }, {
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }

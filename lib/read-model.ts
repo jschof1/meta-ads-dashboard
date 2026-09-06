@@ -577,6 +577,12 @@ async function readCrmRows(db: PrismaClient, settings: HighLevelSettings, run: C
       db.crmContact.findMany({ where: { sourceSyncRunId: run.id, locationId: settings.locationId } }),
       db.crmOpportunity.findMany({ where: { sourceSyncRunId: run.id, locationId: settings.locationId, pipelineId: settings.pipelineId } }),
     ]);
+    // Rows are upserted in place. A different pipeline/mapping can supersede
+    // the contacts, and a concurrent commit can move their snapshot pointer.
+    // An empty/missing subset is not a complete zero-outcome snapshot.
+    if (contacts.length !== run.contactsWritten || opportunities.length !== run.opportunitiesWritten) {
+      return { available: false, contacts: [], opportunities: [] };
+    }
     return { available: true, contacts, opportunities };
   } catch {
     return { available: false, contacts: [], opportunities: [] };
@@ -646,7 +652,9 @@ function crmState(input: {
       ...base,
       status: input.runs.latestAttempt?.status === "RUNNING"
         ? "running"
-        : input.settings.status === "disabled" ? "disabled" : "never",
+        : input.runs.latestAttempt?.status === "FAILED"
+          ? "failed"
+          : input.settings.status === "disabled" ? "disabled" : "never",
       ...empty,
       warnings: [...configWarnings, "No successful HighLevel snapshot is stored yet; CRM outcomes remain unknown."],
     };
@@ -694,6 +702,15 @@ function crmState(input: {
     : snapshotWarning
       ? "partial" as const
       : metrics.dataQuality;
+  // Legacy snapshots predate the complete-collection write gate. Only these
+  // exact revenue-only messages are safe to exempt: revenueFor independently
+  // withholds money/ROAS while complete contact and funnel counts remain usable.
+  // Any other (including future unknown) warning still fails closed for totals.
+  const rowCompletenessWarning = (snapshotWarning ?? "")
+    .replaceAll("HIGHLEVEL_CURRENCY_CODE is not configured; attributed revenue and ROAS remain unknown.", "")
+    .replace(/\d+ won opportunity row\(s\) have no valid monetary value; attributed revenue remains incomplete\./g, "")
+    .trim();
+  const withholdMetrics = Boolean(rowCompletenessWarning) || metrics.dataQuality !== "complete";
   const successAge = input.runs.latestSuccess.finishedAt
     ? Math.max(0, input.now.getTime() - input.runs.latestSuccess.finishedAt.getTime())
     : null;
@@ -709,9 +726,9 @@ function crmState(input: {
   return {
     ...base,
     status,
-    ...metrics,
+    ...(withholdMetrics ? empty : metrics),
     dataQuality: snapshotDataQuality,
-    warnings: [...configWarnings, ...(snapshotWarning ? [snapshotWarning] : []), ...(failedAfterSuccess ? ["The latest HighLevel attempt failed; displayed CRM metrics come from the last successful snapshot."] : []), ...metrics.warnings],
+    warnings: [...configWarnings, ...(withholdMetrics ? ["HighLevel snapshot is incomplete; CRM totals, rates, costs and revenue are withheld until a complete read succeeds."] : []), ...(snapshotWarning ? [snapshotWarning] : []), ...(failedAfterSuccess ? ["The latest HighLevel attempt failed; displayed CRM metrics come from the last successful snapshot."] : []), ...metrics.warnings],
   };
 }
 
@@ -795,6 +812,39 @@ export function buildDataWarningsByPeriod(input: {
 export function buildDashboardState(options: DashboardStateOptions & { recommendationMode: "derived" }): Promise<DerivedDashboardState>;
 export function buildDashboardState(options?: DashboardStateOptions): Promise<DashboardState>;
 export async function buildDashboardState(options: DashboardStateOptions = {}): Promise<DashboardState | DerivedDashboardState> {
+  const db = options.db ?? defaultPrisma;
+  const now = options.now ?? new Date();
+  // Successful runs are append-only, and every snapshot writer commits its
+  // rows and SUCCEEDED transition atomically. Bracket ALL dependent reads with
+  // these monotonic revisions, not just the selected run ID: timestamp ties
+  // and other campaign/pipeline scopes can also replace shared metadata.
+  // Optimistic retries avoid holding a remote interactive transaction open
+  // across the dashboard's queries (libSQL limits those to five seconds).
+  const revision = async () => {
+    const [meta, crm] = await Promise.all([
+      db.syncRun.count({ where: { status: "SUCCEEDED" } }),
+      db.crmSyncRun.count({ where: { status: "SUCCEEDED" } }).catch(() => null),
+    ]);
+    return { meta, crm };
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = await revision();
+    const state = await buildDashboardStateOnce({ ...options, db, now });
+    const after = await revision();
+    if (before.meta === after.meta && before.crm === after.crm) {
+      // Older databases may lack optional CRM storage, which the CRM panel
+      // reports explicitly. A readable snapshot without a verifiable revision
+      // is different: it cannot safely be returned as consistent.
+      if (before.crm === null && state.crm.lastSyncAt !== null) {
+        throw new Error("The CRM snapshot revision could not be verified");
+      }
+      return state;
+    }
+  }
+  throw new Error("Stored snapshots changed during dashboard read; retry the request");
+}
+
+async function buildDashboardStateOnce(options: DashboardStateOptions): Promise<DashboardState | DerivedDashboardState> {
   const db = options.db ?? defaultPrisma;
   const now = options.now ?? new Date();
   const accountId = configuredAccountId();

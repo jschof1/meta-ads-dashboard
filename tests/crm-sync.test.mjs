@@ -1,4 +1,4 @@
-import test, { afterEach } from "node:test";
+import test, { afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,12 +31,58 @@ async function createDatabase() {
 }
 
 afterEach(async () => {
+  mock.restoreAll();
   while (fixtures.length > 0) {
     const fixture = fixtures.pop();
     await fixture.db.$disconnect();
     await rm(fixture.directory, { recursive: true, force: true });
   }
 });
+
+test("writes a large CRM snapshot with only the short lease-acquisition Prisma transaction", async () => {
+  const db = await createDatabase();
+  const transaction = db.$transaction.bind(db);
+  const spy = mock.fn((...args) => transaction(...args));
+  db.$transaction = spy;
+  const contacts = Array.from({ length: 1_000 }, (_, i) => ({ id: `contact-${i}`, locationId: "location-1", dateAdded: "2026-09-04T10:00:00.000Z" }));
+  const opportunities = contacts.map((contact, i) => ({ id: `opportunity-${i}`, contactId: contact.id, locationId: "location-1", pipelineId: "pipeline-1", pipelineStageId: "stage-qualified", status: "open", monetaryValue: "12.34" }));
+  const result = await syncHighLevel({ db, config: config(), client: client({ listContacts: async () => collection(contacts), listOpportunities: async () => collection(opportunities) }), clock: () => new Date("2026-09-04T12:00:00.000Z") });
+  assert.equal(spy.mock.callCount(), 1);
+  assert.equal(result.contactsWritten, 1_000);
+  assert.equal(result.opportunitiesWritten, 1_000);
+  assert.equal(await db.crmContact.count({ where: { sourceSyncRunId: result.runId } }), 1_000);
+  assert.equal(await db.crmOpportunity.count({ where: { sourceSyncRunId: result.runId } }), 1_000);
+  assert.equal((await db.crmSyncRun.findUnique({ where: { id: result.runId } })).status, "SUCCEEDED");
+});
+
+for (const failure of ["opportunity write", "expired lease", "replaced owner"]) {
+  test(`CRM ${failure} rolls back contact updates and retains the last successful snapshot`, async () => {
+    const db = await createDatabase();
+    const settings = config();
+    const first = await syncHighLevel({ db, config: settings, client: client(), clock: () => new Date("2026-09-04T12:00:00.000Z") });
+    const beforeContacts = await db.crmContact.findMany();
+    const beforeOpportunities = await db.crmOpportunity.findMany();
+    if (failure === "opportunity write") {
+      await db.$executeRawUnsafe(`CREATE TRIGGER fail_opportunity BEFORE INSERT ON "CrmOpportunity" BEGIN SELECT RAISE(ABORT, 'opportunity batch failure'); END`);
+    }
+    const ordinary = client();
+    const source = client({
+      listContacts: async () => collection([{ id: "contact-1", locationId: "location-1", dateAdded: "2026-09-05T10:00:00.000Z", attribution: { utmSource: "changed" } }, { id: "new-contact", locationId: "location-1" }]),
+      listOpportunities: async () => {
+        if (failure === "expired lease") await db.crmSyncRun.updateMany({ where: { status: "RUNNING" }, data: { lockExpiresAt: new Date(0) } });
+        if (failure === "replaced owner") await db.crmSyncRun.updateMany({ where: { status: "RUNNING" }, data: { lockOwner: "other-worker" } });
+        return ordinary.listOpportunities();
+      },
+    });
+    await assert.rejects(syncHighLevel({ db, config: settings, client: source, clock: () => new Date("2026-09-05T12:00:00.000Z") }), /opportunity batch failure|lease was lost/);
+    assert.deepEqual(await db.crmContact.findMany(), beforeContacts);
+    assert.deepEqual(await db.crmOpportunity.findMany(), beforeOpportunities);
+    assert.equal(await db.crmSyncRun.count({ where: { status: "SUCCEEDED" } }), 1);
+    assert.equal((await db.crmSyncRun.findUnique({ where: { id: first.runId } })).status, "SUCCEEDED");
+    if (failure === "replaced owner") assert.equal((await db.crmSyncRun.findFirst({ where: { status: "RUNNING" } })).lockOwner, "other-worker");
+    else assert.equal(await db.crmSyncRun.count({ where: { status: "FAILED" } }), 1);
+  });
+}
 
 function config(overrides = {}) {
   return loadHighLevelSettings({
@@ -248,30 +294,226 @@ test("reads the matching CRM snapshot into the dashboard without replacing the M
   }
 });
 
-test("surfaces skipped or capped provider rows as partial CRM data instead of a clean zero", async () => {
+test("a CRM batch committed during a dashboard read cannot become complete zero outcomes", async () => {
+  const db = await createDatabase();
+  const settings = config();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  const overrides = { ...environmentFor(settings), META_AD_ACCOUNT_ID: "", META_CAMPAIGN_ID: "", ANTHROPIC_API_KEY: "" };
+  const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, overrides);
+  let replacement;
+  let rowRead;
+  try {
+    const first = await syncHighLevel({ db, config: settings, client: client(), clock: () => now });
+    assert.equal((await buildDashboardState({ db, now })).crm.counts.qualified, 1);
+    rowRead = db.crmContact.findMany;
+    db.crmContact.findMany = async (...args) => {
+      // Commit the real replacement batch after run selection but before the
+      // selected run's contacts are read. No timing sleeps or provider calls.
+      replacement ??= syncHighLevel({
+        db,
+        config: settings,
+        client: client(),
+        clock: () => new Date(now.getTime() + 60_000),
+      });
+      await replacement;
+      return rowRead.apply(db.crmContact, args);
+    };
+    const state = await buildDashboardState({ db, now: new Date(now.getTime() + 120_000) });
+    assert.ok(replacement, "the replacement must commit while the read is in flight");
+    const committed = await replacement;
+    assert.notEqual(committed.runId, first.runId);
+    assert.equal(committed.status, "SUCCEEDED");
+    assert.equal(committed.contactsWritten, 1);
+    assert.equal(committed.opportunitiesWritten, 1);
+    assert.equal(await db.crmContact.count({ where: { sourceSyncRunId: committed.runId } }), 1);
+
+    // Both snapshots contain the same one qualified contact. Accept either a
+    // consistent snapshot (including a retry) or explicit withheld metrics,
+    // without prescribing a retry count, status label or internal strategy.
+    if (state.crm.counts.crmRecords === null) {
+      assert.notEqual(state.crm.dataQuality, "complete");
+      for (const [key, value] of Object.entries(state.crm.counts)) {
+        if (key !== "metaLeads") assert.equal(value, null, key);
+      }
+      for (const value of Object.values(state.crm.rates)) assert.equal(value, null);
+      for (const value of Object.values(state.crm.costs)) assert.equal(value, null);
+      assert.equal(state.crm.revenue.minorUnits, null);
+      assert.equal(state.funnel.qualified, null);
+    } else {
+      assert.equal(state.crm.counts.crmRecords, 1, "an overwritten snapshot is not an empty cohort");
+      assert.equal(state.crm.counts.qualified, 1, "contact and opportunity reads must belong to one snapshot");
+      assert.equal(state.funnel.qualified, 1);
+    }
+  } finally {
+    if (rowRead) db.crmContact.findMany = rowRead;
+    if (replacement) await replacement.catch(() => {});
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("repeated CRM batch commits bound dashboard retries instead of returning mixed data", async () => {
+  const db = await createDatabase();
+  const settings = config();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  const overrides = { ...environmentFor(settings), META_AD_ACCOUNT_ID: "", META_CAMPAIGN_ID: "", ANTHROPIC_API_KEY: "" };
+  const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, overrides);
+  const findContacts = db.crmContact.findMany;
+  let commits = 0;
+  try {
+    await syncHighLevel({ db, config: settings, client: client(), clock: () => now });
+    db.crmContact.findMany = async (...args) => {
+      // A safety cap detects an unbounded retry loop without a timing race.
+      // Do not require the reader to use a particular number of retries.
+      assert.ok(commits < 10, "dashboard must bound its attempts");
+      commits += 1;
+      const result = await syncHighLevel({ db, config: settings, client: client(), clock: () => new Date(now.getTime() + commits * 60_000) });
+      assert.equal(result.status, "SUCCEEDED");
+      return findContacts.apply(db.crmContact, args);
+    };
+    await assert.rejects(
+      buildDashboardState({ db, now: new Date(now.getTime() + 15 * 60_000) }),
+      /snapshot.*(?:changed|consistent)|retry/i,
+    );
+    assert.ok(commits >= 2, "exercise continued churn, not just a single replacement");
+    assert.equal(await db.crmSyncRun.count({ where: { status: "SUCCEEDED" } }), commits + 1);
+    db.crmContact.findMany = findContacts;
+    const stable = await buildDashboardState({ db, now: new Date(now.getTime() + 15 * 60_000) });
+    assert.equal(stable.crm.counts.crmRecords, 1);
+    assert.equal(stable.crm.counts.qualified, 1);
+  } finally {
+    db.crmContact.findMany = findContacts;
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("rejects capped snapshots, preserving the complete snapshot and marking the latest attempt failed", async () => {
   const db = await createDatabase();
   const now = new Date("2026-09-04T12:00:00.000Z");
   const settings = config();
   const previous = Object.fromEntries(Object.entries(environmentFor(settings)).map(([key]) => [key, process.env[key]]));
   Object.assign(process.env, environmentFor(settings));
   try {
-    const result = await syncHighLevel({
+    const first = await syncHighLevel({ db, config: settings, client: client(), clock: () => now });
+    const later = new Date(now.getTime() + 60_000);
+    await assert.rejects(() => syncHighLevel({
       db,
       config: settings,
       client: client({
         listContacts: async () => collection([{ id: "contact-1", locationId: "location-1", dateAdded: "2026-09-04T10:00:00.000Z" }], { providerTotal: 2, truncated: true }),
         listOpportunities: async () => collection([]),
       }),
-      clock: () => now,
-    });
-    assert.match(result.warning, /partial/);
-    const run = await db.crmSyncRun.findUnique({ where: { id: result.runId } });
-    assert.match(run.warning, /HIGHLEVEL_MAX_RECORDS/);
-    const state = await buildDashboardState({ db, now });
-    assert.equal(state.crm.status, "fresh");
-    assert.equal(state.crm.dataQuality, "partial");
+      clock: () => later,
+    }), /incomplete snapshot/);
+    const run = await db.crmSyncRun.findFirst({ orderBy: { startedAt: "desc" } });
+    assert.equal(run.status, "FAILED");
+    assert.match(run.error, /HIGHLEVEL_MAX_RECORDS/);
+    assert.equal((await db.crmContact.findFirst()).sourceSyncRunId, first.runId);
+    assert.equal((await db.crmOpportunity.findFirst()).sourceSyncRunId, first.runId);
+    const state = await buildDashboardState({ db, now: later });
+    assert.equal(state.crm.status, "failed");
+    assert.equal(state.crm.dataQuality, "complete");
     assert.equal(state.crm.counts.crmRecords, 1);
-    assert.match(state.crm.warnings.join(" "), /partial/);
+    assert.equal(state.crm.counts.qualified, 1);
+    assert.match(state.crm.warnings.join(" "), /latest HighLevel attempt failed/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("never turns an incomplete first read into zero CRM outcomes", async () => {
+  const db = await createDatabase();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  const settings = config();
+  const previous = Object.fromEntries(Object.keys(environmentFor(settings)).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environmentFor(settings));
+  try {
+    const contact = { id: "contact-1", locationId: "location-1", dateAdded: "2026-09-04T10:00:00.000Z" };
+    for (const badCollection of [
+      collection([], { providerTotal: 2 }),
+      collection([{ ...contact, locationId: "wrong-location" }]),
+      collection([contact, contact]),
+      { items: null, providerTotal: null, truncated: false },
+    ]) {
+      await assert.rejects(() => syncHighLevel({ db, config: settings, client: client({ listContacts: async () => badCollection }), clock: () => now }), /invalid collection|incomplete snapshot/);
+    }
+    await assert.rejects(() => syncHighLevel({ db, config: settings, client: client({ listOpportunities: async () => collection([], { truncated: true }) }), clock: () => now }), /incomplete snapshot/);
+    assert.equal(await db.crmContact.count(), 0);
+    assert.equal(await db.crmOpportunity.count(), 0);
+    assert.equal(await db.crmSyncRun.count({ where: { status: "SUCCEEDED" } }), 0);
+    const state = await buildDashboardState({ db, now });
+    assert.equal(state.crm.status, "failed");
+    assert.equal(state.crm.counts.crmRecords, null);
+    assert.equal(state.crm.counts.qualified, null);
+    assert.equal(state.crm.counts.wonCustomers, null);
+    assert.equal(state.funnel.qualified, null);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("withholds all CRM aggregates from legacy partial snapshots without hiding Meta leads", async () => {
+  const db = await createDatabase();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  const settings = config();
+  const previous = Object.fromEntries(Object.keys(environmentFor(settings)).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environmentFor(settings));
+  try {
+    const result = await syncHighLevel({ db, config: settings, client: client(), clock: () => now });
+    await db.crmSyncRun.update({ where: { id: result.runId }, data: { warning: "Provider rows were capped; stored snapshot is partial." } });
+    const state = await buildDashboardState({ db, now });
+    assert.equal(state.crm.dataQuality, "partial");
+    for (const [key, value] of Object.entries(state.crm.counts)) {
+      if (key !== "metaLeads") assert.equal(value, null, key);
+    }
+    for (const value of Object.values(state.crm.rates)) assert.equal(value, null);
+    for (const value of Object.values(state.crm.costs)) assert.equal(value, null);
+    assert.equal(state.crm.revenue.minorUnits, null);
+    assert.equal(state.crm.revenue.roas, null);
+    assert.deepEqual(state.crm.performanceByEntity, []);
+    assert.equal(state.crm.counts.metaLeads, state.funnel.leads);
+    assert.equal(state.funnel.qualified, null);
+    assert.match(state.crm.warnings.join(" "), /withheld/);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
+test("revenue-only uncertainty preserves complete CRM counts but cannot override a partial-read warning", async () => {
+  const db = await createDatabase();
+  const now = new Date("2026-09-04T12:00:00.000Z");
+  const settings = config({ HIGHLEVEL_CURRENCY_CODE: "" });
+  const previous = Object.fromEntries(Object.keys(environmentFor(settings)).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, environmentFor(settings));
+  try {
+    const result = await syncHighLevel({ db, config: settings, client: client(), clock: () => now });
+    const state = await buildDashboardState({ db, now });
+    assert.equal(state.crm.counts.crmRecords, 1);
+    assert.equal(state.crm.counts.qualified, 1);
+    assert.equal(state.crm.revenue.minorUnits, null);
+    assert.equal(state.crm.revenue.roas, null);
+    const run = await db.crmSyncRun.findUnique({ where: { id: result.runId } });
+    assert.match(run.warning, /CURRENCY_CODE/);
+    await db.crmSyncRun.update({ where: { id: result.runId }, data: { warning: `${run.warning} 1 won opportunity row(s) have no valid monetary value; attributed revenue remains incomplete.` } });
+    assert.equal((await buildDashboardState({ db, now })).crm.counts.crmRecords, 1);
+    await db.crmSyncRun.update({ where: { id: result.runId }, data: { warning: `${run.warning} The stored snapshot is partial.` } });
+    assert.equal((await buildDashboardState({ db, now })).crm.counts.crmRecords, null);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

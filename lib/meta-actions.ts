@@ -30,6 +30,7 @@ const DEFAULT_BUDGET_CHANGE_PERCENT = 20;
 const MAX_ID_LENGTH = 128;
 const MAX_IDEMPOTENCY_LENGTH = 160;
 const EXECUTION_RECOVERY_AFTER_MS = 5 * 60 * 1_000;
+const ACTION_EVIDENCE_STALE_AFTER_MS = 26 * 60 * 60 * 1_000;
 const META_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
 
@@ -546,7 +547,7 @@ async function readRecommendation(db: PrismaClient, fingerprint: string, account
   return recommendation;
 }
 
-async function latestSuccessfulRun(db: PrismaClient, recommendation: RecommendationRow): Promise<{ id: string } | null> {
+async function latestSuccessfulRun(db: PrismaClient, recommendation: RecommendationRow): Promise<{ id: string; finishedAt: Date | null } | null> {
   return db.syncRun.findFirst({
     where: {
       accountId: recommendation.accountId,
@@ -555,8 +556,15 @@ async function latestSuccessfulRun(db: PrismaClient, recommendation: Recommendat
       status: "SUCCEEDED",
     },
     orderBy: [{ finishedAt: "desc" }, { startedAt: "desc" }],
-    select: { id: true },
+    select: { id: true, finishedAt: true },
   });
+}
+
+function assertFreshSourceRun(run: { finishedAt: Date | null }, now: Date): void {
+  const finishedAt = run.finishedAt?.getTime();
+  if (finishedAt == null || !Number.isFinite(finishedAt) || now.getTime() - finishedAt > ACTION_EVIDENCE_STALE_AFTER_MS) {
+    throw new MetaActionError("stale", "The stored Meta evidence is stale; complete a fresh successful sync before preparing or executing this action");
+  }
 }
 
 function ensureRecommendationAction(recommendation: RecommendationRow, action: MetaActionKind, targetType: MetaActionTargetType, current: { status: string; dailyBudgetMinor: number | null }): void {
@@ -615,6 +623,7 @@ function actionCreateData(input: {
 /** Create a proposal only from a validated durable recommendation. */
 export async function proposeMetaAction(db: PrismaClient, input: ProposeMetaActionInput, options: { env?: ActionEnvironment; now?: Date } = {}): Promise<MetaActionResult> {
   const config = loadMetaActionConfig(options.env);
+  const now = options.now ?? new Date();
   if (!config.accountId) throw new MetaActionError("configuration", "META_AD_ACCOUNT_ID is required before preparing Meta actions");
   const fingerprint = boundedString(input.recommendationFingerprint, 240);
   if (!fingerprint) throw new MetaActionError("validation", "recommendationFingerprint is required");
@@ -626,6 +635,7 @@ export async function proposeMetaAction(db: PrismaClient, input: ProposeMetaActi
   if (!evidence || !validConfidence(recommendation.confidence)) throw new MetaActionError("validation", "The stored recommendation evidence is not valid for action approval");
   const latest = await latestSuccessfulRun(db, recommendation);
   if (!latest || recommendation.sourceSyncRunId !== latest.id) throw new MetaActionError("stale", "The recommendation is not from the latest successful stored Meta sync");
+  assertFreshSourceRun(latest, now);
 
   const targetType: MetaActionTargetType = action === "set_adset_daily_budget" ? "adset" : "ad";
   if (!validMetaObjectId(recommendation.targetId)) throw new MetaActionError("validation", "The recommendation target id is invalid");
@@ -645,7 +655,6 @@ export async function proposeMetaAction(db: PrismaClient, input: ProposeMetaActi
   const actionFingerprint = deterministicActionFingerprint(accountId, fingerprint, sourceSyncRunId, action, requestedChange);
   const generatedKey = deterministicIdempotencyKey(accountId, fingerprint, sourceSyncRunId, action, requestedChange);
   const idempotencyKey = normaliseIdempotencyKey(input.idempotencyKey, generatedKey);
-  const now = options.now ?? new Date();
   const createInput = actionCreateData({ idempotencyKey, actionFingerprint, accountId, campaignId: recommendation.campaignId, attributionKey: recommendation.attributionKey, action, targetType, targetId: recommendation.targetId, targetName: target.name, requestedChange, expectedState, recommendation, evidence: JSON.stringify(evidence), now });
 
   const existing = await db.metaAction.findUnique({ where: { idempotencyKey } });
@@ -842,16 +851,17 @@ async function verifyStoredTarget(db: PrismaClient, row: {
   targetId: string;
   expectedState: string;
   sourceSyncRunId: string | null;
-}): Promise<{ expected: MetaActionExpectedState; current: { status: string; dailyBudgetMinor: number | null } }> {
+}, now: Date): Promise<{ expected: MetaActionExpectedState; current: { status: string; dailyBudgetMinor: number | null } }> {
   if (!validTargetType(row.targetType)) throw new MetaActionError("validation", "Stored Meta action target type is invalid");
   const expected = parseExpectedState(row.expectedState);
   if (!expected) throw new MetaActionError("validation", "Stored Meta action expected state is invalid");
   const latest = await db.syncRun.findFirst({
     where: { accountId: row.accountId, campaignId: row.campaignId, attributionKey: row.attributionKey, status: "SUCCEEDED" },
     orderBy: [{ finishedAt: "desc" }, { startedAt: "desc" }],
-    select: { id: true },
+    select: { id: true, finishedAt: true },
   });
   if (!latest || row.sourceSyncRunId !== latest.id) throw new MetaActionError("stale", "The target has changed since this action was proposed; prepare a fresh action");
+  assertFreshSourceRun(latest, now);
   const target = row.targetType === "ad"
     ? await db.ad.findUnique({ where: { metaId: row.targetId } })
     : await db.adSet.findUnique({ where: { metaId: row.targetId } });
@@ -882,7 +892,8 @@ function validateStoredChange(row: { action: string; targetType: string; request
 export async function executeMetaAction(db: PrismaClient, id: string, options: { env?: ActionEnvironment; provider?: MetaActionProvider; fetchImpl?: typeof fetch; actor?: string; now?: Date } = {}): Promise<MetaActionResult> {
   const config = loadMetaActionConfig(options.env);
   if (!config.accountId) throw new MetaActionError("configuration", "META_AD_ACCOUNT_ID is required before executing Meta actions");
-  await recoverStaleExecutingActions(db, { accountId: config.accountId }, options.now ?? new Date());
+  const now = options.now ?? new Date();
+  await recoverStaleExecutingActions(db, { accountId: config.accountId }, now);
   const initial = await readActionForAccount(db, id, config.accountId, config);
   if (initial.status === "EXECUTED") return { action: parseActionRow(initial), duplicate: true };
   if (initial.status === "FAILED") throw new MetaActionError("conflict", "This Meta action failed and cannot be retried; prepare a fresh action", parseActionRow(initial));
@@ -891,7 +902,6 @@ export async function executeMetaAction(db: PrismaClient, id: string, options: {
   if (!config.requestedWritesEnabled) throw new MetaActionError("disabled", "Meta writes are disabled; no provider call was made", parseActionRow(initial));
   if (!config.writesEnabled) throw new MetaActionError("configuration", "Meta writes are not safely configured; no provider call was made", parseActionRow(initial));
 
-  const now = options.now ?? new Date();
   const claimed = await db.metaAction.updateMany({ where: { id, accountId: config.accountId, campaignId: config.campaignId, attributionKey: config.attributionKey, status: "APPROVED" }, data: { status: "EXECUTING", executingAt: now, error: null } });
   if (claimed.count === 0) {
     const current = await readActionForAccount(db, id, config.accountId, config);
@@ -903,7 +913,7 @@ export async function executeMetaAction(db: PrismaClient, id: string, options: {
   let expectedTarget: { expected: MetaActionExpectedState; current: { status: string; dailyBudgetMinor: number | null } };
   try {
     parsed = validateStoredChange(row, parseExpectedState(row.expectedState) ?? { status: "", dailyBudgetMinor: null }, config);
-    expectedTarget = await verifyStoredTarget(db, row);
+    expectedTarget = await verifyStoredTarget(db, row, now);
     if (parsed.action === "set_adset_daily_budget" && requestBudgetFor(parsed.requested) === expectedTarget.current.dailyBudgetMinor) throw new MetaActionError("stale", "The ad-set already has the requested budget; prepare a fresh action");
     if ((parsed.action === "pause_ad" || parsed.action === "resume_ad") && requestStatusFor(parsed.requested) === expectedTarget.current.status) throw new MetaActionError("stale", "The ad already has the requested status; prepare a fresh action");
   } catch (error) {

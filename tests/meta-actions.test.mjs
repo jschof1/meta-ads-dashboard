@@ -1,4 +1,4 @@
-import test, { afterEach } from "node:test";
+import test, { afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -25,6 +25,10 @@ const migrationPaths = [
   new URL("../prisma/migrations/20260905143000_pr09_approved_meta_actions/migration.sql", import.meta.url),
 ];
 const fixtures = [];
+
+beforeEach((context) => {
+  context.mock.timers.enable({ apis: ["Date"], now: new Date("2026-09-05T12:00:00.000Z") });
+});
 
 async function createDatabase() {
   const directory = await mkdtemp(join(tmpdir(), "meta-ads-pr09-"));
@@ -441,6 +445,33 @@ test("invalid budget bounds fail before a provider call", async () => {
     );
   }
   assert.equal(await db.metaAction.count(), 0);
+});
+
+test("stale successful-sync evidence cannot prepare or execute an approved action", async () => {
+  const freshNow = new Date("2026-09-05T12:00:00.000Z");
+  const staleNow = new Date("2026-09-07T15:00:00.000Z");
+
+  const proposalDb = await createDatabase();
+  const proposalFixture = await seedFixture(proposalDb);
+  await assert.rejects(
+    proposeMetaAction(proposalDb, { recommendationFingerprint: proposalFixture.fingerprint, action: "pause_ad" }, { env: environment(), now: staleNow }),
+    (error) => error instanceof MetaActionError && error.code === "stale" && /evidence is stale/.test(error.message),
+  );
+  assert.equal(await proposalDb.metaAction.count(), 0);
+
+  const executionDb = await createDatabase();
+  const executionFixture = await seedFixture(executionDb);
+  const proposal = await proposeMetaAction(executionDb, { recommendationFingerprint: executionFixture.fingerprint, action: "pause_ad" }, { env: environment(), now: freshNow });
+  await approveMetaAction(executionDb, proposal.action.id, { env: environment(), now: freshNow });
+  await executionDb.syncRun.update({ where: { id: executionFixture.runId }, data: { finishedAt: new Date("2026-09-05T10:00:00.000Z") } });
+  const provider = providerFor({ id: executionFixture.targetId, accountId: ACCOUNT_ID, status: "ACTIVE", dailyBudgetMinor: null });
+  await assert.rejects(
+    executeMetaAction(executionDb, proposal.action.id, { env: environment({ META_WRITES_ENABLED: "true" }), provider: provider.provider, now: staleNow }),
+    (error) => error instanceof MetaActionError && error.code === "stale" && /evidence is stale/.test(error.message),
+  );
+  assert.equal(provider.calls.readAd, 0);
+  assert.equal(provider.calls.updateAdStatus, 0);
+  assert.equal((await executionDb.metaAction.findUnique({ where: { id: proposal.action.id } })).status, "FAILED");
 });
 
 test("stale durable metadata and live account/state mismatches fail closed without a write", async () => {

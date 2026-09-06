@@ -54,7 +54,9 @@ async function invokeAnthropic(request: AiModelRequest, apiKey: string): Promise
   const anthropic = new Anthropic({
     apiKey,
     maxRetries: 0,
-    timeout: 20_000,
+    // First-use structured-output grammar compilation can exceed 20 seconds.
+    // Keep a bounded request below the route's 60-second runtime budget.
+    timeout: 45_000,
   });
   const common = {
     model: configuredModel(),
