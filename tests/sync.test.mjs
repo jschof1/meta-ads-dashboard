@@ -1,4 +1,4 @@
-import test, { after, afterEach, before } from "node:test";
+import test, { after, afterEach, before, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,6 +14,8 @@ const migrationPaths = [
   new URL("../prisma/migrations/20260904210000_pr06_recommendation_engine/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260905120000_pr07_ai_briefings/migration.sql", import.meta.url),
   new URL("../prisma/migrations/20260905133000_pr08_highlevel_attribution/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260905143000_pr09_approved_meta_actions/migration.sql", import.meta.url),
+  new URL("../prisma/migrations/20260905160000_pr10_production_hardening/migration.sql", import.meta.url),
 ];
 const databases = [];
 const originalAccountId = process.env.META_AD_ACCOUNT_ID;
@@ -57,11 +59,32 @@ async function createDatabase() {
 }
 
 afterEach(async () => {
+  mock.restoreAll();
   while (databases.length > 0) {
     const current = databases.pop();
     await current.db.$disconnect();
     await rm(current.directory, { recursive: true, force: true });
   }
+});
+
+test("writes a large Meta snapshot without a bulk Prisma interactive transaction", async () => {
+  const db = await createDatabase();
+  const transaction = db.$transaction.bind(db);
+  const spy = mock.fn((...args) => transaction(...args));
+  db.$transaction = spy;
+  const campaigns = Array.from({ length: 1_000 }, (_, i) => ({ ...metadata.campaigns[0], id: `campaign-${i}` }));
+  // Missing actions creates an explicit warning and skips downstream advisory
+  // persistence, isolating the ingestion transaction count in this check.
+  const { client } = fakeClient({ metadata: { ...metadata, campaigns }, rows: {
+    account: [insight("2026-09-04", { actions: null })], campaign: [], adset: [], ad: [],
+  } });
+  const result = await run(db, client);
+  assert.equal(result.status, "SUCCEEDED");
+  assert.ok(result.warning);
+  assert.equal(spy.mock.callCount(), 1);
+  assert.equal(await db.campaign.count(), 1_000);
+  assert.equal(await db.campaign.count({ where: { lastSeenSyncRunId: result.runId } }), 1_000);
+  assert.equal(await db.dailyInsight.count({ where: { syncRunId: result.runId } }), 1);
 });
 
 const metadata = {
@@ -400,6 +423,73 @@ test("marks a failed refresh without discarding the last successful read model",
   assert.equal(state.meta.lastSyncError.includes("provider unavailable"), false);
   assert.match(state.meta.lastSyncError, /redacted provider diagnostic/);
   assert.equal(state.scorecard.last30.leads, 2);
+});
+
+test("retries an in-flight Meta batch commit instead of returning a fresh historical-only undercount", async () => {
+  const db = await createDatabase();
+  const previousCampaign = process.env.META_CAMPAIGN_ID;
+  const previousAttribution = process.env.META_ATTRIBUTION_WINDOWS;
+  process.env.META_CAMPAIGN_ID = "";
+  process.env.META_ATTRIBUTION_WINDOWS = "7d_click,1d_view";
+  const originalFindMany = db.dailyInsight.findMany;
+  try {
+    const initial = await run(db, fakeClient({ rows: {
+      account: [
+        insight("2026-08-10", {
+          spend: "100.00",
+          actions: [{ action_type: "offsite_conversion.custom.lead", value: "5" }],
+        }),
+        insight("2026-09-04", { spend: "20.00" }),
+      ],
+    } }).client);
+    const baseline = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+    assert.equal(baseline.scorecard.last30.spendCents, 12000);
+    assert.equal(baseline.scorecard.last30.leads, 7);
+
+    let replacement;
+    let racedRows;
+    // Pause after the reader captures successful run IDs, then commit a real
+    // replacement batch. Historical rows retain the first run's ID; refreshed
+    // rows now belong to the new run and disappear from the first read's filter.
+    // Assign directly because Prisma delegate proxies do not support mock.method.
+    db.dailyInsight.findMany = async (...args) => {
+      db.dailyInsight.findMany = originalFindMany;
+      replacement = await run(db, fakeClient({ rows: {
+        account: [insight("2026-09-04", {
+          spend: "30.00",
+          actions: [{ action_type: "offsite_conversion.custom.lead", value: "3" }],
+        })],
+      } }).client, new Date("2026-09-04T12:01:00.000Z"));
+      racedRows = await originalFindMany.apply(db.dailyInsight, args);
+      return racedRows;
+    };
+
+    const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:02:00.000Z") });
+
+    assert.equal(replacement.status, "SUCCEEDED");
+    assert.notEqual(replacement.runId, initial.runId);
+    assert.equal(await db.syncRun.count({ where: { status: "SUCCEEDED" } }), 2);
+    assert.deepEqual(racedRows.map((row) => [row.date, row.spendMinorUnits, row.leads]), [
+      ["2026-08-10", 10000, 5],
+    ]);
+    const stored = await db.dailyInsight.findMany({ orderBy: { date: "asc" } });
+    assert.deepEqual(stored.map((row) => [row.date, row.syncRunId]), [
+      ["2026-08-10", initial.runId],
+      ["2026-09-04", replacement.runId],
+    ]);
+    assert.equal(state.meta.syncState, "fresh");
+    assert.equal(state.meta.currencyCode, "GBP");
+    assert.equal(state.meta.lastSuccessfulSyncRunId, replacement.runId);
+    assert.equal(state.scorecard.last30.spendCents, 13000);
+    assert.equal(state.scorecard.last30.leads, 8);
+    assert.equal(state.scorecard.last30.cplCents, 1625);
+  } finally {
+    db.dailyInsight.findMany = originalFindMany;
+    if (previousCampaign === undefined) delete process.env.META_CAMPAIGN_ID;
+    else process.env.META_CAMPAIGN_ID = previousCampaign;
+    if (previousAttribution === undefined) delete process.env.META_ATTRIBUTION_WINDOWS;
+    else process.env.META_ATTRIBUTION_WINDOWS = previousAttribution;
+  }
 });
 
 test("loads dashboard state from stored data with no Meta client and reports stale data honestly", async () => {

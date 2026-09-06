@@ -18,6 +18,7 @@ import { OperatorHeader } from "@/components/operator-header";
 import { PeriodSelector } from "@/components/period-selector";
 import { RecommendationPanel } from "@/components/recommendation-panel";
 import { MetaActionPanel } from "@/components/meta-action-panel";
+import { SystemDiagnosticsPanel } from "@/components/system-diagnostics-panel";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 
@@ -100,15 +101,18 @@ export default function DashboardHome() {
 
   if (error) {
     return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm">
-        <div className="flex items-center gap-2 mb-2 text-destructive font-medium">
-          <AlertTriangle className="w-4 h-4" /> Failed to load dashboard
+      <>
+        <SystemDiagnosticsPanel />
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm">
+          <div className="flex items-center gap-2 mb-2 text-destructive font-medium">
+            <AlertTriangle className="w-4 h-4" /> Failed to load dashboard
+          </div>
+          <p className="text-foreground/80">{error}</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            The dashboard reads durable stored data. Check the database connection and the server logs for the read-model error.
+          </p>
         </div>
-        <p className="text-foreground/80">{error}</p>
-        <p className="text-xs text-muted-foreground mt-2">
-          The dashboard reads durable stored data. Check the database connection and the server logs for the read-model error.
-        </p>
-      </div>
+      </>
     );
   }
 
@@ -122,6 +126,7 @@ export default function DashboardHome() {
         <p className="text-xs text-muted-foreground">Use the matched comparison to decide where to look next.</p>
       </div>
       <SyncNotice state={state} />
+      <SystemDiagnosticsPanel />
       <DataQualityPanel state={state} period={period} />
       <RecommendationPanel state={state} />
       <MetaActionPanel state={state} />

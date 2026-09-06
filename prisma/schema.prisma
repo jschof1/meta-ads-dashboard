@@ -30,6 +30,15 @@ model Snapshot {
   @@index([capturedAt])
 }
 
+model AuthRateLimit {
+  keyHash   String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+  updatedAt DateTime
+
+  @@index([resetAt])
+}
+
 // One row per ad per day, captured at every cron run (upsert by date+adId).
 model AdDaily {
   id            String  @id @default(cuid())
@@ -248,6 +257,21 @@ model Recommendation {
   @@index([accountId, campaignId, attributionKey, lifecycle])
   @@index([targetId, lastSeenAt])
   @@index([sourceSyncRunId])
+}
+
+// Records observations of an entire recommendation set, including empty sets.
+// Without this watermark a delayed analysis could reintroduce obsolete advice.
+model RecommendationScopeState {
+  id              String   @id
+  accountId       String
+  campaignId      String?
+  attributionKey  String
+  ruleVersion     String
+  observedAt      DateTime
+  sourceSyncRunId String
+  updatedAt       DateTime @updatedAt
+
+  @@index([accountId, campaignId, attributionKey])
 }
 
 // AI output is a durable, scoped snapshot of an explanation generated from

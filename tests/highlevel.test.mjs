@@ -38,10 +38,11 @@ test("uses fixed v3 paths, bearer/version headers, bounded pagination, and ignor
       assert.equal(parsed.origin, "https://services.leadconnectorhq.com");
       assert.equal(new Headers(init.headers).get("Authorization"), "Bearer test-highlevel-token");
       assert.equal(new Headers(init.headers).get("Version"), "v3");
-      if (parsed.pathname === "/opportunities/pipelines/pipeline-1") {
-        return response({ id: "pipeline-1", locationId: "location-1", stages: [
+      if (parsed.pathname === "/opportunities/pipelines") {
+        assert.equal(parsed.searchParams.get("locationId"), "location-1");
+        return response({ pipelines: [{ id: "pipeline-1", locationId: "location-1", stages: [
           { id: "stage-lead" }, { id: "stage-contacted" }, { id: "stage-qualified" }, { id: "stage-booked" }, { id: "stage-attended" },
-        ] });
+        ] }] });
       }
       if (parsed.pathname === "/contacts/search") {
         const body = JSON.parse(init.body);
@@ -71,7 +72,7 @@ test("uses fixed v3 paths, bearer/version headers, bounded pagination, and ignor
   assert.equal(contacts.truncated, false);
   assert.equal(opportunities.truncated, false);
   assert.deepEqual(calls.map((call) => new URL(call.url).pathname), [
-    "/opportunities/pipelines/pipeline-1",
+    "/opportunities/pipelines",
     "/contacts/search",
     "/contacts/search",
     "/opportunities/search",
@@ -97,6 +98,20 @@ test("marks a capped collection as partial when the provider proves or implies m
   assert.equal(contacts.providerTotal, 2);
   assert.equal(opportunities.truncated, true);
   assert.equal(opportunities.providerTotal, null);
+});
+
+test("marks a short provider page as partial when its total proves more rows exist", async () => {
+  const config = loadHighLevelSettings(env({ HIGHLEVEL_MAX_RECORDS: "1000" }));
+  const client = createHighLevelClient({
+    config,
+    maxRetries: 0,
+    fetcher: async () => response({ contacts: Array.from({ length: 20 }, (_, index) => ({ id: `contact-${index}` })), total: 101 }),
+  });
+
+  const contacts = await client.listContacts();
+  assert.equal(contacts.items.length, 20);
+  assert.equal(contacts.providerTotal, 101);
+  assert.equal(contacts.truncated, true);
 });
 
 test("retries transient provider responses without following provider-controlled URLs", async () => {
@@ -158,9 +173,20 @@ test("fails closed on malformed responses and provider errors without exposing t
   const malformedPipeline = createHighLevelClient({
     config,
     maxRetries: 0,
-    fetcher: async () => response({ id: "pipeline-1", locationId: "location-1", stages: [{ id: "stage-lead" }, null] }),
+    fetcher: async () => response({ pipelines: [{ id: "pipeline-1", locationId: "location-1", stages: [{ id: "stage-lead" }, null] }] }),
   });
   await assert.rejects(() => malformedPipeline.getPipeline(), /invalid pipeline/);
+});
+
+test("selects only one exact location-scoped pipeline and rejects missing, duplicate or foreign matches", async () => {
+  const config = loadHighLevelSettings(env());
+  const valid = { id: "pipeline-1", locationId: "location-1", stages: [{ id: "stage-lead" }] };
+  for (const pipelines of [[], [valid, valid], [{ ...valid, locationId: "foreign-location" }], [{ ...valid, id: "another-pipeline" }]]) {
+    const client = createHighLevelClient({ config, maxRetries: 0, fetcher: async () => response({ pipelines }) });
+    await assert.rejects(() => client.getPipeline(), HighLevelApiError);
+  }
+  const client = createHighLevelClient({ config, maxRetries: 0, fetcher: async () => response({ pipelines: [{ ...valid, id: "another-pipeline" }, valid] }) });
+  assert.equal((await client.getPipeline()).id, "pipeline-1");
 });
 
 test("requires the explicit sync gate and rejects a non-v3 configuration", () => {

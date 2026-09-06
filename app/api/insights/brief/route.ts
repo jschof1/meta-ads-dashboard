@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireApiSession } from "@/lib/api-auth";
+import { validateDatabaseEnvironment } from "@/lib/env";
 import { buildDashboardState } from "@/lib/read-model";
 import {
   AiBriefingInputError,
@@ -32,6 +33,9 @@ function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
 export async function GET(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
+  if (validateDatabaseEnvironment().length > 0) {
+    return noStoreJson({ error: "Creative brief unavailable; the database is not configured." }, { status: 503 });
+  }
   try {
     const state = await buildDashboardState();
     const result = await readStoredAiBriefing(prisma, state, "creative");
@@ -55,6 +59,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
+  if (validateDatabaseEnvironment().length > 0) {
+    return noStoreJson({ error: "Creative brief unavailable; the database is not configured." }, { status: 503 });
+  }
   if (!aiEnabled()) {
     return noStoreJson({
       enabled: false,

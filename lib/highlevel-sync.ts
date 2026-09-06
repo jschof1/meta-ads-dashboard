@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { SnapshotWriteBatch } from "@/lib/snapshot-write-batch";
 import { prisma as defaultPrisma } from "@/lib/db";
 import { createHighLevelClient, HighLevelApiError, type HighLevelClient, type HighLevelCollection } from "@/lib/highlevel";
 import { loadHighLevelSettings, type HighLevelSettings } from "@/lib/highlevel-config";
@@ -42,8 +43,6 @@ export type HighLevelSyncOptions = {
   now?: Date;
   clock?: () => Date;
 };
-
-const TRANSACTION_TIMEOUT_MS = 45_000;
 
 function safeErrorMessage(error: unknown, config: HighLevelSettings): string {
   const source = error instanceof Error ? error.message : String(error);
@@ -170,21 +169,11 @@ async function markFailed(db: PrismaClient, runId: string, owner: string | null 
 }
 
 function warningFor(input: {
-  rawContacts: number;
   contacts: NormalizedCrmContact[];
-  rawOpportunities: number;
   opportunities: NormalizedCrmOpportunity[];
-  contactsTruncated: boolean;
-  opportunitiesTruncated: boolean;
-  contactsTotal: number | null;
-  opportunitiesTotal: number | null;
   pipelineWarnings: string[];
 }): string | null {
   const warnings = [...input.pipelineWarnings];
-  if (input.contactsTruncated) warnings.push(`HighLevel contact polling reached HIGHLEVEL_MAX_RECORDS${input.contactsTotal != null ? ` (${input.contactsTotal} provider rows reported)` : ""}; the stored contact snapshot is partial.`);
-  if (input.opportunitiesTruncated) warnings.push(`HighLevel opportunity polling reached HIGHLEVEL_MAX_RECORDS${input.opportunitiesTotal != null ? ` (${input.opportunitiesTotal} provider rows reported)` : ""}; the stored opportunity snapshot is partial.`);
-  if (input.rawContacts !== input.contacts.length) warnings.push(`${input.rawContacts - input.contacts.length} contact row(s) were skipped because the id or location was invalid.`);
-  if (input.rawOpportunities !== input.opportunities.length) warnings.push(`${input.rawOpportunities - input.opportunities.length} opportunity row(s) were skipped because the id, location, pipeline or status was invalid.`);
   const missingDates = input.contacts.filter((contact) => contact.dateAdded == null).length;
   if (missingDates > 0) warnings.push(`${missingDates} contact row(s) have no usable creation date; cohort metrics will exclude them.`);
   const unmapped = input.opportunities.filter((opportunity) => opportunity.semanticStage == null).length;
@@ -205,72 +194,75 @@ async function persistSnapshot(
   opportunitiesFetched: number,
   warning: string | null,
   completedAt: Date,
+  leaseNow?: Date,
 ): Promise<void> {
-  await db.$transaction(async (tx: Prisma.TransactionClient) => {
-    for (const contact of contacts) {
-      await tx.crmContact.upsert({
-        where: { locationId_highLevelId: { locationId: contact.locationId, highLevelId: contact.highLevelId } },
-        create: {
-          ...contact,
-          clickIds: JSON.stringify(contact.clickIds),
-          attribution: JSON.stringify(contact.attribution),
-          sourceSyncRunId: runId,
-        },
-        update: {
-          locationId: contact.locationId,
-          dateAdded: contact.dateAdded,
-          dateUpdated: contact.dateUpdated,
-          attributionGranularity: contact.attributionGranularity,
-          metaAdId: contact.metaAdId,
-          metaCampaignId: contact.metaCampaignId,
-          utmSource: contact.utmSource,
-          utmMedium: contact.utmMedium,
-          utmCampaign: contact.utmCampaign,
-          utmContent: contact.utmContent,
-          clickIds: JSON.stringify(contact.clickIds),
-          attribution: JSON.stringify(contact.attribution),
-          sourceSyncRunId: runId,
-        },
-      });
-    }
-    for (const opportunity of opportunities) {
-      await tx.crmOpportunity.upsert({
-        where: { locationId_pipelineId_highLevelId: { locationId: opportunity.locationId, pipelineId: opportunity.pipelineId, highLevelId: opportunity.highLevelId } },
-        create: { ...opportunity, sourceSyncRunId: runId },
-        update: {
-          locationId: opportunity.locationId,
-          contactId: opportunity.contactId,
-          pipelineId: opportunity.pipelineId,
-          pipelineStageId: opportunity.pipelineStageId,
-          status: opportunity.status,
-          semanticStage: opportunity.semanticStage,
-          valueMajorUnits: opportunity.valueMajorUnits,
-          createdAtProvider: opportunity.createdAtProvider,
-          updatedAtProvider: opportunity.updatedAtProvider,
-          lastStageChangeAt: opportunity.lastStageChangeAt,
-          lastStatusChangeAt: opportunity.lastStatusChangeAt,
-          sourceSyncRunId: runId,
-        },
-      });
-    }
-    const committed = await tx.crmSyncRun.updateMany({
-      where: { id: runId, status: "RUNNING", lockOwner: owner, lockKey: lockKey(config), lockExpiresAt: { gt: completedAt } },
-      data: {
-        status: "SUCCEEDED",
-        finishedAt: completedAt,
-        contactsFetched,
-        opportunitiesFetched,
-        contactsWritten: contacts.length,
-        opportunitiesWritten: opportunities.length,
-        warning,
-        error: null,
-        lockKey: null,
-        lockOwner: null,
-        lockExpiresAt: null,
+  const snapshot = new SnapshotWriteBatch();
+  for (const contact of contacts) {
+    snapshot.upsert("CrmContact", {
+      create: {
+        ...contact,
+        clickIds: JSON.stringify(contact.clickIds),
+        attribution: JSON.stringify(contact.attribution),
+        sourceSyncRunId: runId,
+      },
+      update: {
+        locationId: contact.locationId,
+        dateAdded: contact.dateAdded,
+        dateUpdated: contact.dateUpdated,
+        attributionGranularity: contact.attributionGranularity,
+        metaAdId: contact.metaAdId,
+        metaCampaignId: contact.metaCampaignId,
+        utmSource: contact.utmSource,
+        utmMedium: contact.utmMedium,
+        utmCampaign: contact.utmCampaign,
+        utmContent: contact.utmContent,
+        clickIds: JSON.stringify(contact.clickIds),
+        attribution: JSON.stringify(contact.attribution),
+        sourceSyncRunId: runId,
       },
     });
-    if (committed.count !== 1) throw new Error("The HighLevel sync lease was lost before its data could be committed");
-  }, { maxWait: 5_000, timeout: TRANSACTION_TIMEOUT_MS });
+  }
+  for (const opportunity of opportunities) {
+    snapshot.upsert("CrmOpportunity", {
+      create: { ...opportunity, sourceSyncRunId: runId },
+      update: {
+        locationId: opportunity.locationId,
+        contactId: opportunity.contactId,
+        pipelineId: opportunity.pipelineId,
+        pipelineStageId: opportunity.pipelineStageId,
+        status: opportunity.status,
+        semanticStage: opportunity.semanticStage,
+        valueMajorUnits: opportunity.valueMajorUnits,
+        createdAtProvider: opportunity.createdAtProvider,
+        updatedAtProvider: opportunity.updatedAtProvider,
+        lastStageChangeAt: opportunity.lastStageChangeAt,
+        lastStatusChangeAt: opportunity.lastStatusChangeAt,
+        sourceSyncRunId: runId,
+      },
+    });
+  }
+  await snapshot.commit(db, {
+    table: "CrmSyncRun",
+    id: runId,
+    owner,
+    lockKey: lockKey(config),
+    completedAt,
+    leaseNow,
+    lostLeaseError: new Error("The HighLevel sync lease was lost before its data could be committed"),
+    data: {
+      status: "SUCCEEDED",
+      finishedAt: completedAt,
+      contactsFetched,
+      opportunitiesFetched,
+      contactsWritten: contacts.length,
+      opportunitiesWritten: opportunities.length,
+      warning,
+      error: null,
+      lockKey: null,
+      lockOwner: null,
+      lockExpiresAt: null,
+    },
+  });
 }
 
 export async function syncHighLevel(options: HighLevelSyncOptions = {}): Promise<HighLevelSyncResult> {
@@ -299,19 +291,15 @@ export async function syncHighLevel(options: HighLevelSyncOptions = {}): Promise
     const rawOpportunities = collectionItems(opportunityCollection);
     const contacts = rawContacts.map((raw) => normalizeContact(raw, config)).filter((row): row is NormalizedCrmContact => row != null);
     const opportunities = rawOpportunities.map((raw) => normalizeOpportunity(raw, config)).filter((row): row is NormalizedCrmOpportunity => row != null);
+    assertCompleteCollection(contactCollection, contacts);
+    assertCompleteCollection(opportunityCollection, opportunities);
     const warning = warningFor({
-      rawContacts: rawContacts.length,
       contacts,
-      rawOpportunities: rawOpportunities.length,
       opportunities,
-      contactsTruncated: collectionTruncated(contactCollection),
-      opportunitiesTruncated: collectionTruncated(opportunityCollection),
-      contactsTotal: collectionTotal(contactCollection),
-      opportunitiesTotal: collectionTotal(opportunityCollection),
       pipelineWarnings: config.currencyCode ? [] : ["HIGHLEVEL_CURRENCY_CODE is not configured; attributed revenue and ROAS remain unknown."],
     });
     const completedAt = options.clock?.() ?? new Date();
-    await persistSnapshot(db, run.id, run.lockOwner as string, config, contacts, opportunities, rawContacts.length, rawOpportunities.length, warning, completedAt);
+    await persistSnapshot(db, run.id, run.lockOwner as string, config, contacts, opportunities, rawContacts.length, rawOpportunities.length, warning, completedAt, options.clock?.());
     await heartbeat.stop();
     return {
       runId: run.id,
@@ -331,13 +319,14 @@ export async function syncHighLevel(options: HighLevelSyncOptions = {}): Promise
 }
 
 function collectionItems(collection: HighLevelCollection): Record<string, unknown>[] {
-  return Array.isArray(collection.items) ? collection.items : [];
+  if (!Array.isArray(collection.items)) throw new HighLevelApiError("snapshot", null, "HighLevel returned an invalid collection; the last complete snapshot was retained.");
+  return collection.items;
 }
 
-function collectionTruncated(collection: HighLevelCollection): boolean {
-  return collection.truncated === true;
-}
-
-function collectionTotal(collection: HighLevelCollection): number | null {
-  return typeof collection.providerTotal === "number" ? collection.providerTotal : null;
+function assertCompleteCollection(collection: HighLevelCollection, rows: { highLevelId: string }[]): void {
+  const uniqueCount = new Set(rows.map((row) => row.highLevelId)).size;
+  if (collection.truncated || rows.length !== collection.items.length || uniqueCount !== rows.length
+    || (collection.providerTotal != null && collection.providerTotal > uniqueCount)) {
+    throw new HighLevelApiError("snapshot", null, "HighLevel returned an incomplete snapshot (capped, missing, duplicate or invalid rows); the last complete snapshot was retained. Check pagination, HIGHLEVEL_MAX_RECORDS and provider data before retrying.");
+  }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateCronEnvironment } from "@/lib/env";
+import { validateCronEnvironment, validateDatabaseEnvironment } from "@/lib/env";
 import { HighLevelAlreadyRunningError, syncHighLevel } from "@/lib/highlevel-sync";
 
 export const maxDuration = 60;
@@ -14,6 +14,9 @@ function authorized(request: NextRequest): boolean {
 
 async function handle(request: NextRequest) {
   if (!authorized(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (validateDatabaseEnvironment().length > 0) {
+    return NextResponse.json({ ok: false, error: "HighLevel sync is unavailable; the database is not configured." }, { status: 503 });
+  }
   try {
     const result = await syncHighLevel({ trigger: "cron" });
     return NextResponse.json({ ok: true, ...result }, { status: 200 });
