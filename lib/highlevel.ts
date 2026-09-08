@@ -1,6 +1,5 @@
 import {
   HIGHLEVEL_BASE_URL,
-  HIGHLEVEL_API_VERSION,
   type HighLevelSettings,
 } from "@/lib/highlevel-config";
 
@@ -152,7 +151,7 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
     const url = new URL(boundedPath(path), HIGHLEVEL_BASE_URL).toString();
     const headers = new Headers(init.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
-    headers.set("Version", HIGHLEVEL_API_VERSION);
+    headers.set("Version", options.config.apiVersion);
     headers.set("Accept", "application/json");
     if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
@@ -205,7 +204,7 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
     for (let page = 1; page <= maxPages && result.length < maxRecords; page += 1) {
       const path = kind === "contacts"
         ? "/contacts/search"
-        : `/opportunities/search?locationId=${encodeURIComponent(options.config.locationId as string)}&pipelineId=${encodeURIComponent(options.config.pipelineId as string)}&status=all&limit=${PAGE_SIZE}&page=${page}`;
+        : `/opportunities/search?${options.config.apiVersion === "2021-07-28" ? "location_id" : "locationId"}=${encodeURIComponent(options.config.locationId as string)}&${options.config.apiVersion === "2021-07-28" ? "pipeline_id" : "pipelineId"}=${encodeURIComponent(options.config.pipelineId as string)}&status=all&limit=${PAGE_SIZE}&page=${page}`;
       const payload = await request(path, operation, kind === "contacts"
         ? { method: "POST", body: JSON.stringify({ locationId: options.config.locationId, page, pageLimit: PAGE_SIZE }) }
         : { method: "GET" });
