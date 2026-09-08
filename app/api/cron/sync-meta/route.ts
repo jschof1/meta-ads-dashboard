@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateCronEnvironment } from "@/lib/env";
+import { validateCronEnvironment, validateDatabaseEnvironment } from "@/lib/env";
 import { SyncAlreadyRunningError, syncMeta } from "@/lib/sync";
 
 export const maxDuration = 60;
@@ -15,6 +15,9 @@ function authorized(request: NextRequest): boolean {
 async function handle(request: NextRequest) {
   if (!authorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (validateDatabaseEnvironment().length > 0) {
+    return NextResponse.json({ ok: false, error: "Meta sync is unavailable; the database is not configured." }, { status: 503 });
   }
   try {
     return NextResponse.json({ ok: true, ...(await syncMeta({ trigger: "cron" })) });

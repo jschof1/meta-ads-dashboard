@@ -1,18 +1,19 @@
 # UK Trade Leads Meta Ads Command Centre
 
-This is a private Next.js application for the UK Trade Leads operating team. It stores Meta acquisition data, reports it in the account currency and timezone, and keeps downstream CRM outcomes separate until they are evidenced.
+Private, single-business operator software for UK Trade Leads. It stores Meta
+acquisition data, produces deterministic evidence and recommendations, and
+keeps HighLevel outcomes separate until they are actually evidenced. It is
+not a multi-client SaaS, client portal, CRM replacement, or generic Ads
+Manager clone.
 
-## Before you start
-
-You need:
+## Prerequisites
 
 - Node.js 20 or newer and npm.
-- A Meta Business account and ad account.
-- A server-side Meta read token with the required read permissions.
-- A private database for production, such as libSQL/Turso.
-- An Anthropic key only if the optional AI briefing is wanted.
-
-The application is single-business by design. It has no tenant switcher, client portal, or admin panel.
+- A private Meta Business/ad account and a server-side read token for live
+  ingestion. Local tests use fixtures and do not need Meta credentials.
+- A private libSQL/Turso database for production. Local development uses
+  SQLite.
+- A Vercel project only for deployment. Anthropic and HighLevel are optional.
 
 ## Local setup
 
@@ -24,68 +25,192 @@ cp .env.example .env.local
 cp public/plan.md.template public/plan.md
 ```
 
-Set these values in `.env.local`:
+Fill `.env.local` with a strong private dashboard password, unique
+`AUTH_SECRET` and `CRON_SECRET` values of at least 32 characters, and local
+database/Meta values. `DATABASE_URL=file:./dev.db` is the local default.
+Never commit `.env.local` or put credentials in `public/plan.md`.
 
-1. `DASHBOARD_PASSWORD` - a strong private password.
-2. `AUTH_SECRET` - a random value of at least 32 characters.
-3. `CRON_SECRET` - a different random value of at least 32 characters.
-4. `DATABASE_URL=file:./dev.db` for local SQLite.
-5. `META_MARKETING_TOKEN` - keep this server-side and never commit it.
-6. `META_AD_ACCOUNT_ID` - the account ID from Meta Ads Manager.
-
-Optional values are documented in `.env.example`. Use `META_CAMPAIGN_ID` only when the view should be restricted to one campaign. Use `META_PRIMARY_RESULT_ACTION_TYPE` when the account returns more than one possible lead-result action. Add `META_CAMPAIGN_LAUNCH_DATE` only when the date is known.
-
-Apply the database migrations and start the app:
+Apply the committed local schema and start the app:
 
 ```bash
-npx prisma migrate deploy
+DATABASE_URL="file:$PWD/dev.db" npx prisma migrate deploy
 npm run dev
 ```
 
-Open `http://localhost:3000`, sign in, and use `Sync now` after the Meta read configuration is complete. The first successful run stores the initial historical window. Subsequent runs refresh recent days to account for delayed results.
+Run this from the repository root. Prisma CLI does not load `.env.local` and
+resolves relative SQLite paths from its schema directory. The explicit absolute
+URL targets the same root-level `dev.db` used by the runtime adapter. If you use
+a different local database, supply that same absolute URL to both commands.
 
-## UKTL configuration
+Open `http://localhost:3000`, sign in, and use `Sync now` only after the Meta
+read configuration is complete. A page load reads the database and does not
+call Meta. The first successful sync stores the initial historical window;
+later runs refresh recent days so delayed results can be incorporated.
 
-`lib/uktl-config.ts` is the typed source for:
+## Configuration contract
 
-- UK Trade Leads naming and `en-GB` locale.
-- The conversion vocabulary: lead, contacted, qualified, call booked, call attended, won customer, and lost.
-- Optional CPL, CPM, link CTR, budget, CAC, learning, and decision-gate inputs.
-- Evidence minimums and frequency diagnostics.
-- The secret-free UKTL operating brief used by the plan panel and optional AI features.
+Required for a normal configured environment:
 
-The shipped economic fields are `null`. This is intentional. Do not invent targets, budget caps, customer value, revenue, or return assumptions. When a target is absent, the dashboard says `Target not set` and continues to compare matched historical periods.
+- `DASHBOARD_PASSWORD`, `AUTH_SECRET`, `CRON_SECRET`.
+- `DATABASE_URL` locally, or `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` for
+  the remote libSQL runtime.
+- `META_MARKETING_TOKEN` and `META_AD_ACCOUNT_ID` for Meta reads.
 
-Currency and timezone are read from the successful Meta sync. Values are formatted with `Intl.NumberFormat` using `en-GB`; if the account currency is unavailable, the dashboard says `Currency pending`.
+Useful Meta values are `META_CAMPAIGN_ID`,
+`META_ATTRIBUTION_WINDOWS` (default `7d_click,1d_view`),
+`META_PRIMARY_RESULT_ACTION_TYPE`, `META_CUSTOM_CONVERSION_ID`,
+`META_GRAPH_VERSION` (default `v25.0`), and
+`META_CAMPAIGN_LAUNCH_DATE`. The account currency and timezone come from the
+successful Meta sync; the UI uses `en-GB` formatting and says `Currency pending`
+when Meta has not supplied a currency.
 
-Edit `public/plan.md` only with approved UKTL context. Never put credentials, access tokens, personal data, or unverified business figures in the brief.
+Targets and budgets are typed UKTL configuration inputs, not environment
+defaults. They remain `null` until Jack supplies an approved business value.
+The app never invents CPL, CAC, budget, revenue, or ROAS assumptions.
 
-## What the operator sees
+## Meta result setup
 
-- Spend, CPL, CPM, link CTR, frequency, and historical trend context.
-- Creative rows sorted by CPL with verdicts that stay early or unknown when evidence or targets are missing.
-- A conversion path from Meta impressions and leads into the CRM stages. CRM stages remain unknown until a supported integration provides them.
-- An action log for recorded operations. Meta writes remain disabled until the later approval-gated implementation.
-- Optional AI summaries and creative briefs grounded in the stored state and operating brief.
+The sync records the result action types returned by Meta and does not assume
+that every account's lead event is called `lead`, `registration`, or `complete
+registration`. After configuring a read token, use the authenticated
+`/api/meta/diagnostic` endpoint in a controlled operator session. Inspect the
+redacted action-type diagnostics and set `META_PRIMARY_RESULT_ACTION_TYPE`
+only when the account's real lead result is known. If the result is ambiguous,
+leave the lead count unknown and resolve the mapping in Meta rather than
+guessing.
 
-The dashboard does not call Meta during page loads. It reads the durable database. A failed sync preserves the last successful read model and reports the failure without converting it to zero performance.
+## Optional AI and HighLevel
 
-## Production deployment
+`ANTHROPIC_API_KEY` enables persisted AI explanations and metadata-only
+creative briefs. AI reads server-side stored evidence, is schema-validated,
+and cannot execute Meta actions. Without the key, deterministic metrics and
+recommendations continue to work.
 
-For Vercel, use a private project and a production libSQL/Turso database:
+HighLevel is read-only and disabled by default. Enable it only when the
+private token, UKTL location, pipeline, every explicit stage ID,
+`HIGHLEVEL_WON_STATUS` and `HIGHLEVEL_LOST_STATUS` are
+confirmed. Then set `HIGHLEVEL_SYNC_ENABLED=true`. The cron preserves the last
+successful CRM snapshot on failure and stores bounded normalized attribution,
+not contact PII or full provider payloads. An HTTP success does not prove the
+mapping is right; sample provider IDs and stages during live validation.
+Set `HIGHLEVEL_CURRENCY_CODE` separately to enable monetary results; complete
+funnel counts remain usable without a currency mapping.
 
-1. Create the database and server-side auth token through your database provider.
-2. Apply the committed migration SQL using the provider's supported migration workflow.
-3. Set the values in `.env.example` as Vercel environment variables. Do not expose tokens to client-side code.
-4. Deploy from the merged `main` branch.
-5. Configure the scheduled request to `/api/cron/sync-meta` with the bearer secret represented by `CRON_SECRET`.
-6. Verify a successful sync response and then verify the authenticated dashboard in a browser.
+## Syncs, diagnostics, and failure visibility
 
-For an existing database, take a recoverable backup before applying migrations. If the database was created by an earlier schema workflow, apply the migration once and mark it applied in Prisma's migration ledger. Do not use destructive schema resets against production.
+- Meta manual sync: authenticated `POST /api/refresh` or the dashboard
+  control.
+- Meta cron: Vercel `GET /api/cron/sync-meta` (the route also accepts POST for
+  local/manual checks).
+- HighLevel cron: Vercel `GET /api/cron/sync-highlevel` (the route also accepts
+  POST for local/manual checks).
+- Authenticated system diagnostics: `GET /api/diagnostics`.
+- Authenticated live Meta read diagnostic: `GET /api/meta/diagnostic`.
+
+The dashboard reads stored `SyncRun`/`DailyInsight` data. Missing fields stay
+`null`, real zeroes stay zero, and a failed/stale provider run does not erase
+or fabricate the last successful read model. The diagnostics panel reports
+database reachability, migration state, configuration presence, stored sync
+freshness, optional provider state, and the Meta action gate without secrets.
+
+Vercel cron schedules are configured for 06:00 UTC for Meta and 06:30 UTC for
+HighLevel. Vercel sends the configured `CRON_SECRET` as the cron request's
+bearer authorization header; do not put the secret in a URL. On Vercel Hobby,
+daily jobs may run at any point within their scheduled hour, so verify the
+actual invocation in Vercel logs. Cron configuration changes require a new
+deployment.
+
+## Approval-gated Meta actions
+
+`META_WRITES_ENABLED=false` is the safe default. The app can prepare and
+persist a proposal, but execution returns disabled before constructing a
+provider or making a network call. The supported allowlist is pause/resume ad
+and measured ad-set daily-budget increases. Each action requires a stored
+recommendation, an authenticated operator, separate approval, live-state
+verification, one bounded provider POST, read-after-write verification, and a
+durable audit row.
+
+Do not enable live writes during an ordinary deployment or browser smoke test.
+Live mutation validation requires Jack's explicit approval, suitable Meta
+advertiser permissions, server-only token configuration, and both
+`META_ACTION_MAX_DAILY_BUDGET_MINOR` and
+`META_ACTION_MAX_BUDGET_CHANGE_PERCENT`. Provider failures are terminal and
+are never automatically retried.
+
+## Production: Vercel and Turso
+
+Create a private Vercel project and a production Turso database. The Turso
+CLI's normal provisioning shape is:
+
+```bash
+turso db create <database-name>
+turso db show <database-name> --url
+turso db tokens create <database-name>
+```
+
+Store the returned URL/token in Vercel Production as
+`TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN`. Set the auth, Meta, and optional
+provider values server-side. `DATABASE_URL` is the local Prisma SQLite URL;
+the application selects `TURSO_DATABASE_URL` first at runtime. The repository's
+install/build wrappers supply a local SQLite schema URL to Prisma Client
+generation, so Vercel does not need a production `DATABASE_URL`; Vercel's
+filesystem must not be used as application storage.
+
+Remote Turso/libSQL uses HTTP and must not be passed to Prisma Migrate. Prisma
+documents that remote HTTP libSQL is incompatible with Prisma Migrate. After
+taking a recoverable backup, apply the committed remote SQL with:
+
+```bash
+TURSO_DATABASE_URL='libsql://…' \
+TURSO_AUTH_TOKEN='…' \
+TURSO_MIGRATION_CONFIRM=yes \
+npm run db:migrate:turso
+```
+
+The utility verifies migration checksums, writes the Prisma-compatible ledger,
+applies each pending migration in an atomic non-interactive write batch, and is
+idempotent. It refuses to guess a baseline for an existing table set with no
+ledger. If the read-only inspector reports that such a legacy schema is
+compatible with the selected committed migration version, record its ledger
+only after an explicit review:
+
+```bash
+TURSO_DATABASE_URL='libsql://…' \
+TURSO_AUTH_TOKEN='…' \
+TURSO_MIGRATION_CONFIRM=yes \
+TURSO_BASELINE_CONFIRM=yes \
+npm run db:baseline:turso
+```
+
+The guarded baseline utility validates table SQL, columns, defaults,
+constraints, indexes and foreign keys, then records only the migration ledger
+in one atomic batch; it does not alter application tables or rows. Set
+`TURSO_BASELINE_THROUGH` to an exact earlier migration name when the legacy
+schema predates the current release, then run the normal migration command for
+the remaining changes. Follow
+[`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md) for the explicit
+legacy-schema and recovery procedure. Do not use `prisma migrate reset` in
+production. See the [Prisma Turso guide](https://docs.prisma.io/docs/orm/v6/overview/databases/turso)
+and [Turso's Prisma guidance](https://docs.turso.tech/sdk/ts/orm/prisma).
+
+Deploy only the merged `main` commit after migration. Sign in, verify
+`/api/diagnostics`, verify a protected dashboard read, and confirm the Vercel
+cron invocations create the expected durable sync rows. Record exact dates,
+timezone, attribution window, action type, metrics and discrepancies when
+manually reconciling against Meta Ads Manager. A production deployment is not
+reconciled merely because it returned HTTP 200.
+
+## UKTL data rules
+
+The authoritative domain configuration is `lib/uktl-config.ts`. The funnel is
+lead → contacted → qualified → call booked → call attended → won customer,
+with lost shown separately. Meta-reported leads are not CRM contacts or
+customers. Revenue/ROAS stays unknown unless opportunity values, currency and
+attribution are all evidenced. Never turn missing provider data into a zero.
 
 ## Verification
 
-Run the repository gates locally:
+Run the full local gate:
 
 ```bash
 npm ci
@@ -93,13 +218,18 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm audit --omit=dev --audit-level=high
+npx playwright install chromium
+npm run test:browser
 ```
 
-Also verify in a browser that unauthenticated requests are rejected, an authenticated empty database shows unknown values rather than zeros, a successful sync populates stored data, and the account currency and timezone are visible in the formatted output.
-
-## Safety boundary
-
-- Never commit `.env.local` or provider credentials.
-- Missing Meta fields remain unknown; a provider error is not zero performance.
-- Meta actions are not autonomous. `META_WRITES_ENABLED` stays false until the explicit safety gate for that delivery stage.
-- CRM attribution must remain honest about its granularity. A Meta lead is not automatically a qualified lead or a customer.
+The browser command tests the built app with `next start` against an isolated
+official libSQL server over TLS, using a temporary JWT and a small synthetic
+UKTL/GBP fixture. It verifies remote migrations, secure cookies, stored metrics,
+diagnostics, approval UI, disabled Meta execution, and production rejection of
+local-only storage. It requires macOS/Linux arm64/x64, OpenSSL, curl and tar;
+the server download is checksum-pinned. Evidence is retained at the printed
+temporary path, while the temporary database and runtime files are removed.
+Keep live provider accounts out of routine smoke tests. The separate opt-in
+`npm run validate:anthropic` command requires a secure key and
+`ANTHROPIC_VALIDATION_CONFIRM=yes`; it performs a billable synthetic-data check.

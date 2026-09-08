@@ -4,6 +4,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { rm } from "node:fs/promises";
 import { setTimeout as wait } from "node:timers/promises";
 import { createPrismaClient } from "../lib/db.ts";
+import { createSessionToken, SESSION_COOKIE } from "../lib/session.ts";
 
 const root = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const nextBin = new URL("../node_modules/next/dist/bin/next", import.meta.url).pathname;
@@ -15,6 +16,11 @@ const cronSecret = "route-test-cron-secret-that-is-at-least-32-characters";
 const routeAccountId = "act_route-test-account";
 const routeAttributionKey = "7d_click,1d_view";
 const databasePath = `${root}/route-tests-${process.pid}.db`;
+const safeEnvironment = Object.fromEntries(
+  ["PATH", "HOME", "USERPROFILE", "CI", "LANG", "LC_ALL", "TMPDIR"]
+    .filter((name) => process.env[name] !== undefined)
+    .map((name) => [name, process.env[name]]),
+);
 
 let server;
 let serverOutput = "";
@@ -81,7 +87,7 @@ function routeEvidence() {
 
 async function seedActionRouteFixtures() {
   seedDb = createPrismaClient({ url: `file:${databasePath}` });
-  const now = new Date("2026-09-05T12:00:00.000Z");
+  const now = new Date();
   const runId = "route-test-sync-run";
   await seedDb.syncRun.create({
     data: {
@@ -91,8 +97,20 @@ async function seedActionRouteFixtures() {
       trigger: "route-test",
       status: "SUCCEEDED",
       attributionKey: routeAttributionKey,
-      startedAt: new Date("2026-09-05T11:59:00.000Z"),
+      startedAt: new Date(now.getTime() - 60_000),
       finishedAt: now,
+    },
+  });
+  await seedDb.syncRun.create({
+    data: {
+      id: "route-test-unrelated-sync-run",
+      accountId: "act_unrelated-account",
+      campaignId: null,
+      trigger: "route-test",
+      status: "SUCCEEDED",
+      attributionKey: routeAttributionKey,
+      startedAt: new Date("2030-01-01T11:59:00.000Z"),
+      finishedAt: new Date("2030-01-01T12:00:00.000Z"),
     },
   });
   for (const suffix of ["approve", "reject", "missing-token"]) {
@@ -138,6 +156,7 @@ async function seedActionRouteFixtures() {
       },
     });
   }
+  return now;
 }
 
 async function get(path, options = {}) {
@@ -148,7 +167,7 @@ async function startServer(overrides = {}) {
   execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["prisma", "migrate", "deploy", "--schema", "prisma/schema.prisma"], {
     cwd: root,
     env: {
-      ...process.env,
+      ...safeEnvironment,
       RUST_LOG: "info",
       DATABASE_URL: `file:${databasePath}`,
       TURSO_DATABASE_URL: "",
@@ -159,10 +178,12 @@ async function startServer(overrides = {}) {
   server = spawn(process.execPath, [nextBin, "dev", "--hostname", "127.0.0.1", "--port", String(port)], {
     cwd: root,
     env: {
-      ...process.env,
+      ...safeEnvironment,
       NODE_ENV: "development",
       NEXT_TELEMETRY_DISABLED: "1",
       DATABASE_URL: `file:${databasePath}`,
+      TURSO_DATABASE_URL: "",
+      TURSO_AUTH_TOKEN: "",
       DASHBOARD_PASSWORD: dashboardPassword,
       AUTH_SECRET: authSecret,
       CRON_SECRET: cronSecret,
@@ -173,6 +194,7 @@ async function startServer(overrides = {}) {
       META_ACTION_MAX_BUDGET_CHANGE_PERCENT: "20",
       ANTHROPIC_API_KEY: "",
       HIGHLEVEL_TOKEN: "",
+      HIGHLEVEL_PRIVATE_INTEGRATION_TOKEN: "",
       HIGHLEVEL_SYNC_ENABLED: "false",
       AIRTABLE_ENABLED: "false",
       ...overrides,
@@ -259,6 +281,7 @@ test("protected APIs reject requests without a session", async () => {
     ["GET", "/api/plan"],
     ["GET", "/api/dashboard/state"],
     ["GET", "/api/health"],
+    ["GET", "/api/diagnostics"],
     ["GET", "/api/meta/diagnostic"],
     ["GET", "/api/insights/summary"],
     ["GET", "/api/insights/brief"],
@@ -357,9 +380,22 @@ test("authenticated dashboard, health, manual refresh, cron POST, and diagnostic
 
   const healthResponse = await get("/api/health", { headers: { cookie } });
   assert.equal(healthResponse.status, 200);
+  assert.equal(healthResponse.headers.get("cache-control"), "private, no-store");
   const health = await healthResponse.json();
   assert.equal(health.database, "reachable");
   assert.equal(health.sync.status, "never");
+
+  const diagnosticsResponse = await get("/api/diagnostics", { headers: { cookie } });
+  assert.equal(diagnosticsResponse.status, 200);
+  assert.equal(diagnosticsResponse.headers.get("cache-control"), "private, no-store");
+  const diagnostics = await diagnosticsResponse.json();
+  assert.equal(diagnostics.database.status, "ok");
+  assert.equal(diagnostics.migrations.status, "ok");
+  assert.equal(diagnostics.meta.configuration, "not_configured");
+  assert.equal(diagnostics.meta.actionGate.status, "disabled");
+  assert.equal(diagnostics.ai.status, "not_configured");
+  assert.equal(JSON.stringify(diagnostics).includes("route-test-auth"), false);
+  assert.equal(JSON.stringify(diagnostics).includes("META_MARKETING_TOKEN"), false);
 
   const refresh = await get("/api/refresh", { method: "POST", headers: { cookie } });
   assert.equal(refresh.status, 500);
@@ -394,7 +430,7 @@ test("login rate limiting returns 429 after five failed attempts", async () => {
 });
 
 test("authenticated action routes require a proposal, approval, and server-side execution gate", async () => {
-  await seedActionRouteFixtures();
+  const fixtureTime = await seedActionRouteFixtures();
   const login = await get("/api/auth", {
     method: "POST",
     headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.20" },
@@ -403,6 +439,10 @@ test("authenticated action routes require a proposal, approval, and server-side 
   assert.equal(login.status, 200);
   const cookie = login.headers.get("set-cookie")?.match(/uktl_dashboard_session=[^;]+/)?.[0];
   assert.ok(cookie);
+
+  const scopedHealth = await get("/api/health", { headers: { cookie } });
+  assert.equal(scopedHealth.status, 200);
+  assert.equal((await scopedHealth.json()).sync.lastSyncAt, fixtureTime.toISOString());
 
   const proposalResponse = await get("/api/actions", {
     method: "POST",
@@ -482,4 +522,36 @@ test("enabled action routes fail closed when the server token is missing", async
   assert.equal(payload.action.status, "APPROVED");
   assert.equal((await get("/api/actions", { headers: { cookie } })).status, 200);
   assert.equal((await (await get("/api/actions", { headers: { cookie } })).json()).gate.status, "misconfigured");
+});
+
+test("durable-data routes fail closed instead of using a local fallback when the database is unconfigured", async () => {
+  await stopServer();
+  await startServer({ DATABASE_URL: "", TURSO_DATABASE_URL: "", TURSO_AUTH_TOKEN: "" });
+
+  const login = await get("/api/auth", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-forwarded-for": "198.51.100.22" },
+    body: JSON.stringify({ password: dashboardPassword }),
+  });
+  assert.equal(login.status, 503);
+  assert.equal((await login.json()).error, "Authentication is not configured");
+
+  const cookie = [SESSION_COOKIE, await createSessionToken(authSecret)].join("=");
+  const health = await get("/api/health", { headers: { cookie } });
+  assert.equal(health.status, 503);
+  const healthPayload = await health.json();
+  assert.equal(healthPayload.configuration.database, "misconfigured");
+  assert.equal(healthPayload.database, "unreachable");
+
+  for (const [method, path] of [["GET", "/api/dashboard/state"], ["GET", "/api/actions"], ["POST", "/api/refresh"]]) {
+    const response = await get(path, {
+      method,
+      headers: { cookie, ...(method === "POST" ? { "content-type": "application/json" } : {}) },
+      body: method === "POST" ? "{}" : undefined,
+    });
+    assert.equal(response.status, 503, method + " " + path);
+  }
+
+  const cron = await get("/api/cron/sync-meta", { headers: { authorization: "Bearer " + cronSecret } });
+  assert.equal(cron.status, 503);
 });

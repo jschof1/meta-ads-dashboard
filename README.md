@@ -14,6 +14,7 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 - A secret-free UKTL operating brief at `public/plan.md.template`, loaded by the operator brief panel when `public/plan.md` exists.
 - Recorded action log entries and an approval-gated Meta action panel. Recommendations remain suggestions until an operator prepares the exact change, approves it, and submits a separate execution request.
 - Deterministic recommendations computed after a successful sync, persisted with a versioned evidence snapshot, and read back by the authenticated dashboard. Only an open `pause_candidate` for an ad or `scale_candidate` for an ad set can prepare the narrow allowlisted actions.
+- An authenticated system diagnostics panel covering database reachability, migration state, stored-sync freshness, optional provider configuration, and the disabled Meta action gate without exposing secrets.
 
 Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
@@ -31,11 +32,15 @@ cp .env.example .env.local
 # Fill in private values in .env.local
 cp public/plan.md.template public/plan.md
 
-DATABASE_URL="file:./dev.db" npx prisma migrate deploy
+DATABASE_URL="file:$PWD/dev.db" npx prisma migrate deploy
 npm run dev
 ```
 
 Open `http://localhost:3000` and sign in with `DASHBOARD_PASSWORD`.
+
+Run the migration command from the repository root. Its absolute URL keeps
+Prisma CLI and the runtime adapter on the same database; Prisma does not load
+`.env.local`, and its relative SQLite paths resolve from the schema directory.
 
 To request a manual Meta sync after the server is running, sign in and use the authenticated `Sync now` dashboard control.
 
@@ -66,7 +71,8 @@ Required:
 - `DASHBOARD_PASSWORD` - password for the private dashboard.
 - `AUTH_SECRET` - at least 32 random characters for signed sessions.
 - `CRON_SECRET` - at least 32 random characters for the protected cron endpoint.
-- `DATABASE_URL` - libSQL connection string, or `file:./dev.db` locally.
+- `DATABASE_URL` - local SQLite URL, normally `file:./dev.db`.
+- `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` - production remote libSQL/Turso URL and server token; the runtime selects these before `DATABASE_URL`.
 - `META_MARKETING_TOKEN` - server-side Meta read token.
 - `META_AD_ACCOUNT_ID` - Meta account ID, with or without the `act_` prefix.
 
@@ -82,6 +88,7 @@ Optional:
 - `META_WRITES_ENABLED` - exact `true` is required before a server-side Meta mutation is even considered; keep `false` by default.
 - `META_ACTION_MAX_DAILY_BUDGET_MINOR` - required when writes are enabled; positive absolute daily-budget cap in the Meta account's minor units.
 - `META_ACTION_MAX_BUDGET_CHANGE_PERCENT` - optional positive bound, default `20`; it limits the absolute ad-set budget delta from the approved live value.
+- Login attempts are HMAC-keyed and atomically rate-limited in the durable database; the source IP is never stored. A database/schema failure fails authentication closed.
 - `ANTHROPIC_API_KEY` - enables the optional persisted AI briefing and creative brief features.
 - `ANTHROPIC_MODEL` - optional Anthropic model identifier; the application uses its dated default when omitted.
 
@@ -93,10 +100,10 @@ HighLevel CRM attribution is optional and read-only:
 - `HIGHLEVEL_WON_STATUS` and `HIGHLEVEL_LOST_STATUS` - exact provider status values for terminal outcomes.
 - `HIGHLEVEL_META_AD_ID_FIELD_ID` and `HIGHLEVEL_META_CAMPAIGN_ID_FIELD_ID` - optional explicit custom-field IDs used to attribute a CRM contact to a Meta ad or campaign. Provider-marked `meta`/`facebook` ad or campaign IDs are also accepted; UTM campaign names are not treated as Meta IDs.
 - `HIGHLEVEL_CURRENCY_CODE` - explicit currency used to interpret opportunity values. Revenue and ROAS stay unknown or incomplete when it is absent, mismatched with Meta, or values are missing.
-- `HIGHLEVEL_SYNC_ENABLED` - an explicit `true` gate before any HighLevel provider call. It defaults to `false`; no live access is currently configured.
+- `HIGHLEVEL_SYNC_ENABLED` - an explicit `true` gate before scheduled HighLevel polling. It defaults to `false`; the application's production mapping/token are not configured.
 - `HIGHLEVEL_SYNC_LEASE_SECONDS` and `HIGHLEVEL_MAX_RECORDS` - bounded polling lease and record cap.
 
-The adapter uses the current HighLevel v3 read contracts: [Search Contacts](https://marketplace.gohighlevel.com/docs/ghl/contacts/search-contacts-advanced), [Search Opportunity](https://marketplace.gohighlevel.com/docs/ghl/opportunities/search-opportunity), and [Get Pipeline](https://marketplace.gohighlevel.com/docs/ghl/opportunities/get-pipeline/). Contacts are queried with a bounded page body because the current contact-search reference does not publish a complete response schema; live validation must confirm the account's response shape before enabling the cron. The scheduled route is `/api/cron/sync-highlevel` at 06:30 UTC, protected by `CRON_SECRET`. Each run is recoverable: it records an audit row, uses a location/pipeline lease, writes only normalized fields, preserves the last successful snapshot on failure, and never deletes records.
+The adapter uses the current HighLevel v3 read contracts: [Search Contacts](https://marketplace.gohighlevel.com/docs/ghl/contacts/search-contacts-advanced), [Search Opportunity](https://marketplace.gohighlevel.com/docs/ghl/opportunities/search-opportunity), and [Get Pipelines](https://marketplace.gohighlevel.com/docs/ghl/opportunities/get-pipelines/). Contact and opportunity pagination was validated read-only against UKTL on 6 September 2026; the business stage mapping still needs confirmation. The pipeline list must contain exactly one matching ID in the configured location. The scheduled route is `/api/cron/sync-highlevel` at 06:30 UTC, protected by `CRON_SECRET`. Each run records an audit row, uses a location/pipeline lease, writes only normalized fields, preserves the last complete snapshot on capped/missing/invalid provider rows or other failures, and never deletes records. Aggregates from incomplete legacy snapshots remain unknown, not zero.
 
 CRM dashboard metrics use a 30-day contact-created cohort in the account timezone. Rates use distinct CRM contacts and the best mapped opportunity snapshot for each contact; Meta leads remain a separate reported count. Revenue/ROAS is shown only when the configured HighLevel currency matches the Meta account currency and all relevant won values are known. Attribution labels are `Meta ad`, `Meta campaign`, `Paid Meta`, and `Unattributed`. The normalized snapshot stores provider IDs and bounded attribution metadata only; raw contact email, name, phone and full provider payloads are never stored.
 
@@ -104,15 +111,94 @@ Targets and budgets are not environment defaults. They live in the typed UKTL co
 
 ## Production deploy
 
-Use a private Vercel project and a production libSQL/Turso database. With the production `DATABASE_URL` configured, apply all committed migrations before serving the app:
+Use a private Vercel project and a production libSQL/Turso database. Set
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as server-only Vercel Production
+variables. The runtime selects the Turso URL before the local Prisma
+`DATABASE_URL` value.
+
+The repository's install/build wrappers supply a local SQLite schema URL to
+Prisma Client generation, so a Vercel build does not need a `DATABASE_URL`
+value. It is not production storage: the runtime always selects
+`TURSO_DATABASE_URL` first, and Vercel's filesystem must not be used as the
+application's database.
 
 ```bash
-npx prisma migrate deploy
+TURSO_DATABASE_URL='libsql://…' \
+TURSO_AUTH_TOKEN='…' \
+TURSO_MIGRATION_CONFIRM=yes \
+npm run db:migrate:turso
 ```
 
-Set the environment values from `.env.example` in Vercel. Keep all tokens server-side. Configure the Vercel cron to call `/api/cron/sync-meta` with the bearer value represented by `CRON_SECRET`; when the HighLevel read-only gate is configured, enable `/api/cron/sync-highlevel` with the same protected bearer and verify both responses are successful stored syncs before treating the deployment as live. HighLevel remains safely disabled when its explicit gate is false or its mapping/token is incomplete.
+Take a recoverable backup before applying migrations. The migration utility
+uses committed SQL, verifies checksums against the existing ledger, applies
+pending migrations in a write transaction, and is idempotent. It refuses to
+guess a baseline when application tables exist without `_prisma_migrations`.
+For a compatible legacy schema, inspect it and record the ledger with the
+guarded command below only after an explicit review:
 
-For an existing database created with an earlier schema workflow, take a recoverable backup, apply the migration SQL once, and record the migration as applied with Prisma. Do not overwrite a production database to repair drift.
+```bash
+TURSO_DATABASE_URL='libsql://…' \
+TURSO_AUTH_TOKEN='…' \
+TURSO_MIGRATION_CONFIRM=yes \
+TURSO_BASELINE_CONFIRM=yes \
+npm run db:baseline:turso
+```
+
+The baseline command validates table SQL, columns, defaults, constraints,
+indexes and foreign keys, then writes only the ledger in one atomic batch. It
+does not alter application tables or rows. Set `TURSO_BASELINE_THROUGH` to an
+exact earlier migration name when the legacy schema predates the current
+release; run the normal migration command afterward for the remaining changes.
+Do not run Prisma Migrate against a
+remote Turso/libSQL HTTP URL and do not use a production reset. See
+[`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md) for the controlled
+procedure and recovery steps.
+
+Set the remaining values from `.env.example` in Vercel and keep all tokens
+server-side. The committed Vercel schedules are configured for Meta at 06:00
+UTC and HighLevel at 06:30 UTC. Vercel invokes cron routes with `GET` and
+supplies the configured `CRON_SECRET` as the cron request's bearer
+authorization header. On Vercel Hobby, daily jobs may run at any point within
+the scheduled hour; inspect the actual cron logs. Changing the schedule
+requires a new deployment. Verify `/api/diagnostics`, a protected dashboard
+read, and the resulting durable sync rows after deployment. HighLevel remains
+safely disabled when its explicit gate is false or its mapping/token is
+incomplete.
+
+## System diagnostics
+
+The authenticated `/api/diagnostics` endpoint and dashboard panel report safe
+operational state: database probe latency, latest migration ledger status,
+Meta configuration and stored-sync freshness, the approval-gated Meta action
+state, AI snapshot freshness, and HighLevel mapping/provider/sync state. They
+never return credentials, raw provider payloads, or raw database errors.
+
+`/api/meta/diagnostic` remains a separate authenticated live Meta read check.
+Use it only in a controlled operator window after configuring a read token;
+its response is redacted and it is not called during page rendering. Local
+and browser smoke tests deliberately keep live provider calls out of the
+routine gate.
+
+## API and dependency upgrades
+
+Keep `META_GRAPH_VERSION` and `HIGHLEVEL_API_VERSION` explicit. For a Meta
+Graph upgrade, first review the current official object/insights contracts,
+update the typed parser and fixtures, and run the complete local gate. Compare
+the redacted `/api/meta/diagnostic` response, pagination, result action types,
+account currency/timezone, and identical-date metrics in a controlled read-only
+operator window. Deploy the code and version together; roll back by restoring
+the previous application commit and supported version, never by guessing a
+result action or rewriting stored history.
+
+For a HighLevel upgrade, review the provider's v3 contact, opportunity, and
+pipeline response contracts, update bounded parsers and mapping tests, and
+keep `HIGHLEVEL_SYNC_ENABLED=false` until the live response shape and stage
+mapping have been sampled. A failed or incompatible upgrade preserves the last
+successful CRM snapshot. For Prisma/Next.js or dependency upgrades, run
+`npm ci`, lint, typecheck, all tests, build, audit, and browser smoke before
+opening the implementation PR; apply any new database migration separately
+with the backup/checksum procedure in
+[`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md).
 
 ## Domain and evidence rules
 
@@ -129,6 +215,7 @@ Missing provider fields remain `null`, while a real zero remains `0`. Failed syn
 ```text
 app/(dashboard)/page.tsx       authenticated operator surface
 app/api/dashboard/state        durable read endpoint
+app/api/diagnostics            authenticated safe system diagnostics
 app/api/cron/sync-meta         protected scheduled sync
 app/api/cron/sync-highlevel    protected read-only HighLevel polling
 lib/meta.ts                    Meta read client and diagnostics
@@ -148,6 +235,11 @@ lib/ai-service.ts              optional Anthropic generation and fail-closed err
 lib/uktl-config.ts             typed UKTL domain configuration
 lib/targets.ts                 target classification without defaults
 lib/format.ts                  account-currency and UK date formatting
+lib/system-diagnostics.ts      safe database, migration and provider state
+scripts/apply-turso-migrations.mjs  checksum-verified remote migration utility
+scripts/inspect-turso-schema.mjs    read-only legacy schema/ledger inspector
+scripts/record-turso-baseline.mjs  guarded ledger-only legacy baseline utility
+scripts/turso-schema.mjs           shared schema compatibility checks
 public/plan.md.template        secret-free operating brief template
 prisma/schema.prisma           durable read model plus AI snapshots and legacy tables
 ```
@@ -160,4 +252,18 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npm audit --omit=dev --audit-level=high
+npx playwright install chromium
+npm run test:browser
 ```
+
+For changed UI, also run a browser smoke test covering auth rejection and
+login/logout. `npm run test:browser` runs the production build with `next start`
+against a temporary, checksum-pinned official libSQL server over TLS. It checks
+remote migrations, stored metrics, secure cookies, diagnostics, UKTL formatting,
+the approval UI, disabled Meta execution and production fail-closed storage
+guards. It requires macOS/Linux arm64/x64, OpenSSL, curl and tar. No live provider
+account is used. `npm run validate:anthropic` is a separate, opt-in billable
+synthetic-evidence contract check. Full production verification, manual Meta
+reconciliation, and final HighLevel semantic mapping remain controlled external
+gates documented in [`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md).

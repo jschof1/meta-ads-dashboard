@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
+import type { InStatement } from "@libsql/client";
+import { withDatabaseClient } from "@/lib/db";
 import { safeJson } from "@/lib/safe-json";
 import {
   COMPARISON_WINDOWS,
@@ -183,9 +186,24 @@ function fingerprint(input: RecommendationPersistenceInput, recommendation: Reco
   ].join("|");
 }
 
+function storedTimestampMs(column: "lastSeenAt" | "resolvedAt" | "observedAt"): string {
+  // Historic SQLite rows use epoch milliseconds; PrismaLibSQL now writes ISO
+  // strings. SQLite compares storage classes, not dates, unless normalized.
+  // Round away julianday's floating-point error to preserve millisecond ties.
+  return `CASE WHEN typeof("${column}") IN ('integer', 'real') THEN "${column}"
+    ELSE round((julianday("${column}") - 2440587.5) * 86400000) END`;
+}
+
+// A resolution is also an observation: an older candidate cannot reopen it.
+const CURRENT_OBSERVATION = `(${storedTimestampMs("lastSeenAt")}) <= ?
+  AND ("resolvedAt" IS NULL OR (${storedTimestampMs("resolvedAt")}) <= ?)`;
+
+const SCOPE_OBSERVATION = `EXISTS (SELECT 1 FROM "RecommendationScopeState"
+  WHERE "id" = ? AND (${storedTimestampMs("observedAt")}) = ? AND "sourceSyncRunId" = ?)`;
+
 /**
  * Store the current recommendation set and, when reconciliation is allowed,
- * resolve only recommendations in the same account/campaign/attribution
+ * resolve only recommendations in the same account/campaign/attribution/rule
  * scope that were not seen in this successful sync. The unique fingerprint
  * makes retries idempotent.
  */
@@ -194,103 +212,97 @@ export async function persistRecommendationLifecycle(
   input: RecommendationPersistenceInput,
 ): Promise<RecommendationPersistenceResult> {
   const now = input.now ?? new Date();
+  const observedAtMs = now.getTime();
+  if (!Number.isFinite(observedAtMs)) throw new Error("Invalid recommendation observation date");
+  // Match PrismaLibSQL's default DateTime encoding. Audit timestamps describe
+  // persistence time, while first/lastSeenAt describe the source observation.
+  const observedAt = now.toISOString().replace("Z", "+00:00");
+  const writtenAt = new Date().toISOString().replace("Z", "+00:00");
+  const scopeStateId = JSON.stringify([input.accountId, input.campaignId, input.attributionKey, RECOMMENDATION_RULE_VERSION]);
   const uniqueRecommendations = Array.from(
     new Map(input.recommendations.map((recommendation) => [recommendation.key, recommendation])).values(),
   );
   const fingerprints = uniqueRecommendations.map((recommendation) => fingerprint(input, recommendation));
+  // Do not pass membership lists through safeJson: its array limit would drop
+  // candidates. One bound JSON array avoids an IN parameter per fingerprint.
+  const encodedFingerprints = JSON.stringify(fingerprints);
+  const statements: InStatement[] = [{
+    // Scope progress must survive empty observations and cover unseen keys.
+    // Before the first watermark, existing rows still fence older analyses.
+    sql: `INSERT INTO "RecommendationScopeState"
+      ("id", "accountId", "campaignId", "attributionKey", "ruleVersion", "observedAt", "sourceSyncRunId", "updatedAt")
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM "Recommendation"
+        WHERE "accountId" = ? AND "campaignId" IS ? AND "attributionKey" = ? AND "ruleVersion" = ?
+          AND ((${storedTimestampMs("lastSeenAt")}) > ? OR (${storedTimestampMs("resolvedAt")}) > ?))
+      ON CONFLICT ("id") DO UPDATE SET
+        "observedAt" = excluded."observedAt", "sourceSyncRunId" = excluded."sourceSyncRunId",
+        "updatedAt" = excluded."updatedAt"
+      WHERE (${storedTimestampMs("observedAt")}) < ?
+        OR ((${storedTimestampMs("observedAt")}) = ? AND "sourceSyncRunId" = excluded."sourceSyncRunId")`,
+    args: [scopeStateId, input.accountId, input.campaignId, input.attributionKey, RECOMMENDATION_RULE_VERSION,
+      observedAt, input.syncRunId, writtenAt,
+      input.accountId, input.campaignId, input.attributionKey, RECOMMENDATION_RULE_VERSION, observedAtMs, observedAtMs,
+      observedAtMs, observedAtMs],
+  }, {
+    sql: `SELECT "fingerprint" FROM "Recommendation"
+      WHERE "fingerprint" IN (SELECT value FROM json_each(?))`,
+    args: [encodedFingerprints],
+  }, {
+    sql: `UPDATE "Recommendation"
+      SET "lifecycle" = 'RESOLVED', "resolvedAt" = ?, "updatedAt" = ?
+      WHERE ? = 1 AND "accountId" = ? AND "campaignId" IS ?
+        AND "attributionKey" = ? AND "ruleVersion" = ? AND "lifecycle" = 'OPEN'
+        AND "fingerprint" NOT IN (SELECT value FROM json_each(?))
+        AND ${CURRENT_OBSERVATION} AND ${SCOPE_OBSERVATION}`,
+    args: [observedAt, writtenAt, input.reconcile === false ? 0 : 1,
+      input.accountId, input.campaignId, input.attributionKey, RECOMMENDATION_RULE_VERSION,
+      encodedFingerprints, observedAtMs, observedAtMs, scopeStateId, observedAtMs, input.syncRunId],
+  }];
+  // Validate the deduplicated evidence before opening the batch. Any invalid
+  // candidate leaves both reconciliation and all other candidates untouched.
+  for (const [index, recommendation] of uniqueRecommendations.entries()) {
+    const evidence = serialiseEvidence(recommendation.evidence);
+    statements.push({
+      sql: `INSERT INTO "Recommendation" (
+        "id", "fingerprint", "accountId", "campaignId", "attributionKey", "type",
+        "analysisWindowDays", "ruleVersion", "targetType", "targetId", "targetName",
+        "severity", "confidence", "lifecycle", "reason", "evidence", "proposedAction",
+        "sourceSyncRunId", "firstSeenAt", "lastSeenAt", "resolvedAt", "createdAt", "updatedAt"
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, NULL, ?, ?
+      WHERE ${SCOPE_OBSERVATION}
+      ON CONFLICT ("fingerprint") DO UPDATE SET
+        "accountId" = excluded."accountId", "campaignId" = excluded."campaignId",
+        "attributionKey" = excluded."attributionKey", "type" = excluded."type",
+        "analysisWindowDays" = excluded."analysisWindowDays", "ruleVersion" = excluded."ruleVersion",
+        "targetType" = excluded."targetType", "targetId" = excluded."targetId", "targetName" = excluded."targetName",
+        "severity" = excluded."severity", "confidence" = excluded."confidence",
+        "lifecycle" = 'OPEN', "reason" = excluded."reason", "evidence" = excluded."evidence",
+        "proposedAction" = excluded."proposedAction", "sourceSyncRunId" = excluded."sourceSyncRunId",
+        "lastSeenAt" = excluded."lastSeenAt", "resolvedAt" = NULL, "updatedAt" = excluded."updatedAt"
+      WHERE ${CURRENT_OBSERVATION}`,
+      args: [randomUUID(), fingerprints[index], input.accountId, input.campaignId, input.attributionKey,
+        recommendation.type, recommendation.evidence.comparisonDays, RECOMMENDATION_RULE_VERSION,
+        recommendation.target.type, recommendation.target.id, recommendation.target.name,
+        recommendation.severity, recommendation.confidence, recommendation.reason, evidence,
+        recommendation.proposedAction, input.syncRunId, observedAt, observedAt, writtenAt, writtenAt,
+        scopeStateId, observedAtMs, input.syncRunId, observedAtMs, observedAtMs],
+    });
+  }
 
-  return db.$transaction(async (tx) => {
-    const existing = fingerprints.length === 0
-      ? []
-      : await tx.recommendation.findMany({
-        where: { fingerprint: { in: fingerprints } },
-        select: { id: true, fingerprint: true, lastSeenAt: true },
-      });
-    const existingByFingerprint = new Map(existing.map((row) => [row.fingerprint, row]));
-    const staleCandidates = input.reconcile === false
-      ? []
-      : await tx.recommendation.findMany({
-        where: {
-          accountId: input.accountId,
-          campaignId: input.campaignId,
-          attributionKey: input.attributionKey,
-          lifecycle: "OPEN",
-          ...(fingerprints.length > 0 ? { fingerprint: { notIn: fingerprints } } : {}),
-        },
-        select: { id: true, lastSeenAt: true },
-      });
-    // A late analysis must not resolve a newer observation in the same scope.
-    const stale = staleCandidates.filter((row) => row.lastSeenAt.getTime() <= now.getTime());
-    if (stale.length > 0) {
-      await tx.recommendation.updateMany({
-        where: { id: { in: stale.map((row) => row.id) } },
-        data: { lifecycle: "RESOLVED", resolvedAt: now },
-      });
-    }
-
-    const createdKeys = new Set<string>();
-    const updatedKeys = new Set<string>();
-    for (const recommendation of uniqueRecommendations) {
-      const key = fingerprint(input, recommendation);
-      const prior = existingByFingerprint.get(key);
-      if (prior && prior.lastSeenAt.getTime() > now.getTime()) continue;
-      const evidence = serialiseEvidence(recommendation.evidence);
-      await tx.recommendation.upsert({
-        where: { fingerprint: key },
-        create: {
-          fingerprint: key,
-          accountId: input.accountId,
-          campaignId: input.campaignId,
-          attributionKey: input.attributionKey,
-          type: recommendation.type,
-          analysisWindowDays: recommendation.evidence.comparisonDays,
-          ruleVersion: RECOMMENDATION_RULE_VERSION,
-          targetType: recommendation.target.type,
-          targetId: recommendation.target.id,
-          targetName: recommendation.target.name,
-          severity: recommendation.severity,
-          confidence: recommendation.confidence,
-          lifecycle: "OPEN",
-          reason: recommendation.reason,
-          evidence,
-          proposedAction: recommendation.proposedAction,
-          sourceSyncRunId: input.syncRunId,
-          firstSeenAt: now,
-          lastSeenAt: now,
-          resolvedAt: null,
-        },
-        update: {
-          accountId: input.accountId,
-          campaignId: input.campaignId,
-          attributionKey: input.attributionKey,
-          type: recommendation.type,
-          analysisWindowDays: recommendation.evidence.comparisonDays,
-          ruleVersion: RECOMMENDATION_RULE_VERSION,
-          targetType: recommendation.target.type,
-          targetId: recommendation.target.id,
-          targetName: recommendation.target.name,
-          severity: recommendation.severity,
-          confidence: recommendation.confidence,
-          lifecycle: "OPEN",
-          reason: recommendation.reason,
-          evidence,
-          proposedAction: recommendation.proposedAction,
-          sourceSyncRunId: input.syncRunId,
-          lastSeenAt: now,
-          resolvedAt: null,
-        },
-      });
-      if (prior) updatedKeys.add(key);
-      else createdKeys.add(key);
-    }
-
-    return {
-      created: createdKeys.size,
-      updated: updatedKeys.size,
-      resolved: stale.length,
-      active: uniqueRecommendations.length,
-    };
+  // Turso's five-second interactive transaction limit cannot be extended by
+  // Prisma. One native write batch runs these reads and writes atomically on
+  // the server, including rollback on any statement failure:
+  // https://docs.turso.tech/sdk/ts/reference#batch-transactions
+  const results = await withDatabaseClient(db, (client) => client.batch(statements, "write"));
+  const existing = new Set(results[1].rows.map((row) => row.fingerprint));
+  let created = 0;
+  let updated = 0;
+  fingerprints.forEach((key, index) => {
+    if (existing.has(key)) updated += results[index + 3].rowsAffected;
+    else created += results[index + 3].rowsAffected;
   });
+  return { created, updated, resolved: results[2].rowsAffected, active: uniqueRecommendations.length };
 }
 
 type RecommendationReadScope = {

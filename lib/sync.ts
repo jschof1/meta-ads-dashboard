@@ -20,6 +20,7 @@ import { safeJson } from "@/lib/safe-json";
 import { buildDashboardState } from "@/lib/read-model";
 import { persistRecommendationLifecycle } from "@/lib/recommendation-store";
 import { generateAndPersistAiBriefing } from "@/lib/ai-service";
+import { SnapshotWriteBatch } from "@/lib/snapshot-write-batch";
 
 export type SyncTrigger = "cron" | "manual";
 
@@ -108,7 +109,6 @@ type EntityDiscovery = {
 };
 
 const INSIGHT_LEVELS: MetaInsightLevel[] = ["account", "campaign", "adset", "ad"];
-const SYNC_TRANSACTION_TIMEOUT_MS = 45_000;
 
 function json(value: unknown, fallback = "{}"): string {
   return safeJson(value, fallback);
@@ -638,242 +638,227 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       + normalized.rows.length;
 
     const completedAt = options.clock?.() ?? new Date();
-    await db.$transaction(async (tx) => {
-      for (const campaign of discovery.campaigns) {
-        const campaignHasProviderFields = hasProviderFields(campaign);
-        const campaignMetadataIsCurrent = hasCompleteProviderMetadata(campaign, CURRENT_METADATA_FIELDS.campaign);
-        await tx.campaign.upsert({
-          where: { metaId: campaign.id },
-          create: {
-            metaId: campaign.id,
-            name: campaign.name || campaign.id,
-            objective: optionalString(campaign.objective),
-            configuredStatus: optionalString(campaign.status),
-            effectiveStatus: optionalString(campaign.effective_status),
-            dailyBudgetMinor: toOptionalInt(campaign.daily_budget),
-            lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget),
-            startDate: optionalString(campaign.start_time),
-            stopDate: optionalString(campaign.stop_time),
-            providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null,
-            lastSeenSyncRunId: campaignMetadataIsCurrent ? run.id : null,
-            raw: json(campaign),
-          },
-          update: {
-            ...(campaignHasProviderFields ? { raw: json(campaign) } : {}),
-            ...(hasProviderField(campaign, "name") ? { name: optionalString(campaign.name) ?? campaign.id } : {}),
-            ...(hasProviderField(campaign, "objective") ? { objective: optionalString(campaign.objective) } : {}),
-            ...(hasProviderField(campaign, "status") ? { configuredStatus: optionalString(campaign.status) } : {}),
-            ...(hasProviderField(campaign, "effective_status") ? { effectiveStatus: optionalString(campaign.effective_status) } : {}),
-            ...(hasProviderField(campaign, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(campaign.daily_budget) } : {}),
-            ...(hasProviderField(campaign, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget) } : {}),
-            ...(hasProviderField(campaign, "start_time") ? { startDate: optionalString(campaign.start_time) } : {}),
-            ...(hasProviderField(campaign, "stop_time") ? { stopDate: optionalString(campaign.stop_time) } : {}),
-            ...(hasProviderField(campaign, "updated_time") ? { providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null } : {}),
-            ...(campaignMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
-          },
-        });
-      }
-      for (const adSet of discovery.adSets) {
-        const adSetHasProviderFields = hasProviderFields(adSet);
-        const adSetMetadataIsCurrent = hasCompleteProviderMetadata(adSet, CURRENT_METADATA_FIELDS.adSet);
-        await tx.adSet.upsert({
-          where: { metaId: adSet.id },
-          create: {
-            metaId: adSet.id,
-            campaignMetaId: optionalString(adSet.campaign_id),
-            name: adSet.name || adSet.id,
-            configuredStatus: optionalString(adSet.status),
-            effectiveStatus: optionalString(adSet.effective_status),
-            optimisationGoal: optionalString(adSet.optimization_goal),
-            billingEvent: optionalString(adSet.billing_event),
-            // Meta returns budget fields already in the account currency's
-            // smallest unit, unlike spend/cost metrics which are decimal
-            // currency strings.
-            dailyBudgetMinor: toOptionalInt(adSet.daily_budget),
-            lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget),
-            startDate: optionalString(adSet.start_time),
-            endDate: optionalString(adSet.end_time),
-            learningStage: learningStage(adSet.learning_stage_info),
-            learningStageInfo: json(adSet.learning_stage_info),
-            providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null,
-            lastSeenSyncRunId: adSetMetadataIsCurrent ? run.id : null,
-            raw: json(adSet),
-          },
-          update: {
-            ...(adSetHasProviderFields ? { raw: json(adSet) } : {}),
-            ...(hasProviderField(adSet, "campaign_id") ? { campaignMetaId: optionalString(adSet.campaign_id) } : {}),
-            ...(hasProviderField(adSet, "name") ? { name: optionalString(adSet.name) ?? adSet.id } : {}),
-            ...(hasProviderField(adSet, "status") ? { configuredStatus: optionalString(adSet.status) } : {}),
-            ...(hasProviderField(adSet, "effective_status") ? { effectiveStatus: optionalString(adSet.effective_status) } : {}),
-            ...(hasProviderField(adSet, "optimization_goal") ? { optimisationGoal: optionalString(adSet.optimization_goal) } : {}),
-            ...(hasProviderField(adSet, "billing_event") ? { billingEvent: optionalString(adSet.billing_event) } : {}),
-            ...(hasProviderField(adSet, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(adSet.daily_budget) } : {}),
-            ...(hasProviderField(adSet, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget) } : {}),
-            ...(hasProviderField(adSet, "start_time") ? { startDate: optionalString(adSet.start_time) } : {}),
-            ...(hasProviderField(adSet, "end_time") ? { endDate: optionalString(adSet.end_time) } : {}),
-            ...(hasProviderField(adSet, "learning_stage_info") ? {
-              learningStage: learningStage(adSet.learning_stage_info),
-              learningStageInfo: json(adSet.learning_stage_info),
-            } : {}),
-            ...(hasProviderField(adSet, "updated_time") ? { providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null } : {}),
-            ...(adSetMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
-          },
-        });
-      }
-      for (const ad of discovery.ads) {
-        const adHasProviderFields = hasProviderFields(ad);
-        const adMetadataIsCurrent = hasCompleteProviderMetadata(ad, CURRENT_METADATA_FIELDS.ad);
-        await tx.ad.upsert({
-          where: { metaId: ad.id },
-          create: {
-            metaId: ad.id,
-            campaignMetaId: optionalString(ad.campaign_id),
-            adSetMetaId: optionalString(ad.adset_id),
-            name: ad.name || ad.id,
-            configuredStatus: optionalString(ad.status),
-            effectiveStatus: optionalString(ad.effective_status),
-            creativeMetaId: optionalString(ad.creative_id),
-            providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null,
-            lastSeenSyncRunId: adMetadataIsCurrent ? run.id : null,
-            raw: json(ad),
-          },
-          update: {
-            ...(adHasProviderFields ? { raw: json(ad) } : {}),
-            ...(hasProviderField(ad, "campaign_id") ? { campaignMetaId: optionalString(ad.campaign_id) } : {}),
-            ...(hasProviderField(ad, "adset_id") ? { adSetMetaId: optionalString(ad.adset_id) } : {}),
-            ...(hasProviderField(ad, "name") ? { name: optionalString(ad.name) ?? ad.id } : {}),
-            ...(hasProviderField(ad, "status") ? { configuredStatus: optionalString(ad.status) } : {}),
-            ...(hasProviderField(ad, "effective_status") ? { effectiveStatus: optionalString(ad.effective_status) } : {}),
-            ...(hasProviderField(ad, "creative_id") ? { creativeMetaId: optionalString(ad.creative_id) } : {}),
-            ...(hasProviderField(ad, "updated_time") ? { providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null } : {}),
-            ...(adMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
-          },
-        });
-      }
-      for (const creative of discovery.creatives) {
-        const creativeHasProviderFields = hasProviderFields(creative);
-        const creativeMetadataIsCurrent = hasCompleteProviderMetadata(creative, CURRENT_METADATA_FIELDS.creative);
-        const destinationUrl = hasProviderField(creative, "object_url") || hasProviderField(creative, "link_url")
-          ? optionalString(creative.object_url) ?? optionalString(creative.link_url)
-          : undefined;
-        const hasFormatFields = [
-          "video_id",
-          "image_hash",
-          "image_url",
-          "thumbnail_url",
-          "asset_feed_spec",
-        ].some((field) => hasProviderField(creative, field));
-        await tx.creative.upsert({
-          where: { metaId: creative.id },
-          create: {
-            metaId: creative.id,
-            name: optionalString(creative.name),
-            title: optionalString(creative.title),
-            body: optionalString(creative.body),
-            callToActionType: optionalString(creative.call_to_action_type),
-            thumbnailUrl: optionalString(creative.thumbnail_url),
-            imageHash: optionalString(creative.image_hash),
-            imageUrl: optionalString(creative.image_url),
-            videoId: optionalString(creative.video_id),
-            objectId: optionalString(creative.object_id),
-            destinationUrl: destinationUrl ?? null,
-            urlTags: optionalString(creative.url_tags),
-            format: creativeFormat(creative),
-            providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null,
-            lastSeenSyncRunId: creativeMetadataIsCurrent ? run.id : null,
-            raw: json(creative.raw ?? creative),
-          },
-          update: {
-            ...(creativeHasProviderFields ? { raw: json(creative.raw ?? creative) } : {}),
-            ...(hasProviderField(creative, "name") ? { name: optionalString(creative.name) } : {}),
-            ...(hasProviderField(creative, "title") ? { title: optionalString(creative.title) } : {}),
-            ...(hasProviderField(creative, "body") ? { body: optionalString(creative.body) } : {}),
-            ...(hasProviderField(creative, "call_to_action_type") ? { callToActionType: optionalString(creative.call_to_action_type) } : {}),
-            ...(hasProviderField(creative, "thumbnail_url") ? { thumbnailUrl: optionalString(creative.thumbnail_url) } : {}),
-            ...(hasProviderField(creative, "image_hash") ? { imageHash: optionalString(creative.image_hash) } : {}),
-            ...(hasProviderField(creative, "image_url") ? { imageUrl: optionalString(creative.image_url) } : {}),
-            ...(hasProviderField(creative, "video_id") ? { videoId: optionalString(creative.video_id) } : {}),
-            ...(hasProviderField(creative, "object_id") ? { objectId: optionalString(creative.object_id) } : {}),
-            ...(destinationUrl !== undefined ? { destinationUrl } : {}),
-            ...(hasProviderField(creative, "url_tags") ? { urlTags: optionalString(creative.url_tags) } : {}),
-            ...(hasFormatFields ? { format: creativeFormat(creative) } : {}),
-            ...(hasProviderField(creative, "updated_time") ? { providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null } : {}),
-            ...(creativeMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
-          },
-        });
-      }
-      for (const insight of normalized.rows) {
-        await tx.dailyInsight.upsert({
-          where: {
-            date_level_entityId_attributionKey_scopeKey: {
-              date: insight.date,
-              level: insight.level,
-              entityId: insight.entityId,
-              attributionKey: insight.attributionKey,
-              scopeKey: syncScopeKey,
-            },
-          },
-          create: {
-            ...insight,
-            scopeKey: syncScopeKey,
-            syncRunId: run.id,
-          },
-          update: {
-            // A successful response is the source of truth for this date. Clear
-            // omitted fields rather than presenting a previous value as fresh.
-            currencyCode: insight.currencyCode,
-            spendMinorUnits: insight.spendMinorUnits,
-            impressions: insight.impressions,
-            reach: insight.reach,
-            clicks: insight.clicks,
-            linkClicks: insight.linkClicks,
-            leads: insight.leads,
-            cplMinorUnits: insight.cplMinorUnits,
-            cpcMinorUnits: insight.cpcMinorUnits,
-            cpmMinorUnits: insight.cpmMinorUnits,
-            ctrLink: insight.ctrLink,
-            frequency: insight.frequency,
-            resultActionType: insight.resultActionType,
-            rawActions: insight.rawActions,
-            raw: insight.raw,
-            observedAt: now,
-            syncRunId: run.id,
-          },
-        });
-      }
-      const committed = await tx.syncRun.updateMany({
-        where: {
-          id: run.id,
-          status: "RUNNING",
-          lockKey: accountId,
-          lockOwner: run.lockOwner,
-          lockExpiresAt: { gt: completedAt },
+    const snapshot = new SnapshotWriteBatch();
+    for (const campaign of discovery.campaigns) {
+      const campaignHasProviderFields = hasProviderFields(campaign);
+      const campaignMetadataIsCurrent = hasCompleteProviderMetadata(campaign, CURRENT_METADATA_FIELDS.campaign);
+      snapshot.upsert("Campaign", {
+        create: {
+          metaId: campaign.id,
+          name: campaign.name || campaign.id,
+          objective: optionalString(campaign.objective),
+          configuredStatus: optionalString(campaign.status),
+          effectiveStatus: optionalString(campaign.effective_status),
+          dailyBudgetMinor: toOptionalInt(campaign.daily_budget),
+          lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget),
+          startDate: optionalString(campaign.start_time),
+          stopDate: optionalString(campaign.stop_time),
+          providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null,
+          lastSeenSyncRunId: campaignMetadataIsCurrent ? run.id : null,
+          raw: json(campaign),
         },
-        data: {
-          accountId,
-          accountName: optionalString(discovery.account.name),
-          currencyCode: optionalString(discovery.account.currency),
-          timezoneName: timeZone,
-          apiVersion: client.getGraphVersion(),
-          attributionKey,
-          requestedSince: range.since,
-          requestedUntil: range.until,
-          initialBackfill: range.initialBackfill,
-          status: "SUCCEEDED",
-          finishedAt: completedAt,
-          rowsFetched,
-          rowsWritten,
-          warning,
-          error: null,
-          traceId: client.getDiagnostics().traceId ?? null,
-          apiDiagnostics: json(client.getDiagnostics()),
-          lockKey: null,
-          lockOwner: null,
-          lockExpiresAt: null,
+        update: {
+          ...(campaignHasProviderFields ? { raw: json(campaign) } : {}),
+          ...(hasProviderField(campaign, "name") ? { name: optionalString(campaign.name) ?? campaign.id } : {}),
+          ...(hasProviderField(campaign, "objective") ? { objective: optionalString(campaign.objective) } : {}),
+          ...(hasProviderField(campaign, "status") ? { configuredStatus: optionalString(campaign.status) } : {}),
+          ...(hasProviderField(campaign, "effective_status") ? { effectiveStatus: optionalString(campaign.effective_status) } : {}),
+          ...(hasProviderField(campaign, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(campaign.daily_budget) } : {}),
+          ...(hasProviderField(campaign, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(campaign.lifetime_budget) } : {}),
+          ...(hasProviderField(campaign, "start_time") ? { startDate: optionalString(campaign.start_time) } : {}),
+          ...(hasProviderField(campaign, "stop_time") ? { stopDate: optionalString(campaign.stop_time) } : {}),
+          ...(hasProviderField(campaign, "updated_time") ? { providerUpdatedAt: optionalDateTime(campaign.updated_time) ?? null } : {}),
+          ...(campaignMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
         },
       });
-      if (committed.count !== 1) throw new SyncLeaseLostError();
-    }, { maxWait: 5_000, timeout: SYNC_TRANSACTION_TIMEOUT_MS });
+    }
+    for (const adSet of discovery.adSets) {
+      const adSetHasProviderFields = hasProviderFields(adSet);
+      const adSetMetadataIsCurrent = hasCompleteProviderMetadata(adSet, CURRENT_METADATA_FIELDS.adSet);
+      snapshot.upsert("AdSet", {
+        create: {
+          metaId: adSet.id,
+          campaignMetaId: optionalString(adSet.campaign_id),
+          name: adSet.name || adSet.id,
+          configuredStatus: optionalString(adSet.status),
+          effectiveStatus: optionalString(adSet.effective_status),
+          optimisationGoal: optionalString(adSet.optimization_goal),
+          billingEvent: optionalString(adSet.billing_event),
+          // Meta returns budget fields already in the account currency's
+          // smallest unit, unlike spend/cost metrics which are decimal
+          // currency strings.
+          dailyBudgetMinor: toOptionalInt(adSet.daily_budget),
+          lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget),
+          startDate: optionalString(adSet.start_time),
+          endDate: optionalString(adSet.end_time),
+          learningStage: learningStage(adSet.learning_stage_info),
+          learningStageInfo: json(adSet.learning_stage_info),
+          providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null,
+          lastSeenSyncRunId: adSetMetadataIsCurrent ? run.id : null,
+          raw: json(adSet),
+        },
+        update: {
+          ...(adSetHasProviderFields ? { raw: json(adSet) } : {}),
+          ...(hasProviderField(adSet, "campaign_id") ? { campaignMetaId: optionalString(adSet.campaign_id) } : {}),
+          ...(hasProviderField(adSet, "name") ? { name: optionalString(adSet.name) ?? adSet.id } : {}),
+          ...(hasProviderField(adSet, "status") ? { configuredStatus: optionalString(adSet.status) } : {}),
+          ...(hasProviderField(adSet, "effective_status") ? { effectiveStatus: optionalString(adSet.effective_status) } : {}),
+          ...(hasProviderField(adSet, "optimization_goal") ? { optimisationGoal: optionalString(adSet.optimization_goal) } : {}),
+          ...(hasProviderField(adSet, "billing_event") ? { billingEvent: optionalString(adSet.billing_event) } : {}),
+          ...(hasProviderField(adSet, "daily_budget") ? { dailyBudgetMinor: toOptionalInt(adSet.daily_budget) } : {}),
+          ...(hasProviderField(adSet, "lifetime_budget") ? { lifetimeBudgetMinor: toOptionalInt(adSet.lifetime_budget) } : {}),
+          ...(hasProviderField(adSet, "start_time") ? { startDate: optionalString(adSet.start_time) } : {}),
+          ...(hasProviderField(adSet, "end_time") ? { endDate: optionalString(adSet.end_time) } : {}),
+          ...(hasProviderField(adSet, "learning_stage_info") ? {
+            learningStage: learningStage(adSet.learning_stage_info),
+            learningStageInfo: json(adSet.learning_stage_info),
+          } : {}),
+          ...(hasProviderField(adSet, "updated_time") ? { providerUpdatedAt: optionalDateTime(adSet.updated_time) ?? null } : {}),
+          ...(adSetMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
+        },
+      });
+    }
+    for (const ad of discovery.ads) {
+      const adHasProviderFields = hasProviderFields(ad);
+      const adMetadataIsCurrent = hasCompleteProviderMetadata(ad, CURRENT_METADATA_FIELDS.ad);
+      snapshot.upsert("Ad", {
+        create: {
+          metaId: ad.id,
+          campaignMetaId: optionalString(ad.campaign_id),
+          adSetMetaId: optionalString(ad.adset_id),
+          name: ad.name || ad.id,
+          configuredStatus: optionalString(ad.status),
+          effectiveStatus: optionalString(ad.effective_status),
+          creativeMetaId: optionalString(ad.creative_id),
+          providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null,
+          lastSeenSyncRunId: adMetadataIsCurrent ? run.id : null,
+          raw: json(ad),
+        },
+        update: {
+          ...(adHasProviderFields ? { raw: json(ad) } : {}),
+          ...(hasProviderField(ad, "campaign_id") ? { campaignMetaId: optionalString(ad.campaign_id) } : {}),
+          ...(hasProviderField(ad, "adset_id") ? { adSetMetaId: optionalString(ad.adset_id) } : {}),
+          ...(hasProviderField(ad, "name") ? { name: optionalString(ad.name) ?? ad.id } : {}),
+          ...(hasProviderField(ad, "status") ? { configuredStatus: optionalString(ad.status) } : {}),
+          ...(hasProviderField(ad, "effective_status") ? { effectiveStatus: optionalString(ad.effective_status) } : {}),
+          ...(hasProviderField(ad, "creative_id") ? { creativeMetaId: optionalString(ad.creative_id) } : {}),
+          ...(hasProviderField(ad, "updated_time") ? { providerUpdatedAt: optionalDateTime(ad.updated_time) ?? null } : {}),
+          ...(adMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
+        },
+      });
+    }
+    for (const creative of discovery.creatives) {
+      const creativeHasProviderFields = hasProviderFields(creative);
+      const creativeMetadataIsCurrent = hasCompleteProviderMetadata(creative, CURRENT_METADATA_FIELDS.creative);
+      const destinationUrl = hasProviderField(creative, "object_url") || hasProviderField(creative, "link_url")
+        ? optionalString(creative.object_url) ?? optionalString(creative.link_url)
+        : undefined;
+      const hasFormatFields = [
+        "video_id",
+        "image_hash",
+        "image_url",
+        "thumbnail_url",
+        "asset_feed_spec",
+      ].some((field) => hasProviderField(creative, field));
+      snapshot.upsert("Creative", {
+        create: {
+          metaId: creative.id,
+          name: optionalString(creative.name),
+          title: optionalString(creative.title),
+          body: optionalString(creative.body),
+          callToActionType: optionalString(creative.call_to_action_type),
+          thumbnailUrl: optionalString(creative.thumbnail_url),
+          imageHash: optionalString(creative.image_hash),
+          imageUrl: optionalString(creative.image_url),
+          videoId: optionalString(creative.video_id),
+          objectId: optionalString(creative.object_id),
+          destinationUrl: destinationUrl ?? null,
+          urlTags: optionalString(creative.url_tags),
+          format: creativeFormat(creative),
+          providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null,
+          lastSeenSyncRunId: creativeMetadataIsCurrent ? run.id : null,
+          raw: json(creative.raw ?? creative),
+        },
+        update: {
+          ...(creativeHasProviderFields ? { raw: json(creative.raw ?? creative) } : {}),
+          ...(hasProviderField(creative, "name") ? { name: optionalString(creative.name) } : {}),
+          ...(hasProviderField(creative, "title") ? { title: optionalString(creative.title) } : {}),
+          ...(hasProviderField(creative, "body") ? { body: optionalString(creative.body) } : {}),
+          ...(hasProviderField(creative, "call_to_action_type") ? { callToActionType: optionalString(creative.call_to_action_type) } : {}),
+          ...(hasProviderField(creative, "thumbnail_url") ? { thumbnailUrl: optionalString(creative.thumbnail_url) } : {}),
+          ...(hasProviderField(creative, "image_hash") ? { imageHash: optionalString(creative.image_hash) } : {}),
+          ...(hasProviderField(creative, "image_url") ? { imageUrl: optionalString(creative.image_url) } : {}),
+          ...(hasProviderField(creative, "video_id") ? { videoId: optionalString(creative.video_id) } : {}),
+          ...(hasProviderField(creative, "object_id") ? { objectId: optionalString(creative.object_id) } : {}),
+          ...(destinationUrl !== undefined ? { destinationUrl } : {}),
+          ...(hasProviderField(creative, "url_tags") ? { urlTags: optionalString(creative.url_tags) } : {}),
+          ...(hasFormatFields ? { format: creativeFormat(creative) } : {}),
+          ...(hasProviderField(creative, "updated_time") ? { providerUpdatedAt: optionalDateTime(creative.updated_time) ?? null } : {}),
+          ...(creativeMetadataIsCurrent ? { lastSeenSyncRunId: run.id } : {}),
+        },
+      });
+    }
+    for (const insight of normalized.rows) {
+      snapshot.upsert("DailyInsight", {
+        create: {
+          ...insight,
+          scopeKey: syncScopeKey,
+          syncRunId: run.id,
+        },
+        update: {
+          // A successful response is the source of truth for this date. Clear
+          // omitted fields rather than presenting a previous value as fresh.
+          currencyCode: insight.currencyCode,
+          spendMinorUnits: insight.spendMinorUnits,
+          impressions: insight.impressions,
+          reach: insight.reach,
+          clicks: insight.clicks,
+          linkClicks: insight.linkClicks,
+          leads: insight.leads,
+          cplMinorUnits: insight.cplMinorUnits,
+          cpcMinorUnits: insight.cpcMinorUnits,
+          cpmMinorUnits: insight.cpmMinorUnits,
+          ctrLink: insight.ctrLink,
+          frequency: insight.frequency,
+          resultActionType: insight.resultActionType,
+          rawActions: insight.rawActions,
+          raw: insight.raw,
+          observedAt: now,
+          syncRunId: run.id,
+        },
+      });
+    }
+    await snapshot.commit(db, {
+      table: "SyncRun",
+      id: run.id,
+      owner: run.lockOwner,
+      lockKey: accountId,
+      completedAt,
+      leaseNow: options.clock?.(),
+      lostLeaseError: new SyncLeaseLostError(),
+      data: {
+        accountId,
+        accountName: optionalString(discovery.account.name),
+        currencyCode: optionalString(discovery.account.currency),
+        timezoneName: timeZone,
+        apiVersion: client.getGraphVersion(),
+        attributionKey,
+        requestedSince: range.since,
+        requestedUntil: range.until,
+        initialBackfill: range.initialBackfill,
+        status: "SUCCEEDED",
+        finishedAt: completedAt,
+        rowsFetched,
+        rowsWritten,
+        warning,
+        error: null,
+        traceId: client.getDiagnostics().traceId ?? null,
+        apiDiagnostics: json(client.getDiagnostics()),
+        lockKey: null,
+        lockOwner: null,
+        lockExpiresAt: null,
+      },
+    });
 
     let finalWarning = warning;
     try {
@@ -881,7 +866,9 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       // commit. This keeps provider ingestion and deterministic analysis
       // separate while making a retry idempotent through the fingerprint.
       const state = await buildDashboardState({ db, now: completedAt, recommendationMode: "derived" });
-      if (warning == null && state.meta.metadataStaleCount === 0) {
+      // Another sync can finish after this run releases its ingestion lease.
+      // Never label a newer dashboard's evidence with this older run's ID.
+      if (warning == null && state.meta.metadataStaleCount === 0 && state.meta.lastSuccessfulSyncRunId === run.id) {
         await persistRecommendationLifecycle(db, {
           accountId,
           campaignId: runCampaignId,

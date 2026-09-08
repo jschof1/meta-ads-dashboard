@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requireApiSession } from "@/lib/api-auth";
+import { validateDatabaseEnvironment } from "@/lib/env";
 import {
   MetaActionError,
   loadMetaActionConfig,
@@ -26,9 +27,14 @@ export function actionErrorResponse(error: unknown): NextResponse {
   return noStore({ error: "Meta action is unavailable; no provider mutation was confirmed." }, { status: 500 });
 }
 
+export function databaseConfigurationResponse(): NextResponse {
+  return noStore({ error: "Meta action is unavailable; the database is not configured." }, { status: 503 });
+}
+
 export async function GET(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
+  if (validateDatabaseEnvironment().length > 0) return databaseConfigurationResponse();
   try {
     const config = loadMetaActionConfig();
     return noStore({ actions: await readMetaActionViews(prisma, config.accountId, config), gate: metaActionGate() });
@@ -40,6 +46,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
+  if (validateDatabaseEnvironment().length > 0) return databaseConfigurationResponse();
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return noStore({ error: "A JSON action proposal is required" }, { status: 400 });

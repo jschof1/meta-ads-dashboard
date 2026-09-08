@@ -217,6 +217,14 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
         truncated = true;
         break;
       }
+      const providerHasMore = pageTotal != null && result.length < pageTotal;
+      if (providerHasMore && pageItems.length < PAGE_SIZE) {
+        // A short page is not proof of completion when the provider says that
+        // more rows exist. Surface the snapshot as partial rather than
+        // silently treating it as complete.
+        truncated = true;
+        break;
+      }
       if (pageItems.length === 0 || pageItems.length < PAGE_SIZE || (pageTotal != null && result.length >= pageTotal)) break;
       if (result.length >= maxRecords) {
         // A full page at the configured cap is incomplete unless the provider
@@ -232,8 +240,13 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
     listContacts: () => listCollection("contacts"),
     listOpportunities: () => listCollection("opportunities"),
     async getPipeline(): Promise<HighLevelPipeline> {
-      const payload = await request(`/opportunities/pipelines/${encodeURIComponent(options.config.pipelineId as string)}`, "pipeline read", { method: "GET" });
-      const pipeline = pipelineFrom(payload, "pipeline read");
+      // The documented location-scoped collection works with existing read-only
+      // CRM grants; the newer single-pipeline endpoint can require extra scopes.
+      const payload = await request(`/opportunities/pipelines?locationId=${encodeURIComponent(options.config.locationId as string)}`, "pipeline read", { method: "GET" });
+      const matches = extractCollection(payload, "pipelines", "pipeline read")
+        .filter((pipeline) => pipeline.id === options.config.pipelineId);
+      if (matches.length !== 1) throw new HighLevelApiError("pipeline read", null, "HighLevel did not return one unambiguous configured pipeline");
+      const pipeline = pipelineFrom(matches[0], "pipeline read");
       if (pipeline.id !== options.config.pipelineId || pipeline.locationId !== options.config.locationId) {
         throw new HighLevelApiError("pipeline read", null, "HighLevel pipeline did not match the configured location or pipeline");
       }

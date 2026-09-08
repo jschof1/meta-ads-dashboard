@@ -56,6 +56,7 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
   const crm = state.crm;
   const currency = crm.revenue.currencyCode ?? state.meta.currencyCode;
   const hasMetrics = crm.counts.crmRecords != null;
+  const isPartialFreshSnapshot = crm.status === "fresh" && crm.dataQuality === "partial";
   return (
     <Card className="mb-6">
       <CardHeader className="border-b border-border">
@@ -66,13 +67,17 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
               {crm.period.label} contact-created cohort · CRM outcomes stay separate from Meta-reported leads.
             </CardDescription>
           </div>
-          <Badge variant={statusVariant(crm.status)}>{STATUS_LABEL[crm.status]}</Badge>
+          <Badge variant={isPartialFreshSnapshot ? "outline" : statusVariant(crm.status)}>
+            {isPartialFreshSnapshot ? "HighLevel snapshot partial" : STATUS_LABEL[crm.status]}
+          </Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
         {!hasMetrics && (
           <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-foreground/80">
-            {crm.status === "not_configured"
+            {crm.dataQuality === "partial"
+              ? "HighLevel snapshot is incomplete; totals, rates, costs and revenue are withheld until a complete read succeeds."
+              : crm.status === "not_configured"
               ? "Meta leads are available above, but HighLevel location, pipeline and every funnel-stage mapping are not configured. No CRM outcomes are inferred."
               : crm.status === "never"
                 ? "The explicit HighLevel mapping is present, but no successful read-only snapshot is stored yet. CRM counts remain unknown."

@@ -9,6 +9,7 @@ import { redactSensitiveData } from "@/lib/safe-json";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+export const runtime = "nodejs";
 
 // Protected operator diagnostic. It returns Meta data and diagnostics but no
 // token, request URL, Authorization header or other credential material.
@@ -46,12 +47,15 @@ export async function GET(request: Request) {
         date: row.date_start ?? null,
         ...diagnoseResultEvents(row, resultEventOptions),
       })),
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     const diagnostic = error instanceof MetaApiError
       ? { kind: error.kind, status: error.status, code: error.code, subcode: error.subcode, traceId: error.traceId }
       : { kind: "unknown" };
     console.error("Meta diagnostic failed:", diagnostic);
-    return NextResponse.json({ ok: false, error: "Meta diagnostic failed; see server logs for redacted provider diagnostics." }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: "Meta diagnostic failed; see server logs for redacted provider diagnostics." },
+      { status: 500, headers: { "Cache-Control": "private, no-store" } },
+    );
   }
 }

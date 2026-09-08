@@ -1,27 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { validateAuthEnvironment } from "@/lib/env";
+import { validateAuthEnvironment, validateDatabaseEnvironment } from "@/lib/env";
+import { checkLoginRateLimit, clearLoginRateLimit } from "@/lib/login-rate-limit";
 import { createSessionToken, SESSION_COOKIE, SESSION_MAX_AGE_SECONDS } from "@/lib/session";
 
-const WINDOW_MS = 15 * 60 * 1000;
-const MAX_ATTEMPTS = 5;
-const attempts = new Map<string, { count: number; resetAt: number }>();
-
-export function checkLoginRateLimit(key: string, now = Date.now()): { allowed: boolean; retryAfter: number } {
-  const current = attempts.get(key);
-  if (!current || current.resetAt <= now) {
-    attempts.set(key, { count: 1, resetAt: now + WINDOW_MS });
-    return { allowed: true, retryAfter: 0 };
-  }
-  if (current.count >= MAX_ATTEMPTS) {
-    return { allowed: false, retryAfter: Math.ceil((current.resetAt - now) / 1000) };
-  }
-  current.count += 1;
-  return { allowed: true, retryAfter: 0 };
-}
-
-export function clearLoginRateLimit(key: string): void {
-  attempts.delete(key);
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 async function valuesMatch(left: string, right: string): Promise<boolean> {
   const [leftHash, rightHash] = await Promise.all([
@@ -36,13 +19,18 @@ async function valuesMatch(left: string, right: string): Promise<boolean> {
 }
 
 export async function POST(request: NextRequest) {
-  const configurationErrors = validateAuthEnvironment();
+  const configurationErrors = [...validateAuthEnvironment(), ...validateDatabaseEnvironment()];
   if (configurationErrors.length > 0) {
     return NextResponse.json({ error: "Authentication is not configured" }, { status: 503 });
   }
 
   const key = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
-  const limit = checkLoginRateLimit(key);
+  let limit;
+  try {
+    limit = await checkLoginRateLimit({ key, secret: process.env.AUTH_SECRET! });
+  } catch {
+    return NextResponse.json({ error: "Authentication is temporarily unavailable" }, { status: 503 });
+  }
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "Too many login attempts. Try again later." },
@@ -56,7 +44,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }
 
-  clearLoginRateLimit(key);
+  try {
+    await clearLoginRateLimit({ key, secret: process.env.AUTH_SECRET! });
+  } catch {
+    return NextResponse.json({ error: "Authentication is temporarily unavailable" }, { status: 503 });
+  }
   const response = NextResponse.json({ success: true });
   response.cookies.set(SESSION_COOKIE, await createSessionToken(process.env.AUTH_SECRET!), {
     httpOnly: true,
