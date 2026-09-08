@@ -46,8 +46,8 @@ therefore checked explicitly by `npm run test:cloudflare`.
 
 `cloudflare-worker.mjs` wraps the generated fetch handler and exports the
 scheduled handler. It replaces untrusted forwarding headers with Cloudflare's
-client IP for durable login throttling. All assets go through the Worker first,
-so `/plan.md` cannot bypass authentication through the static asset service.
+client IP for durable login throttling. The Worker serves public `/_next/static/`
+JavaScript and CSS through the ASSETS binding. Other paths go through Next, so `/plan.md` cannot bypass authentication through the static asset service.
 No shared page-cache bucket or additional paid service is provisioned.
 
 `wrangler.jsonc` is the source of truth for account, Worker, bindings and crons.

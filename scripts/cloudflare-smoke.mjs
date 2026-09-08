@@ -8,7 +8,19 @@ assert.ok(base && new URL(base).protocol === "https:", "An HTTPS DASHBOARD_SMOKE
 assert.ok(password, "DASHBOARD_PASSWORD is required");
 const headers = { "user-agent": "UKTL-deployment-verification/1.0" };
 const get = (path, options = {}) => fetch(new URL(path, base), { redirect: "manual", ...options, headers: { ...headers, ...options.headers } });
-assert.equal((await get("/login")).status, 200);
+const loginPage = await get("/login");
+assert.equal(loginPage.status, 200);
+const html = await loginPage.text();
+assert.match(html, /method="post"/);
+assert.doesNotMatch(html, /name="username"/);
+const assets = [...new Set([...html.matchAll(/(?:src|href)="([^"]*\/_next\/static\/[^"]+)"/g)].map((match) => match[1]))];
+assert.ok(assets.some((path) => path.endsWith(".js")), "Login must include JavaScript");
+assert.ok(assets.some((path) => path.endsWith(".css")), "Login must include styles");
+for (const path of assets) {
+  const asset = await get(path);
+  assert.equal(asset.status, 200, `Login asset must load: ${path}`);
+  assert.match(asset.headers.get("content-type") || "", path.endsWith(".css") ? /text\/css/ : /javascript/);
+}
 for (const path of ["/", "/plan.md", "/plan%2Emd"]) {
   const response = await get(path);
   assert.equal(response.status, 307, `Signed-out ${path} must redirect`);
@@ -41,4 +53,8 @@ for (let session = 0; session < 2; session++) {
   console.info("Cloudflare session verified", { session: session + 1, database: diagnostics.database.status,
     migrations: diagnostics.migrations.appliedCount, meta: diagnostics.meta.status, writesEnabled: false });
 }
+const formLogin = await get("/api/auth", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ password }) });
+assert.equal(formLogin.status, 303, "Native form login must redirect without exposing credentials");
+assert.equal(new URL(formLogin.headers.get("location")).pathname, "/");
+assert.ok(formLogin.headers.get("set-cookie"));
 console.info("Cloudflare deployment smoke passed: protected pages/APIs, secure login/logout, repeated database requests, migration ledger and disabled writes");

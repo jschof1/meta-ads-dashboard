@@ -36,7 +36,7 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center px-4">
-      <form onSubmit={login} className="w-full max-w-sm space-y-6">
+      <form method="post" action="/api/auth" onSubmit={login} className="w-full max-w-sm space-y-6">
         <div className="flex flex-col items-center gap-3">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
             <Lock className="w-7 h-7 text-primary" />
@@ -45,7 +45,6 @@ export default function LoginPage() {
           <p className="text-muted-foreground text-sm">Enter the dashboard password to continue</p>
       </div>
       <div className="space-y-3">
-          <input aria-hidden="true" tabIndex={-1} autoComplete="username" name="username" className="sr-only" />
           <label className="sr-only" htmlFor="password">Dashboard password</label>
           <input id="password" name="password" type="password" required autoComplete="current-password" value={password}
             onChange={(event) => setPassword(event.target.value)} placeholder="Password" autoFocus

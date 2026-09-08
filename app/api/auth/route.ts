@@ -38,7 +38,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const body = await request.json().catch(() => null) as { password?: unknown } | null;
+  const isForm = request.headers.get("content-type")?.includes("application/x-www-form-urlencoded") ?? false;
+  const body = isForm
+    ? await request.formData().then((form) => ({ password: form.get("password") })).catch(() => null)
+    : await request.json().catch(() => null) as { password?: unknown } | null;
   const password = typeof body?.password === "string" ? body.password : "";
   if (!(await valuesMatch(password, process.env.DASHBOARD_PASSWORD!))) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
@@ -49,7 +52,9 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Authentication is temporarily unavailable" }, { status: 503 });
   }
-  const response = NextResponse.json({ success: true });
+  const response = isForm
+    ? NextResponse.redirect(new URL("/", request.url), 303)
+    : NextResponse.json({ success: true });
   response.cookies.set(SESSION_COOKIE, await createSessionToken(process.env.AUTH_SECRET!), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
