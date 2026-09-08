@@ -245,19 +245,20 @@ won customers are not being conflated.
 - **Hosting and storage:** provisioned and verified on Cloudflare Workers and
   Turso Free. Live database/auth/migration diagnostics passed on 2026-09-08.
   See the Cloudflare deployment record for identifiers and repeatable commands.
-- **Meta reads:** neither the secret helper nor the existing Work OS Meta
-  integration has a configured marketing token/account. Supply only
-  `META_MARKETING_TOKEN` (with read access) and `META_AD_ACCOUNT_ID` through the
-  secret helper or Cloudflare Worker secrets. Currency/timezone/entities
-  and result action types should be discovered after connection. Reconcile
-  identical dates/attribution before calling the performance numbers validated.
+- **Meta reads:** connected on 2026-09-08 to UK Trade Leads | AG Digital Studio.
+  Graph v26, GBP/Europe-London, website Lead pixel event and 7d-click/1d-view
+  attribution are configured. The initial 90-day sync stored 1,330 rows;
+  closed-day spend, impressions, link clicks and leads matched Meta directly.
+  Some daily rows omit lead results, so period lead/CPL totals remain unknown
+  and the sync shows a data warning. See the Cloudflare deployment record.
+  Renew the read-only system-user token before 2026-11-07.
 - **CRM:** confirm the business pipeline and semantic stages described above,
   then configure an application-specific read-only integration token. Contact
   and opportunity API contract checks do not prove the chosen funnel mapping.
 - **Meta mutations:** remain disabled. No live mutation was attempted. This
   requires a separate explicit approval, suitable permissions and budget bounds.
 - **Production acceptance:** deployed authentication and migration state passed; successful live
-  provider sync, actual scheduled-provider results and reconciliation remain open. Local/CI checks do not replace those observations.
+  actual scheduled-provider results and CRM integration remain open. The initial Meta sync and closed-day reconciliation passed. Local/CI checks do not replace those observations.
 
 GitHub issues are disabled for this repository, so the implementation PR and
 this runbook hold the remaining release-gate record.

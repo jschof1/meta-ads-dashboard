@@ -98,8 +98,28 @@ HighLevel. Unit tests verify schedule dispatch, bearer protection, disabled CRM
 skipping and failure propagation. Registration and manually invoking an HTTP
 route are not evidence of an actual scheduled provider sync.
 
-Still required for live advertising figures: `META_MARKETING_TOKEN` and
-`META_AD_ACCOUNT_ID`, then matching-date/timezone/attribution reconciliation.
+Meta reads connected on 2026-09-08 using the UKTL Ads Dashboard app
+(`1139210748785458`) and a Work OS system-user token with `ads_read`.
+The API confirms account `act_1357893439073996`, UK Trade Leads | AG Digital Studio,
+GBP and Europe/London. The Business Suite asset ID is `6890136328739`;
+use the API-confirmed account ID in application configuration.
+
+Production uses Graph `v26.0` (the new app upgrades v25 requests to v26),
+`META_PRIMARY_RESULT_ACTION_TYPE=offsite_conversion.fb_pixel_lead` (confirmed
+against the ad set's LEAD pixel event), and `7d_click,1d_view` attribution.
+No Meta write permission was requested and `META_WRITES_ENABLED=false`.
+
+The initial 90-day sync succeeded for 2026-06-11 through 2026-09-08, storing
+1,330 rows. A closed-day comparison for 2026-09-07 matched spend, impressions,
+link clicks and website leads against a fresh Meta API read with identical
+dates and attribution. The live browser renders account, campaign and ad data.
+
+The sync retains a warning for 889 daily rows without a returned lead action.
+Those values remain unknown, so some period lead/CPL totals remain unavailable.
+This does not indicate an authentication failure. Daily imports are scheduled
+at 06:00 UTC. The 60-day token expires on 2026-11-07 and must be renewed before
+expiry. Credentials and detailed reconciliation are stored only in the
+owner-only local configuration directory and Cloudflare secrets.
 Without those, Meta sync fails safely and no zero-performance snapshot is
 created. HighLevel needs its own confirmed pipeline/stages and runtime token;
 Anthropic remains optional and unconfigured. Hosting and database setup are
