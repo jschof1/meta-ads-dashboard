@@ -19,7 +19,7 @@ export type HighLevelConfigStatus = "not_configured" | "misconfigured" | "disabl
 export type HighLevelSettings = {
   token: string | null;
   locationId: string | null;
-  apiVersion: typeof HIGHLEVEL_API_VERSION;
+  apiVersion: "v3" | "2021-07-28";
   syncEnabled: boolean;
   pipelineId: string | null;
   stageIds: HighLevelStageIds;
@@ -99,7 +99,7 @@ export function loadHighLevelSettings(env: Environment = process.env): HighLevel
   const locationId = validId(value(env, "HIGHLEVEL_LOCATION_ID"), "HIGHLEVEL_LOCATION_ID", errors);
   const pipelineId = validId(value(env, "HIGHLEVEL_PIPELINE_ID"), "HIGHLEVEL_PIPELINE_ID", errors);
   const apiVersion = value(env, "HIGHLEVEL_API_VERSION") ?? HIGHLEVEL_API_VERSION;
-  if (apiVersion !== HIGHLEVEL_API_VERSION) errors.push(`HIGHLEVEL_API_VERSION must be ${HIGHLEVEL_API_VERSION}`);
+  if (apiVersion !== "v3" && apiVersion !== "2021-07-28") errors.push("HIGHLEVEL_API_VERSION must be v3 or 2021-07-28");
 
   const stageIds = Object.fromEntries(HIGHLEVEL_STAGE_KEYS.map((key) => {
     const envKey = highLevelStageIdEnvKey(key);
@@ -175,7 +175,7 @@ export function loadHighLevelSettings(env: Environment = process.env): HighLevel
   return {
     token,
     locationId,
-    apiVersion: HIGHLEVEL_API_VERSION,
+    apiVersion: apiVersion === "2021-07-28" ? apiVersion : HIGHLEVEL_API_VERSION,
     syncEnabled,
     pipelineId,
     stageIds,

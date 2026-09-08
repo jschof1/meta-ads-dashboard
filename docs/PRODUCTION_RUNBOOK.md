@@ -299,3 +299,29 @@ protected dashboard request, and the cron bearer boundary.
   POST automatically; inspect Meta and prepare a fresh proposal after
   confirming the live state. Keep the feature flag disabled unless the
   explicit safety gate is active.
+
+
+### 8 September 2026: private integration compatibility and funnel evidence
+
+The existing UKTL private integration supports `Version: 2021-07-28`. Using
+`v3` with this token returns 401 for contact search, despite valid location and
+pipeline reads. The dated API requires `location_id` and `pipeline_id` query
+parameters for opportunity search; the v3 client uses camelCase. Both contracts
+are supported explicitly. A live application-client read retrieved all 2,636
+contacts and 312 opportunities, matching provider totals without truncation.
+
+The business funnel is not represented by five distinct pipeline stages:
+`contacted` is a contact tag; booking history comes from the website sales
+calendar `yqmEqEfPBSYpEBnQ91Q3`; Stripe confirms payments. Closed is only a sales
+indicator. Do not fabricate stage IDs to enable the existing stage-based sync.
+Calendar reads from November 2025 through 8 September 2026 returned 203 events
+for 178 contacts. Confirmed bookings do not prove attendance. The qualification
+rule remains unconfirmed and must be unavailable until supported by evidence.
+
+Stripe-to-CRM reconciliation is a private operator analysis, not a deployed
+scheduled Stripe integration. All 18 successful payments in the inspected
+10 August–8 September window have client matches after owner clarification.
+The dashboard still needs durable tag, appointment and payment ingestion before
+it can report these outcomes automatically. Keep date cohorts and attribution
+coverage explicit; historical first-touch campaign revenue is not same-period
+ROAS.

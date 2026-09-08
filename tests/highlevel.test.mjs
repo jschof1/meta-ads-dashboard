@@ -189,13 +189,13 @@ test("selects only one exact location-scoped pipeline and rejects missing, dupli
   assert.equal((await client.getPipeline()).id, "pipeline-1");
 });
 
-test("requires the explicit sync gate and rejects a non-v3 configuration", () => {
+test("requires the explicit sync gate and rejects an unsupported API version", () => {
   const disabled = loadHighLevelSettings(env({ HIGHLEVEL_SYNC_ENABLED: "false" }));
   assert.equal(disabled.mappingReady, true);
   assert.equal(disabled.providerReady, false);
   assert.equal(disabled.status, "disabled");
 
-  const oldVersion = loadHighLevelSettings(env({ HIGHLEVEL_API_VERSION: "2021-07-28" }));
+  const oldVersion = loadHighLevelSettings(env({ HIGHLEVEL_API_VERSION: "unsupported" }));
   assert.equal(oldVersion.mappingReady, false);
   assert.equal(oldVersion.status, "misconfigured");
   assert.match(oldVersion.errors.join(" "), /HIGHLEVEL_API_VERSION/);
@@ -211,4 +211,18 @@ test("requires the explicit sync gate and rejects a non-v3 configuration", () =>
   const invalidGate = loadHighLevelSettings(env({ HIGHLEVEL_SYNC_ENABLED: "TRUE" }));
   assert.equal(invalidGate.providerReady, false);
   assert.match(invalidGate.errors.join(" "), /HIGHLEVEL_SYNC_ENABLED/);
+});
+
+ test("private integrations use the dated version and snake-case opportunity scope", async () => {
+  const config = loadHighLevelSettings(env({ HIGHLEVEL_API_VERSION: "2021-07-28" }));
+  assert.equal(config.providerReady, true);
+  const client = createHighLevelClient({ config, fetcher: async (url, init) => {
+    assert.equal(new Headers(init.headers).get("Version"), "2021-07-28");
+    const parsed = new URL(url);
+    assert.equal(parsed.searchParams.get("location_id"), "location-1");
+    assert.equal(parsed.searchParams.get("pipeline_id"), "pipeline-1");
+    assert.equal(parsed.searchParams.has("locationId"), false);
+    return response({ opportunities: [], meta: { total: 0 } });
+  }});
+  assert.equal((await client.listOpportunities()).items.length, 0);
 });
