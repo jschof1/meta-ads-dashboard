@@ -226,3 +226,11 @@ test("requires the explicit sync gate and rejects an unsupported API version", (
   }});
   assert.equal((await client.listOpportunities()).items.length, 0);
 });
+
+test('does not follow credential-bearing redirects on Workers', async () => {
+  const client=createHighLevelClient({config:loadHighLevelSettings(env()),maxRetries:0,fetcher:async (_url,init)=>{
+    assert.equal(init.redirect,'manual');
+    return new Response('',{status:302,headers:{Location:'https://example.com'}});
+  }});
+  await assert.rejects(()=>client.listContacts(),HighLevelApiError);
+});

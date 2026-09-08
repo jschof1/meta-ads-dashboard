@@ -330,3 +330,25 @@ ROAS.
 The compatibility fix was deployed on 8 September 2026 as Worker version
 `3215d1d4-c218-47be-9899-5ba44fba0908`. The protected live Cloudflare smoke
 passed for two sessions, including repeated database reads and migration checks.
+
+### Live business outcomes and website tracking verification
+
+`/api/business-outcomes` is session-protected and reads the current contacts,
+sales calendar and connected Stripe transactions from HighLevel. The panel has
+its own rolling 30-day window and refreshes on page load or explicitly; it is
+not a durable scheduled snapshot. Payment pagination is bounded and requires
+unique IDs and provider-total agreement. Currency totals remain separate and
+refunds are deducted. These are client receipts, not attributed ROAS.
+
+The configured `HIGHLEVEL_SALES_CALENDAR_ID` is `yqmEqEfPBSYpEBnQ91Q3`.
+The September 8 payment reconciliation matched all 18 HighLevel transactions to
+Stripe payment intents: GBP 3,499 collected, 197 refunded. The `uktl-tracking-test`
+contact tag excludes controlled test contacts and their bookings from reporting.
+
+A real owner-approved browser test submitted the callback form and booked a call.
+The form redirected to `/book-a-call`; a Lead event and PageView were observed
+for pixel `25839137269022721`. The booking redirected to `/thank-you`, and its
+appointment was read back through the calendar API. The test appointment was
+removed after verification and the contact tagged. Only PageView was observed
+on the thank-you page; a separate Meta booking event is not verified. No claim
+of browser/server deduplication or complete conversions-API delivery is made.
