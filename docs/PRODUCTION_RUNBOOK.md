@@ -315,8 +315,9 @@ The business funnel is not represented by five distinct pipeline stages:
 calendar `yqmEqEfPBSYpEBnQ91Q3`; Stripe confirms payments. Closed is only a sales
 indicator. Do not fabricate stage IDs to enable the existing stage-based sync.
 Calendar reads from November 2025 through 8 September 2026 returned 203 events
-for 178 contacts. Confirmed bookings do not prove attendance. The qualification
-rule remains unconfirmed and must be unavailable until supported by evidence.
+for 178 contacts. Confirmed bookings do not prove attendance. Jack confirmed that qualification is not consistently defined and is not a
+priority. Leave that metric unavailable; it must not block booking, contact-tag
+or payment collection.
 
 Stripe-to-CRM reconciliation is a private operator analysis, not a deployed
 scheduled Stripe integration. All 18 successful payments in the inspected
@@ -325,3 +326,7 @@ The dashboard still needs durable tag, appointment and payment ingestion before
 it can report these outcomes automatically. Keep date cohorts and attribution
 coverage explicit; historical first-touch campaign revenue is not same-period
 ROAS.
+
+The compatibility fix was deployed on 8 September 2026 as Worker version
+`3215d1d4-c218-47be-9899-5ba44fba0908`. The protected live Cloudflare smoke
+passed for two sessions, including repeated database reads and migration checks.
