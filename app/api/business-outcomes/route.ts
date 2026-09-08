@@ -7,6 +7,9 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
   const unauthorized = await requireApiSession(request);
   if (unauthorized) return unauthorized;
+  if (!process.env.HIGHLEVEL_TOKEN || !process.env.HIGHLEVEL_LOCATION_ID || !process.env.HIGHLEVEL_SALES_CALENDAR_ID) {
+    return NextResponse.json({ status: "not_configured", error: "Business reporting is not configured." }, { headers: { "Cache-Control": "private, no-store" } });
+  }
   try {
     return NextResponse.json(await readBusinessOutcomes(), { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

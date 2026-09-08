@@ -10,7 +10,7 @@ export function BusinessOutcomesPanel() {
     const controller = new AbortController();
     fetch("/api/business-outcomes", { signal: controller.signal, cache: "no-store" }).then(async r => {
       if (!r.ok) throw new Error("unavailable");
-      const result = await r.json(); setData(result); setError(false);
+      const result = await r.json(); if (result.error) throw new Error("unavailable"); setData(result); setError(false);
     }).catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, [reload]);
