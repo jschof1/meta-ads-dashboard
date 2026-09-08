@@ -44,6 +44,13 @@ for (let session = 0; session < 2; session++) {
   assert.equal(diagnostics.migrations.status, "ok");
   assert.equal(diagnostics.migrations.appliedCount, 7);
   assert.equal(diagnostics.meta.actionGate.writesEnabled, false);
+  const concurrentReads = await Promise.all(["/api/diagnostics", "/api/dashboard/state", "/api/dashboard/state"].map((path) =>
+    get(path, { headers: { cookie } })));
+  for (const read of concurrentReads) {
+    assert.equal(read.status, 200, "Concurrent browser data requests must succeed");
+    assert.match(read.headers.get("content-type") || "", /application\/json/);
+    await read.json();
+  }
   const page = await get("/", { headers: { cookie } });
   assert.equal(page.status, 200);
   assert.match(await page.text(), /UK Trade Leads/);
