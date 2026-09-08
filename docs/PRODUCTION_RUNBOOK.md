@@ -2,7 +2,8 @@
 
 Status: ready for controlled external validation. The repository has not been
 connected to a production Vercel project, Turso database or Meta account from
-this checkout as of 2026-09-06. Read-only HighLevel access and a synthetic live
+this checkout as of 2026-09-08 (provider project list, CLI authentication and
+secret-helper key inventory rechecked). Read-only HighLevel access and a synthetic live
 Anthropic request have been validated; this is not a production deployment.
 
 This is a single-business UK Trade Leads application. A local green build is
