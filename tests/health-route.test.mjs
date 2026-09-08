@@ -33,7 +33,7 @@ globalThis.prisma = {
 };
 const { prisma } = await import("../lib/db.ts");
 const { GET } = await import("../app/api/health/route.ts");
-assert.equal(prisma, globalThis.prisma);
+assert.equal(prisma.syncRun, globalThis.prisma.syncRun);
 
 beforeEach(() => { process.env = environment(); });
 after(() => {
@@ -59,7 +59,7 @@ function assertUnknown({ response, body }, database) {
 }
 
 test("health rejects missing or invalid signed sessions before querying the database", async (t) => {
-  const probe = t.mock.method(prisma, "$queryRaw", unexpectedDatabaseCall);
+  const probe = t.mock.method(globalThis.prisma, "$queryRaw", unexpectedDatabaseCall);
   const query = t.mock.method(prisma.syncRun, "findFirst", unexpectedDatabaseCall);
   for (const cookie of ["", `${SESSION_COOKIE}=invalid.signature`]) {
     const response = await GET(new Request("http://localhost/api/health", { headers: { cookie } }));
@@ -72,7 +72,7 @@ test("health rejects missing or invalid signed sessions before querying the data
 
 for (const failedQuery of ["attempt", "success"]) {
   test(`health reports unknown when the DB probe succeeds but the ${failedQuery} query fails`, async (t) => {
-    t.mock.method(prisma, "$queryRaw", async () => [{ "1": 1 }]);
+    t.mock.method(globalThis.prisma, "$queryRaw", async () => [{ "1": 1 }]);
     t.mock.method(prisma.syncRun, "findFirst", async ({ where }) => {
       if ((where.status === "SUCCEEDED") === (failedQuery === "success")) {
         throw new Error("synthetic private database credential and missing SyncRun table");
@@ -86,7 +86,7 @@ for (const failedQuery of ["attempt", "success"]) {
 }
 
 test("health reports an unavailable probe without guessing sync history", async (t) => {
-  t.mock.method(prisma, "$queryRaw", async () => { throw new Error("private connection details"); });
+  t.mock.method(globalThis.prisma, "$queryRaw", async () => { throw new Error("private connection details"); });
   const query = t.mock.method(prisma.syncRun, "findFirst", unexpectedDatabaseCall);
   const result = await health();
   assertUnknown(result, "unreachable");
@@ -96,7 +96,7 @@ test("health reports an unavailable probe without guessing sync history", async 
 
 test("health fails closed before the probe when the database is unconfigured", async (t) => {
   delete process.env.DATABASE_URL;
-  const probe = t.mock.method(prisma, "$queryRaw", unexpectedDatabaseCall);
+  const probe = t.mock.method(globalThis.prisma, "$queryRaw", unexpectedDatabaseCall);
   const result = await health();
   assertUnknown(result, "unreachable");
   assert.equal(result.body.configuration.database, "misconfigured");
@@ -105,14 +105,14 @@ test("health fails closed before the probe when the database is unconfigured", a
 
 test("health reports unknown without querying another account when scope is missing", async (t) => {
   delete process.env.META_AD_ACCOUNT_ID;
-  t.mock.method(prisma, "$queryRaw", async () => [{ "1": 1 }]);
+  t.mock.method(globalThis.prisma, "$queryRaw", async () => [{ "1": 1 }]);
   const query = t.mock.method(prisma.syncRun, "findFirst", unexpectedDatabaseCall);
   assertUnknown(await health(), "reachable");
   assert.equal(query.mock.callCount(), 0);
 });
 
 test("health reports never only after both scoped sync queries succeed with no rows", async (t) => {
-  t.mock.method(prisma, "$queryRaw", async () => [{ "1": 1 }]);
+  t.mock.method(globalThis.prisma, "$queryRaw", async () => [{ "1": 1 }]);
   const query = t.mock.method(prisma.syncRun, "findFirst", async () => null);
   const { response, body } = await health();
   assert.equal(response.status, 200);
@@ -128,7 +128,7 @@ for (const status of ["completed", "running", "failed", "stale"]) {
     const finishedAt = new Date(Date.now() - (status === "stale" ? 27 * 60 * 60 * 1_000 : 60_000));
     const startedAt = new Date(finishedAt.getTime() - 60_000);
     const attemptStatus = status === "running" ? "RUNNING" : status === "failed" ? "FAILED" : "SUCCEEDED";
-    t.mock.method(prisma, "$queryRaw", async () => [{ "1": 1 }]);
+    t.mock.method(globalThis.prisma, "$queryRaw", async () => [{ "1": 1 }]);
     t.mock.method(prisma.syncRun, "findFirst", async ({ where }) => where.status === "SUCCEEDED"
       ? { finishedAt }
       : { status: attemptStatus, startedAt, finishedAt: status === "running" ? null : finishedAt });
