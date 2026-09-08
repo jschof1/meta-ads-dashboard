@@ -1,14 +1,10 @@
 # Production verification and recovery runbook
 
-Status: ready for controlled external validation. The repository has not been
-connected to a production Vercel project, Turso database or Meta account from
-this checkout as of 2026-09-08 (provider project list, CLI authentication and
-secret-helper key inventory rechecked). Read-only HighLevel access and a synthetic live
-Anthropic request have been validated; this is not a production deployment.
-
-This is a single-business UK Trade Leads application. A local green build is
-evidence about the code and fixtures, not proof that a provider account,
-production database, domain, or scheduled job is live.
+Status (2026-09-08): deployed on Cloudflare Workers with a Turso Free database
+in Ireland. Live login, protected API boundaries, database access and all seven
+migration checks passed. See [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md).
+Meta credentials and matching-date reconciliation remain outstanding; optional
+HighLevel mapping/token and AI are not configured. Meta writes remain disabled.
 
 ## Local evidence completed
 
@@ -71,20 +67,20 @@ The following checks are automated in this repository:
   is retained in the printed temporary evidence directory; disposable DB,
   certificate, token and runtime files are removed.
 
-## Controlled production deployment
+## Controlled production deployment and database changes
 
-1. Create or select the private Vercel project and the production Turso
+1. Create or select the authenticated Cloudflare Worker and the production Turso
    database. Confirm the database name and URL from the provider account; do
    not paste credentials into the repository.
 2. Take and retain a recoverable database backup before the first schema change.
-3. Set server-only Vercel environment variables for Production. At minimum:
+3. Set server-only Cloudflare Worker secrets. At minimum:
    `DASHBOARD_PASSWORD`, `AUTH_SECRET`, `CRON_SECRET`, `TURSO_DATABASE_URL`,
    `TURSO_AUTH_TOKEN`, `META_MARKETING_TOKEN`, and `META_AD_ACCOUNT_ID`.
    Production requires TLS (`libsql://` or `https://`, never `tls=0`); invalid
    or missing configuration fails closed without a local-file fallback.
    The repository's install/build wrappers supply a local SQLite datasource
    URL to `prisma generate`; no production `DATABASE_URL` is required for the
-   Vercel build. The runtime selects `TURSO_DATABASE_URL` first and Vercel's
+   Cloudflare build. The runtime selects `TURSO_DATABASE_URL` first and the Worker
    filesystem is not application storage.
    Keep `META_WRITES_ENABLED=false`. Add optional provider values only after
    their own validation gate is satisfied.
@@ -104,7 +100,7 @@ The following checks are automated in this repository:
    pending migration is an atomic non-interactive write batch, so concurrent
    runs serialize at the database and a failed batch rolls back. Run it once
    from a controlled operator machine; do not run it from a request route or a
-   Vercel function.
+   Worker request.
 5. If the database already contains application tables but no
    `_prisma_migrations` ledger, stop. Take the backup, inspect the actual
    schema with the repository's read-only inspector. By default it compares
@@ -143,7 +139,7 @@ The following checks are automated in this repository:
    batch. If the inspection reports a mismatch, do not baseline or repair it
    by deleting tables; resolve the schema difference through a separate,
    recoverable database change and rerun the inspection.
-6. Deploy the merged `main` commit to Vercel. Verify the deployment build and
+6. Deploy the merged `main` commit with `npm run deploy:cloudflare`. Verify the deployment build and
    then sign in through the private dashboard.
 7. Open the authenticated dashboard and `/api/diagnostics`. Confirm database
    `ok`, migration `ok`, authentication and cron `configured`, and Meta
@@ -160,18 +156,13 @@ the [Turso Prisma guidance](https://docs.turso.tech/sdk/ts/orm/prisma), and
 
 ## Cron and manual sync verification
 
-The committed `vercel.json` schedules:
-
-- `/api/cron/sync-meta` at `06:00 UTC` (`0 6 * * *`).
-- `/api/cron/sync-highlevel` at `06:30 UTC` (`30 6 * * *`).
-
-Vercel makes a `GET` request and supplies `CRON_SECRET` as an
-`Authorization: Bearer …` header when the environment variable is configured.
-The configured expression is interpreted in UTC. On Vercel Hobby, a daily
-job may run at any point within its scheduled hour; other plans have tighter
-minute-level timing. A cron configuration change requires a new deployment.
-Inspect the Vercel cron logs for the actual invocation. See Vercel's [current
-cron documentation](https://vercel.com/docs/cron-jobs/manage-cron-jobs).
+The committed `wrangler.jsonc` schedules Meta at `0 6 * * *` and HighLevel at
+`30 6 * * *`, both UTC. `cloudflare-worker.mjs` dispatches the existing protected
+route through the OpenNext fetch handler, supplying `CRON_SECRET` as a bearer
+header. Disabled HighLevel polling is skipped. Changes require a new deployment.
+Use Cloudflare Worker logs to inspect actual scheduled events. Registration alone
+is not a successful sync. The normal Node.js route endpoints remain available
+for authenticated operator smoke checks.
 
 Verify each route with the deployment's scheduler and inspect the stored
 `SyncRun` or `CrmSyncRun` row. A successful HTTP response alone is not enough:
@@ -251,15 +242,13 @@ won customers are not being conflated.
 
 ## Remaining external release gates
 
-- **Hosting and storage:** the connected Vercel team is accessible, but contains
-  no project for this repository; the local Vercel CLI has no credentials. No
-  production Turso URL/token is available in the secret helper or this checkout.
-  Confirm/provision the intended Vercel project and Turso database, supply the
-  database connection securely, then follow the controlled deployment steps.
+- **Hosting and storage:** provisioned and verified on Cloudflare Workers and
+  Turso Free. Live database/auth/migration diagnostics passed on 2026-09-08.
+  See the Cloudflare deployment record for identifiers and repeatable commands.
 - **Meta reads:** neither the secret helper nor the existing Work OS Meta
   integration has a configured marketing token/account. Supply only
   `META_MARKETING_TOKEN` (with read access) and `META_AD_ACCOUNT_ID` through the
-  secret helper or Vercel server-side environment. Currency/timezone/entities
+  secret helper or Cloudflare Worker secrets. Currency/timezone/entities
   and result action types should be discovered after connection. Reconcile
   identical dates/attribution before calling the performance numbers validated.
 - **CRM:** confirm the business pipeline and semantic stages described above,
@@ -267,17 +256,15 @@ won customers are not being conflated.
   and opportunity API contract checks do not prove the chosen funnel mapping.
 - **Meta mutations:** remain disabled. No live mutation was attempted. This
   requires a separate explicit approval, suitable permissions and budget bounds.
-- **Production acceptance:** deployed authentication, migration state, manual
-  sync, actual cron invocations, provider reconciliation and recovery have not
-  been claimed complete. Local/CI checks do not replace those observations.
+- **Production acceptance:** deployed authentication and migration state passed; successful live
+  provider sync, actual scheduled-provider results and reconciliation remain open. Local/CI checks do not replace those observations.
 
 GitHub issues are disabled for this repository, so the implementation PR and
 this runbook hold the remaining release-gate record.
 
 ## Secret rotation
 
-Rotate each value at its provider first, then replace the matching Vercel
-Production environment variable and redeploy:
+Rotate each value at its provider first, then replace the matching Cloudflare Worker secret and redeploy:
 
 - `DASHBOARD_PASSWORD`: sign-in password.
 - `AUTH_SECRET`: invalidates existing signed sessions.

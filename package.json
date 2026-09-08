@@ -18,7 +18,11 @@
     "db:inspect:turso": "node scripts/inspect-turso-schema.mjs",
     "db:baseline:turso": "node scripts/record-turso-baseline.mjs",
     "db:migrate:turso": "node scripts/apply-turso-migrations.mjs",
-    "postinstall": "node scripts/prisma-generate.mjs"
+    "postinstall": "node scripts/prisma-generate.mjs",
+    "build:cloudflare": "opennextjs-cloudflare build",
+    "preview:cloudflare": "opennextjs-cloudflare preview",
+    "deploy:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "test:cloudflare": "node scripts/cloudflare-smoke.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.0",
@@ -47,6 +51,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "1.20.6",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -57,6 +62,7 @@
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "4.23.13",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "4.129.1"
   }
 }
