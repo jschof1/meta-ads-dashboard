@@ -6,7 +6,7 @@ const prismaBin = join(root, "node_modules", "prisma", "build", "index.js");
 const nextBin = join(root, "node_modules", "next", "dist", "bin", "next");
 const env = {
   ...process.env,
-  // Keep Prisma's local SQLite datasource valid during the Vercel build while
+  // Keep Prisma's local SQLite datasource valid during the production build while
   // retaining TURSO_DATABASE_URL for any application-side build evaluation.
   DATABASE_URL: "file:/tmp/uktl-prisma-build.db",
 };

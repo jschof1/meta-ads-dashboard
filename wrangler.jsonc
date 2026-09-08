@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "uktl-meta-dashboard",
+  "account_id": "1d7541992ccacf0931ee0e385daa5e08",
+  "main": "cloudflare-worker.mjs",
+  "compatibility_date": "2026-09-08",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "uktl-meta-dashboard"
+    }
+  ],
+  "vars": {
+    "META_WRITES_ENABLED": "false",
+    "HIGHLEVEL_SYNC_ENABLED": "false"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "limits": {
+    "cpu_ms": 1000
+  },
+  "triggers": {
+    "crons": [
+      "0 6 * * *",
+      "30 6 * * *"
+    ]
+  }
+}

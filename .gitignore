@@ -52,3 +52,8 @@ public/plan.md
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Cloudflare generated output and local secrets
+.open-next/
+.wrangler/
+.dev.vars*

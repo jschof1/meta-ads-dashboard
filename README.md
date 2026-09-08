@@ -20,7 +20,7 @@ Budget projections and customer-value assumptions are intentionally absent. They
 
 ## Stack
 
-Next.js 16.3 · React 19 · Tailwind 4 · shadcn · Recharts · Prisma with libSQL/local SQLite · Anthropic SDK · Vercel cron.
+Next.js 16.3 · React 19 · Tailwind 4 · shadcn · Recharts · Prisma with libSQL/local SQLite · Anthropic SDK · Cloudflare cron.
 
 ## Local install
 
@@ -111,15 +111,15 @@ Targets and budgets are not environment defaults. They live in the typed UKTL co
 
 ## Production deploy
 
-Use a private Vercel project and a production libSQL/Turso database. Set
-`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as server-only Vercel Production
+Use the authenticated Cloudflare Worker and a production libSQL/Turso database. Set
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` as server-only Cloudflare Worker
 variables. The runtime selects the Turso URL before the local Prisma
 `DATABASE_URL` value.
 
 The repository's install/build wrappers supply a local SQLite schema URL to
-Prisma Client generation, so a Vercel build does not need a `DATABASE_URL`
+Prisma Client generation, so a Cloudflare build does not need a `DATABASE_URL`
 value. It is not production storage: the runtime always selects
-`TURSO_DATABASE_URL` first, and Vercel's filesystem must not be used as the
+`TURSO_DATABASE_URL` first, and The Worker filesystem must not be used as the
 application's database.
 
 ```bash
@@ -154,16 +154,16 @@ remote Turso/libSQL HTTP URL and do not use a production reset. See
 [`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md) for the controlled
 procedure and recovery steps.
 
-Set the remaining values from `.env.example` in Vercel and keep all tokens
-server-side. The committed Vercel schedules are configured for Meta at 06:00
-UTC and HighLevel at 06:30 UTC. Vercel invokes cron routes with `GET` and
-supplies the configured `CRON_SECRET` as the cron request's bearer
-authorization header. On Vercel Hobby, daily jobs may run at any point within
-the scheduled hour; inspect the actual cron logs. Changing the schedule
-requires a new deployment. Verify `/api/diagnostics`, a protected dashboard
-read, and the resulting durable sync rows after deployment. HighLevel remains
-safely disabled when its explicit gate is false or its mapping/token is
-incomplete.
+Set server-only secrets through Wrangler. `npm run deploy:cloudflare` builds
+and deploys this app with OpenNext. `wrangler.jsonc` registers Meta at 06:00 UTC
+and HighLevel at 06:30 UTC. The scheduled handler calls the existing protected
+routes with `CRON_SECRET`; disabled HighLevel polling is skipped. Schedule
+registration is not proof of a successful provider sync.
+
+Current URL: https://uktl-meta-dashboard.jackschofield1.workers.dev
+
+See [Cloudflare deployment](docs/CLOUDFLARE_DEPLOYMENT.md) for account, database,
+verification, credentials handover and cost details. Vercel is not required.
 
 ## System diagnostics
 

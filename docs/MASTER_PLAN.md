@@ -24,7 +24,7 @@ Meta metrics are diagnostic signals. Downstream lead quality, CAC, and revenue a
 5. Missing/error data stays missing/error; never replace it with believable zeroes.
 6. Use UK terminology and localisation: lead, CPL, qualified lead, booked call, customer, CAC, revenue, ROAS, `en-GB`, account currency, and account timezone.
 7. Follow `AGENTS.md`. Before changing Next.js routing, auth, caching, middleware/proxy, or server behaviour, read the relevant installed Next.js 16 documentation in `node_modules/next/dist/docs/`.
-8. Preserve useful existing code and keep infrastructure simple: Next.js, Prisma/libSQL/Turso, Vercel, Anthropic, and HighLevel when introduced.
+8. Preserve useful existing code and keep infrastructure simple: Next.js, Prisma/libSQL/Turso, Cloudflare Workers, Anthropic, and HighLevel when introduced.
 9. Never commit secrets or expose them to browser code or logs.
 
 ## Known inherited problems
@@ -92,7 +92,7 @@ Continue with mocks/fixtures until an input is genuinely required.
 - **UKTL targets (PR04/06):** target/acceptable/maximum CPL, budget, optional target CAC. Unknown targets do not block historical analysis.
 - **AI (PR07):** `ANTHROPIC_API_KEY`. Deterministic features work without it.
 - **HighLevel (PR08):** current private integration/API access, UKTL location, pipeline and semantically ambiguous stage mapping.
-- **Production (PR10):** Vercel/database access, dashboard password, generated auth and cron secrets.
+- **Production (PR10):** Cloudflare/database access, dashboard password, generated auth and cron secrets.
 - **Meta writes (PR09):** request only at this stage, require explicit permission and `META_WRITES_ENABLED=true`.
 
 ## Non-goals and hard prohibitions

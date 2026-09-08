@@ -13,7 +13,7 @@ Manager clone.
   ingestion. Local tests use fixtures and do not need Meta credentials.
 - A private libSQL/Turso database for production. Local development uses
   SQLite.
-- A Vercel project only for deployment. Anthropic and HighLevel are optional.
+- A Cloudflare Workers account for deployment. Anthropic and HighLevel are optional.
 
 ## Local setup
 
@@ -100,9 +100,9 @@ funnel counts remain usable without a currency mapping.
 
 - Meta manual sync: authenticated `POST /api/refresh` or the dashboard
   control.
-- Meta cron: Vercel `GET /api/cron/sync-meta` (the route also accepts POST for
+- Meta cron: Cloudflare scheduled `GET /api/cron/sync-meta` (the route also accepts POST for
   local/manual checks).
-- HighLevel cron: Vercel `GET /api/cron/sync-highlevel` (the route also accepts
+- HighLevel cron: Cloudflare scheduled `GET /api/cron/sync-highlevel` (the route also accepts
   POST for local/manual checks).
 - Authenticated system diagnostics: `GET /api/diagnostics`.
 - Authenticated live Meta read diagnostic: `GET /api/meta/diagnostic`.
@@ -113,12 +113,11 @@ or fabricate the last successful read model. The diagnostics panel reports
 database reachability, migration state, configuration presence, stored sync
 freshness, optional provider state, and the Meta action gate without secrets.
 
-Vercel cron schedules are configured for 06:00 UTC for Meta and 06:30 UTC for
-HighLevel. Vercel sends the configured `CRON_SECRET` as the cron request's
-bearer authorization header; do not put the secret in a URL. On Vercel Hobby,
-daily jobs may run at any point within their scheduled hour, so verify the
-actual invocation in Vercel logs. Cron configuration changes require a new
-deployment.
+Cloudflare cron schedules are configured in `wrangler.jsonc` for 06:00 UTC
+for Meta and 06:30 UTC for HighLevel. The scheduled handler supplies the secret
+as a bearer header to the existing route handler. Disabled HighLevel polling
+is skipped. Inspect Cloudflare logs and durable sync rows to verify real
+invocations. See [Cloudflare deployment](docs/CLOUDFLARE_DEPLOYMENT.md).
 
 ## Approval-gated Meta actions
 
@@ -137,10 +136,9 @@ advertiser permissions, server-only token configuration, and both
 `META_ACTION_MAX_BUDGET_CHANGE_PERCENT`. Provider failures are terminal and
 are never automatically retried.
 
-## Production: Vercel and Turso
+## Production: Cloudflare Workers and Turso
 
-Create a private Vercel project and a production Turso database. The Turso
-CLI's normal provisioning shape is:
+The production Worker and Turso database are provisioned. For a separate environment, the Turso CLI's normal provisioning shape is:
 
 ```bash
 turso db create <database-name>
@@ -148,12 +146,12 @@ turso db show <database-name> --url
 turso db tokens create <database-name>
 ```
 
-Store the returned URL/token in Vercel Production as
+Store the returned URL/token as Cloudflare Worker secrets named
 `TURSO_DATABASE_URL`/`TURSO_AUTH_TOKEN`. Set the auth, Meta, and optional
 provider values server-side. `DATABASE_URL` is the local Prisma SQLite URL;
 the application selects `TURSO_DATABASE_URL` first at runtime. The repository's
 install/build wrappers supply a local SQLite schema URL to Prisma Client
-generation, so Vercel does not need a production `DATABASE_URL`; Vercel's
+generation, so Cloudflare does not need a production `DATABASE_URL`; the Worker
 filesystem must not be used as application storage.
 
 Remote Turso/libSQL uses HTTP and must not be passed to Prisma Migrate. Prisma
@@ -194,7 +192,7 @@ production. See the [Prisma Turso guide](https://docs.prisma.io/docs/orm/v6/over
 and [Turso's Prisma guidance](https://docs.turso.tech/sdk/ts/orm/prisma).
 
 Deploy only the merged `main` commit after migration. Sign in, verify
-`/api/diagnostics`, verify a protected dashboard read, and confirm the Vercel
+`/api/diagnostics`, verify a protected dashboard read, and confirm the Cloudflare
 cron invocations create the expected durable sync rows. Record exact dates,
 timezone, attribution window, action type, metrics and discrepancies when
 manually reconciling against Meta Ads Manager. A production deployment is not

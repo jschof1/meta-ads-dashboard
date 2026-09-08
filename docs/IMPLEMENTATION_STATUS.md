@@ -15,7 +15,7 @@ issues are disabled for this repository.
 | [07](https://github.com/jschof1/meta-ads-dashboard/pull/17) | Trustworthy AI analyst | COMPLETE | `codex/implement-pr07-from-main/07-ai-analyst` | PR06 | Synthetic live Anthropic validation passed; production configuration pending |
 | [08](https://github.com/jschof1/meta-ads-dashboard/pull/18) | HighLevel CRM attribution | COMPLETE | `codex/implement-pr08-from-main/08-highlevel-attribution` | PR07 | Read access/contract validated; business stage mapping and runtime token pending |
 | [09](https://github.com/jschof1/meta-ads-dashboard/pull/19) | Approval-gated Meta actions | COMPLETE | `codex/implement-pr09-from-main/09-approved-meta-actions` | PR01, PR02, PR06, explicit approval | Meta write permission; disabled by default |
-| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | BLOCKED | `feat/10-production-ready` | PR01–PR09 (PR08 may be explicitly deferred) | Code delivered by PR #20; production acceptance still requires deployment and Meta reconciliation |
+| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | BLOCKED | `feat/10-production-ready` | PR01–PR09 (PR08 may be explicitly deferred) | Code delivered by PR #20; Cloudflare/Turso deployed; live Meta sync and reconciliation remain open |
 
 Allowed statuses: `NOT STARTED`, `ACTIVE`, `BLOCKED`, `IN REVIEW`, `COMPLETE`.
 
@@ -32,17 +32,14 @@ On 2026-09-08 Jack requested completion of the outstanding merges. Code delivery
 through PR #20 is therefore separate from production acceptance; the PR10 work
 item remains `BLOCKED` until the live acceptance checks below are satisfied.
 Merging the verified hardening does not mark the system launched or waive any
-production test. PR01–PR09 are already merged; #20 is the only remaining open
-implementation PR at this verification point.
+production test. PR01–PR10 code is merged. A follow-up Cloudflare migration
+replaces the original Vercel hosting choice under Jack's 2026-09-08 direction.
 
-Fresh verification on 2026-09-08 passed lint, typecheck, all 300 tests, dependency
-audit (zero vulnerabilities), production build, HTTPS/libSQL smoke checks and
-all ten production browser checks (including desktop/mobile and fail-closed storage).
-The connected Vercel team still has no project linked to this repository, the
-local Vercel CLI is unauthenticated, and the secret helper contains no Turso or
-Meta read credentials. Production deployment, authentication, actual cron/manual
-sync and matching-date Meta reconciliation remain unverified. The connection
-requirements and recovery procedure are in [PRODUCTION_RUNBOOK.md](./PRODUCTION_RUNBOOK.md).
+Cloudflare Workers deployment and Turso Free provisioning are complete. Live
+login, protected API boundaries, database reachability and all seven migration
+checks passed. Meta still requires its read token/account and matching-date
+reconciliation. Optional HighLevel still requires business mapping and its
+runtime token. See [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md).
 PR09 remains disabled; no live Meta mutation was attempted.
 
 ## Update rules
