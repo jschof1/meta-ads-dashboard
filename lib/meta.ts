@@ -311,8 +311,8 @@ const ENTITY_FIELDS = {
   account: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc,business_name",
   campaigns: "id,name,objective,status,effective_status,daily_budget,lifetime_budget,start_time,stop_time,updated_time",
   adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info,updated_time",
-  ads: "id,name,status,effective_status,campaign_id,adset_id,updated_time,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec,updated_time}",
-  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags,updated_time",
+  ads: "id,name,status,effective_status,campaign_id,adset_id,updated_time,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec}",
+  creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags",
 } as const;
 
 function isObject(value: unknown): value is JsonObject {
