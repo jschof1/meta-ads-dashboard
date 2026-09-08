@@ -15,3 +15,8 @@ test('keeps contacts, booking people, and refunded client receipts distinct',()=
 test('does not invent zero refunds for missing payment data',()=>{
  assert.throws(()=>summarizeBusinessOutcomes([],[],[{liveMode:true,paymentProviderType:'stripe',status:'succeeded',createdAt:'2026-08-15',currency:'gbp',amount:197}],start,end));
 });
+
+test('excludes tagged tracking tests from contacts and bookings',()=>{
+ const r=summarizeBusinessOutcomes([{id:'test',dateAdded:'2026-08-11',tags:['uktl-tracking-test']}],[{id:'event',contactId:'test',startTime:'2026-08-12'}],[],start,end);
+ assert.equal(r.contactsCreated,0);assert.equal(r.appointments,0);
+});

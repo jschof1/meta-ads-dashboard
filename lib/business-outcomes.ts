@@ -6,9 +6,10 @@ const text = (v: unknown) => typeof v === "string" ? v : "";
 const date = (v: unknown) => Date.parse(text(v));
 export function summarizeBusinessOutcomes(contacts: Row[], events: Row[], payments: Row[], start: Date, end: Date) {
   const within = (value: unknown) => date(value) >= +start && date(value) <= +end;
-  const leads = contacts.filter(c => within(c.dateAdded));
+  const testIds = new Set(contacts.filter(c => Array.isArray(c.tags) && c.tags.includes("uktl-tracking-test")).map(c => text(c.id)));
+  const leads = contacts.filter(c => !testIds.has(text(c.id)) && within(c.dateAdded));
   const contacted = (c: Row) => Array.isArray(c.tags) && c.tags.some(t => text(t).trim().toLowerCase() === "contacted");
-  const appointments = events.filter(e => !e.deleted && within(e.startTime));
+  const appointments = events.filter(e => !e.deleted && !testIds.has(text(e.contactId)) && within(e.startTime));
   const bookedIds = new Set(appointments.map(e => text(e.contactId)).filter(Boolean));
   const paid = payments.filter(p => p.liveMode === true && p.paymentProviderType === "stripe" && ["succeeded", "refunded"].includes(text(p.status)) && within(p.createdAt));
   const currencyGroups: Record<string, { collected: number; refunded: number; net: number; payments: number }> = {};
