@@ -270,6 +270,20 @@ test("login, protected plan access, and logout work through route handlers", asy
   assert.equal(afterLogout.status, 401);
 });
 
+test("native login form posts credentials and redirects with an authenticated session", async () => {
+  const login = await get("/api/auth", {
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": "198.51.100.11" },
+    body: new URLSearchParams({ password: dashboardPassword }),
+  });
+  assert.equal(login.status, 303);
+  assert.equal(new URL(login.headers.get("location")).pathname, "/");
+  const cookie = login.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(cookie);
+  assert.equal((await get("/api/plan", { headers: { cookie } })).status, 200);
+});
+
 test("the optional static plan file stays behind the authentication boundary", async () => {
   const response = await get("/plan.md", { redirect: "manual" });
   assert.equal(response.status, 307);

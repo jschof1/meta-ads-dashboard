@@ -1,3 +1,4 @@
+import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSQL } from "@prisma/adapter-libsql";
 import { createClient, type Client } from "@libsql/client";
@@ -46,7 +47,7 @@ export function createPrismaClient(options: DatabaseOptions = {}): PrismaClient 
 }
 
 export async function withDatabaseClient<T>(db: PrismaClient, operation: (client: Client) => Promise<T>): Promise<T> {
-  const target = databaseTargets.get(db);
+  const target = databaseTargets.get(db === prisma ? getRuntimePrisma() : db);
   if (!target) throw new Error("Snapshot batches require a client created by createPrismaClient; database target is unknown");
   // A second connection to an in-memory URL is a different database.
   if (target.url.includes(":memory:")) throw new Error("Snapshot batches require a shared file or remote database target");
@@ -58,6 +59,29 @@ export async function withDatabaseClient<T>(db: PrismaClient, operation: (client
   }
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
+// Workers forbid reusing request-owned database I/O in a later request.
+const requestClients = new WeakMap<object, PrismaClient>();
+let nodeClient: PrismaClient | undefined;
+function getRuntimePrisma(): PrismaClient {
+  let context: object | undefined;
+  try { context = getCloudflareContext().ctx; } catch { /* Ordinary Node runtime. */ }
+  if (context) {
+    let client = requestClients.get(context);
+    if (!client) {
+      client = createPrismaClient();
+      requestClients.set(context, client);
+    }
+    return client;
+  }
+  nodeClient ??= globalForPrisma.prisma ?? createPrismaClient();
+  if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = nodeClient;
+  return nodeClient;
+}
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = getRuntimePrisma();
+    const value = Reflect.get(client, property, client);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});

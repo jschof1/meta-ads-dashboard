@@ -3,6 +3,10 @@ import { normalizeClientAddress, runScheduledSync } from "./lib/cloudflare-sched
 
 const worker = {
   fetch(request, env, ctx) {
+    // Only public build assets bypass authentication; private files still use Next.
+    if (new URL(request.url).pathname.startsWith("/_next/static/")) {
+      return env.ASSETS.fetch(request);
+    }
     return handler.fetch(normalizeClientAddress(request), env, ctx);
   },
   async scheduled(event, env, ctx) {
