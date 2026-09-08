@@ -448,3 +448,13 @@ test("redacts credential-shaped keys and values before raw data is stored or ret
   });
   assert.equal(safeJson(value).includes(token), false);
 });
+
+test("creative requests omit unsupported updated_time while retaining ad timestamps", async () => {
+  const { client, calls } = makeClient(() => jsonResponse({ data: [] }));
+  await client.listAds();
+  await client.listCreatives();
+  const adFields = calls[0].url.searchParams.get("fields");
+  assert.match(adFields, /adset_id,updated_time,creative\{/);
+  assert.doesNotMatch(adFields.match(/creative\{([^}]+)\}/)[1], /updated_time/);
+  assert.doesNotMatch(calls[1].url.searchParams.get("fields"), /updated_time/);
+});
