@@ -45,7 +45,7 @@ export async function readBusinessOutcomes(now = new Date()) {
   async function read(path: string): Promise<Row> {
     const response = await fetch(`https://services.leadconnectorhq.com${path}`, {
       headers: { Authorization: `Bearer ${config.token}`, Version: config.apiVersion },
-      redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
+      redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`Reporting provider returned ${response.status}`);
     return response.json();

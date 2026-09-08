@@ -158,7 +158,7 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       let response: Response;
       try {
-        response = await fetcher(url, { ...init, headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
+        response = await fetcher(url, { ...init, headers, redirect: "manual", signal: AbortSignal.timeout(15_000) });
       } catch (error) {
         const message = error instanceof Error ? redactToken(error.message, accessToken) : "network error";
         if (attempt < maxRetries) {

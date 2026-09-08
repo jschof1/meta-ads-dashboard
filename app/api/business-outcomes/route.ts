@@ -9,7 +9,8 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized;
   try {
     return NextResponse.json(await readBusinessOutcomes(), { headers: { "Cache-Control": "private, no-store" } });
-  } catch {
+  } catch (error) {
+    console.error("business outcomes unavailable", error instanceof Error ? error.name + ": " + error.message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").slice(0, 200) : "unknown");
     return NextResponse.json({ error: "Live business reporting is unavailable. Refresh to retry." }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
   }
 }
