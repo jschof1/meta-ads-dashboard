@@ -937,6 +937,7 @@ export function diagnoseResultEvents(
   row: MetaInsightRow,
   options: { primaryActionType?: string; customConversionId?: string } = {},
 ): MetaResultEventDiagnostic {
+  const providerReturnedActions = Array.isArray(row.actions);
   const actions = actionRows(row);
   const actionTypeCountsByName = actionTypeCounts(actions);
   const actionTypes = Object.entries(actionTypeCountsByName).map(([actionType, count]) => ({ actionType, count }));
@@ -946,14 +947,23 @@ export function diagnoseResultEvents(
   const needsConfiguration = !options.primaryActionType && !configuredCustom && (candidateActionTypes.length === 0 || candidateActionTypes.length > 1);
   const ambiguous = candidateActionTypes.length > 1 && !options.primaryActionType && !configuredCustom;
   const match = primaryActionType ? actions.find((action) => action.action_type === primaryActionType) : undefined;
-  const value = match ? Number(match.value) : null;
+  // Meta omits a configured action from a daily row when it has zero results.
+  // Treat that explicit empty result set as zero, while still withholding a
+  // value when the response did not contain actions or it contains a different
+  // lead-like action that conflicts with the configured result event.
+  const configuredActionMismatch = Boolean(primaryActionType && !match && candidateActionTypes.length > 0);
+  const value = match
+    ? Number(match.value)
+    : primaryActionType && providerReturnedActions && !configuredActionMismatch
+      ? 0
+      : null;
   return {
     actionTypes,
     actionTypeCounts: actionTypeCountsByName,
     candidateActionTypes,
     primaryActionType,
-    value: match && Number.isFinite(value) ? value : null,
-    missing: !match,
+    value: Number.isFinite(value) ? value : null,
+    missing: value === null,
     ambiguous,
     needsConfiguration,
   };

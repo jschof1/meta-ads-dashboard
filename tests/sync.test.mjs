@@ -197,7 +197,7 @@ async function run(db, client, now = new Date("2026-09-04T12:00:00.000Z"), optio
   return syncMeta({ db, client, now, clock: () => now, initialBackfillDays: 90, recentRefreshDays: 7, ...options });
 }
 
-test("performs the 90-day first sync, persists metadata/insights, and keeps real zeroes distinct from missing values", async () => {
+test("performs the 90-day first sync and persists explicit zero result days", async () => {
   const db = await createDatabase();
   const { client, calls } = fakeClient({ rows: {
     account: [insight("2026-09-04", { account_id: "uktl-test", spend: "0", impressions: "0", reach: "0", clicks: "0", inline_link_clicks: "0", actions: [] })],
@@ -240,7 +240,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   });
   assert.equal(accountRow.spendMinorUnits, 0);
   assert.equal(accountRow.impressions, 0);
-  assert.equal(accountRow.leads, null);
+  assert.equal(accountRow.leads, 0);
 
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
   assert.equal(state.recommendations.length, 0);
@@ -265,7 +265,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal(runRow.initialBackfill, true);
   assert.equal(runRow.traceId, "trace-pr03-test");
   assert.deepEqual(JSON.parse(runRow.apiDiagnostics), { attempts: 1, traceId: "trace-pr03-test", appUsage: { call_count: 4 }, adAccountUsage: { acc_id_util_pct: 2 } });
-  assert.match(runRow.warning, /inquiries remain missing, not zero/);
+  assert.equal(runRow.warning, null);
 });
 
 test("is idempotent and overwrites delayed conversion updates during the recent refresh window", async () => {
@@ -303,10 +303,10 @@ test("does not publish a contradictory recommendation set from a warning-bearing
   assert.ok(before.length > 0);
 
   const warningClient = fakeClient({ rows: {
-    account: [insight("2026-09-05", { actions: [] })],
-    campaign: [insight("2026-09-05", { actions: [] })],
-    adset: [insight("2026-09-05", { actions: [] })],
-    ad: [insight("2026-09-05", { actions: [] })],
+    account: [insight("2026-09-05", { actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "2" }] })],
+    campaign: [insight("2026-09-05", { actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "2" }] })],
+    adset: [insight("2026-09-05", { actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "2" }] })],
+    ad: [insight("2026-09-05", { actions: [{ action_type: "offsite_conversion.fb_pixel_lead", value: "2" }] })],
   } });
   const second = await run(db, warningClient.client, new Date("2026-09-05T12:00:00.000Z"));
   assert.match(second.warning, /inquiries remain missing/);
