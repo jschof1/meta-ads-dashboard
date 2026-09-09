@@ -8,6 +8,7 @@ test('keeps contacts, booking people, and refunded client receipts distinct',()=
  const p={liveMode:true,paymentProviderType:'stripe',status:'succeeded',createdAt:'2026-08-15',currency:'gbp',amount:197,amountRefunded:0};
  const result=summarizeBusinessOutcomes(contacts,events,[p,{...p,status:'refunded',amountRefunded:197},{...p,status:'failed'},{...p,liveMode:false}],start,end);
  assert.equal(result.appointments,2);assert.equal(result.uniqueBookers,1);assert.equal(result.metaContactsBooked,1);
+ assert.equal(result.noShows,1);
  assert.equal(result.payments,2);assert.equal(result.currencyGroups.GBP.net,197);assert.equal(result.currencyGroups.GBP.refunded,197);
  assert.equal(JSON.stringify(result).includes('private@example.com'),false);
  assert.equal('attended' in result,false);

@@ -59,6 +59,7 @@ export type SystemDiagnostics = {
   highLevel: {
     status: DiagnosticStatus;
     configuration: HighLevelConfigStatus;
+    outcomeTrackingReady: boolean;
     providerReady: boolean;
     mappingReady: boolean;
     revenueReady: boolean;
@@ -283,13 +284,24 @@ export async function buildSystemDiagnostics(options: {
   const attributionKey = configuredAttributionKey(env);
   const metaConfig = loadMetaActionConfig(env);
   const highLevel = loadHighLevelSettings(env);
+  // UKTL records its real downstream outcomes with a contact tag and sales
+  // calendar. That connection is independent from the optional generic
+  // pipeline-attribution model below.
+  const outcomeTrackingReady = Boolean(
+    highLevel.token
+      && highLevel.locationId
+      && env.HIGHLEVEL_LEAD_FORM_ID?.trim()
+      && env.HIGHLEVEL_SALES_CALENDAR_ID?.trim(),
+  );
   const databaseStarted = Date.now();
   const databaseProbe = await safeQuery(() => db.$queryRaw`SELECT 1`);
   const databaseLatency = databaseProbe.ok ? Date.now() - databaseStarted : null;
 
   if (!databaseProbe.ok) {
     const metaStatus: DiagnosticStatus = configuration.meta === "configured" ? "unknown" : "not_configured";
-    const highLevelStatus: DiagnosticStatus = highLevel.status === "configured"
+    const highLevelStatus: DiagnosticStatus = outcomeTrackingReady
+      ? "unknown"
+      : highLevel.status === "configured"
       ? "unknown"
       : highLevel.status === "disabled" ? "disabled" : highLevel.status === "not_configured" ? "not_configured" : "misconfigured";
     return {
@@ -315,6 +327,7 @@ export async function buildSystemDiagnostics(options: {
       highLevel: {
         status: highLevelStatus,
         configuration: highLevel.status,
+        outcomeTrackingReady,
         providerReady: highLevel.providerReady,
         mappingReady: highLevel.mappingReady,
         revenueReady: highLevel.revenueReady,
@@ -349,7 +362,9 @@ export async function buildSystemDiagnostics(options: {
   const metaStatus: DiagnosticStatus = configuration.meta === "not_configured"
     ? "not_configured"
     : metaRead.diagnostic.status;
-  const highLevelStatus: DiagnosticStatus = highLevel.status === "not_configured"
+  const highLevelStatus: DiagnosticStatus = outcomeTrackingReady && !highLevel.mappingReady
+    ? "ok"
+    : highLevel.status === "not_configured"
     ? "not_configured"
     : highLevel.status === "disabled"
       ? "disabled"
@@ -385,6 +400,7 @@ export async function buildSystemDiagnostics(options: {
     highLevel: {
       status: highLevelStatus,
       configuration: highLevel.status,
+      outcomeTrackingReady,
       providerReady: highLevel.providerReady,
       mappingReady: highLevel.mappingReady,
       revenueReady: highLevel.revenueReady,

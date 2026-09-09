@@ -94,7 +94,9 @@ export function SystemDiagnosticsPanel() {
             {diagnostics.ai.lastGeneratedAt ? `Last snapshot ${new Date(diagnostics.ai.lastGeneratedAt).toLocaleString("en-GB")}.` : "No stored snapshot."}
           </DiagnosticCard>
           <DiagnosticCard icon={Layers3} label="HighLevel" status={diagnostics.highLevel.status}>
-            {diagnostics.highLevel.configuration.replaceAll("_", " ")}. Sync: <SyncValue sync={diagnostics.highLevel.sync} />
+            {diagnostics.highLevel.outcomeTrackingReady && !diagnostics.highLevel.mappingReady
+              ? "Tag-and-calendar outcome tracking is configured. Legacy pipeline attribution is not used for UKTL."
+              : <>{diagnostics.highLevel.configuration.replaceAll("_", " ")}. Sync: <SyncValue sync={diagnostics.highLevel.sync} /></>}
           </DiagnosticCard>
           <DiagnosticCard icon={GitBranch} label="Migrations" status={diagnostics.migrations.status}>
             {diagnostics.migrations.latestApplied ? `Latest ${diagnostics.migrations.latestApplied}.` : "No applied migration recorded."}

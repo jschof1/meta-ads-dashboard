@@ -214,6 +214,29 @@ test("reports optional and disabled integrations without making provider calls",
   assert.equal(calls, 0);
 });
 
+test("reports UKTL tag-and-calendar outcomes as configured without requiring a generic pipeline map", async () => {
+  const diagnostics = await buildSystemDiagnostics({
+    db: database(),
+    env: environment({
+      HIGHLEVEL_PIPELINE_ID: "",
+      HIGHLEVEL_STAGE_LEAD_ID: "",
+      HIGHLEVEL_STAGE_CONTACTED_ID: "",
+      HIGHLEVEL_STAGE_QUALIFIED_ID: "",
+      HIGHLEVEL_STAGE_CALL_BOOKED_ID: "",
+      HIGHLEVEL_STAGE_CALL_ATTENDED_ID: "",
+      HIGHLEVEL_WON_STATUS: "",
+      HIGHLEVEL_LOST_STATUS: "",
+      HIGHLEVEL_LEAD_FORM_ID: "lead-form-1",
+      HIGHLEVEL_SALES_CALENDAR_ID: "sales-calendar-1",
+    }),
+    now,
+  });
+
+  assert.equal(diagnostics.highLevel.status, "ok");
+  assert.equal(diagnostics.highLevel.outcomeTrackingReady, true);
+  assert.equal(diagnostics.highLevel.mappingReady, false);
+});
+
 test("fails closed to redacted unknown states when the database probe is unavailable", async () => {
   const db = database();
   db.$queryRaw = async () => { throw new Error("database credential or provider detail"); };

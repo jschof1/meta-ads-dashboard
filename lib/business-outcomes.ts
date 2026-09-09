@@ -11,6 +11,9 @@ export function summarizeBusinessOutcomes(contacts: Row[], events: Row[], paymen
   const contacted = (c: Row) => Array.isArray(c.tags) && c.tags.some(t => text(t).trim().toLowerCase() === "contacted");
   const appointments = events.filter(e => !e.deleted && !testIds.has(text(e.contactId)) && within(e.startTime));
   const bookedIds = new Set(appointments.map(e => text(e.contactId)).filter(Boolean));
+  // A booking is not attendance. Only an explicit calendar no-show status
+  // establishes that the person did not attend.
+  const noShows = appointments.filter((event) => /^(no[ _-]?show|noshow)$/i.test(text(event.appointmentStatus).trim())).length;
   const paid = payments.filter(p => p.liveMode === true && p.paymentProviderType === "stripe" && ["succeeded", "refunded"].includes(text(p.status)) && within(p.createdAt));
   const currencyGroups: Record<string, { collected: number; refunded: number; net: number; payments: number }> = {};
   for (const p of paid) {
@@ -27,7 +30,7 @@ export function summarizeBusinessOutcomes(contacts: Row[], events: Row[], paymen
   return {
     checkedAt: end.toISOString(), windowStart: start.toISOString(), windowEnd: end.toISOString(),
     contactsCreated: leads.length, contactedNewContacts: leads.filter(contacted).length,
-    appointments: appointments.length, uniqueBookers: bookedIds.size,
+    appointments: appointments.length, uniqueBookers: bookedIds.size, noShows,
     appointmentStatuses: appointments.reduce<Record<string, number>>((acc, e) => { const s = text(e.appointmentStatus) || "unknown"; acc[s] = (acc[s] || 0) + 1; return acc; }, {}),
     metaSourcedContacts: metaLeads.length,
     metaContactsBooked: metaLeads.filter(c => bookedIds.has(text(c.id))).length,
