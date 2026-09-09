@@ -43,12 +43,12 @@ afterEach(async () => {
 test("applies every committed migration once and is idempotent on a second run", async () => {
   const path = await temporaryDatabase();
   const first = runMigration(path);
-  assert.match(first, /Applied 7 Turso migrations\./);
+  assert.match(first, /Applied 8 Turso migrations\./);
 
   const db = createPrismaClient({ url: `file:${path}` });
   const ledger = await db.$queryRawUnsafe('SELECT "migration_name" FROM "_prisma_migrations" ORDER BY "started_at" ASC');
   const tables = await db.$queryRawUnsafe('SELECT "name" FROM "sqlite_master" WHERE "type" = \'table\'');
-  assert.equal(ledger.length, 7);
+  assert.equal(ledger.length, 8);
   assert.ok(tables.some((row) => row.name === "MetaAction"));
   assert.ok(tables.some((row) => row.name === "CrmOpportunity"));
   assert.ok(tables.some((row) => row.name === "AuthRateLimit"));
@@ -142,6 +142,8 @@ test("rolls back a pending migration batch without writing its ledger row", asyn
   runMigration(path);
   const db = createPrismaClient({ url: `file:${path}` });
   await db.$executeRawUnsafe('DELETE FROM "_prisma_migrations" WHERE "migration_name" = \'20260905160000_pr10_production_hardening\'');
+  await db.$executeRawUnsafe("DELETE FROM _prisma_migrations WHERE migration_name = '20260909140000_lead_register'");
+  await db.$executeRawUnsafe('DROP TABLE "LeadRegisterSnapshot"');
   await db.$executeRawUnsafe('DROP TABLE "AuthRateLimit"');
   await db.$executeRawUnsafe('CREATE TABLE "AuthRateLimit" ("legacyId" TEXT NOT NULL PRIMARY KEY)');
   await db.$disconnect();

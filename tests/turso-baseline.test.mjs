@@ -97,17 +97,17 @@ test("records a complete legacy baseline without changing application rows", asy
   await client.execute(`INSERT INTO "AuthRateLimit" ("keyHash", "count", "resetAt", "updatedAt") VALUES ('legacy-hash', 4, '2026-10-01', '2026-09-01')`);
   const beforeState = await databaseState(client, false);
 
-  assert.match(runBaseline(path), /Recorded baseline ledger through 20260905160000_pr10_production_hardening for 7 migrations\./);
+  assert.match(runBaseline(path), /Recorded baseline ledger through 20260909140000_lead_register for 8 migrations\./);
 
   const after = createPrismaClient({ url: `file:${path}` });
   const campaign = await after.campaign.findUnique({ where: { metaId: "legacy-campaign" } });
   const ledger = await after.$queryRawUnsafe('SELECT "migration_name", "checksum", "applied_steps_count" FROM "_prisma_migrations" ORDER BY "started_at" ASC');
   assert.equal(campaign.name, "Legacy campaign");
-  assert.equal(ledger.length, 7);
+  assert.equal(ledger.length, 8);
   assert.ok(ledger.every((row) => row.checksum.length === 64 && row.applied_steps_count === 1));
   await after.$disconnect();
   assert.deepEqual(await databaseState(client, false), beforeState);
-  await assertLedgerChecksums(client, 7);
+  await assertLedgerChecksums(client, 8);
   client.close();
 });
 
@@ -160,12 +160,12 @@ test("records an earlier baseline so the normal migration command can apply pend
   const db = createPrismaClient({ url: `file:${path}` });
   const ledger = await db.$queryRawUnsafe('SELECT "migration_name" FROM "_prisma_migrations" ORDER BY "started_at" ASC');
   const tables = await db.$queryRawUnsafe('SELECT "name" FROM "sqlite_master" WHERE "type" = \'table\'');
-  assert.equal(ledger.length, 7);
+  assert.equal(ledger.length, 8);
   assert.ok(tables.some((row) => row.name === "AuthRateLimit"));
   await db.$disconnect();
   const after = await databaseState(client, false);
   for (const [table, rows] of Object.entries(before.data)) assert.deepEqual(after.data[table], rows);
-  await assertLedgerChecksums(client, 7);
+  await assertLedgerChecksums(client, 8);
   client.close();
 });
 
@@ -191,14 +191,14 @@ test("baselines populated PR03 then upgrades columns and indexes with all origin
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     };
-    assert.match(execFileSync(process.execPath, ["scripts/apply-turso-migrations.mjs"], options), /Applied 6 Turso migrations/);
+    assert.match(execFileSync(process.execPath, ["scripts/apply-turso-migrations.mjs"], options), /Applied 7 Turso migrations/);
     for (const table of schema.tables) {
       const columns = table.columns.map((column) => quoteIdentifier(column.name)).join(", ");
       const result = await client.execute(`SELECT ${columns} FROM ${quoteIdentifier(table.name)}`);
       assert.deepEqual(result.rows.map((row) => Array.from(row)), before.data[table.name], table.name);
     }
     assert.equal((await client.execute('SELECT "scopeKey" FROM "DailyInsight"')).rows[0].scopeKey, "account");
-    await assertLedgerChecksums(client, 7);
+    await assertLedgerChecksums(client, 8);
     assert.match(execFileSync(process.execPath, ["scripts/apply-turso-migrations.mjs"], options), /up to date/);
   } finally { client.close(); }
 });

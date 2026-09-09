@@ -4,7 +4,7 @@ import { normalizeClientAddress, runScheduledSync } from "../lib/cloudflare-sche
 
 test("Cloudflare schedules call only the matching protected route and propagate failures", async () => {
   const env = { CRON_SECRET: "fixture-secret-with-at-least-32-characters", HIGHLEVEL_SYNC_ENABLED: "true" };
-  for (const [cron, path] of [["0 6 * * *", "sync-meta"], ["30 6 * * *", "sync-highlevel"]]) {
+  for (const [cron, path] of [["15 * * * *", "sync-leads"], ["0 6 * * *", "sync-meta"], ["30 6 * * *", "sync-highlevel"]]) {
     await runScheduledSync({ cron }, env, async (request) => {
       assert.equal(new URL(request.url).pathname, `/api/cron/${path}`);
       assert.equal(request.headers.get("authorization"), `Bearer ${env.CRON_SECRET}`);

@@ -1,0 +1,11 @@
+# Saved enquiry register
+
+The authenticated dashboard now separates Meta Lead events from people. One HighLevel contact ID becomes one register row; repeated website and booking form submissions remain visible under that row. The configured enquiry form is `HIGHLEVEL_LEAD_FORM_ID`. Names and bounded source/tag metadata are stored in `LeadRegisterSnapshot`, scoped by location. Phone numbers, emails, message bodies and full attribution URLs remain in HighLevel.
+
+The first import checks the previous 90 days of contacts, form submissions and recent conversation activity. Sales-calendar appointments are checked from 90 days before the refresh to 90 days after it. Provider date-only form results are filtered again using exact timestamps. The default view shows 30 days of website enquiries; other views include new/active CRM contacts, unbooked website enquiries, tagged test records and saved history. New contacts or messages are not automatically classified as qualified leads. Unknown contacts are retained visibly.
+
+`GET /api/lead-register` reads the saved database register. Authenticated same-origin `POST /api/lead-register` refreshes it. `/api/cron/sync-leads` uses the existing cron bearer secret, with hourly dispatch at minute 15 UTC. This schedule is independent of the stage-based HighLevel integration gate. The entire provider read must succeed before a write transaction merges the data. Older submissions and contacts are retained, refresh failures preserve the previous register, and late responses cannot replace a newer snapshot. Previously saved records outside the import window show their individual check timestamp.
+
+The register is a recovery aid and follow-up view, not proof that every attempted form or SMS reached HighLevel. A gap longer than 90 days requires an explicit backfill. Booking statuses come from the provider and do not establish attendance. Explicit `uktl-tracking-test` tags exclude test records from headline counts; suspicious untagged records are not silently removed.
+
+Apply `20260909140000_lead_register` with the existing backed-up migration procedure before deploying. Verify signed-out reads/writes return 401, authenticated readback persists across requests, a refresh completes, and the Cloudflare schedule is registered. Registration and manual invocation alone do not prove a scheduled run occurred.

@@ -89,7 +89,7 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="CRM records" value={metric(crm.counts.crmRecords)} detail="Distinct HighLevel contacts" />
-          <Stat label="Meta website inquiries" value={metric(crm.counts.metaLeads)} detail="Completed form submissions attributed to Meta" />
+          <Stat label="Meta website inquiries" value={metric(crm.counts.metaLeads)} detail="Meta-reported Lead events; not unique people" />
           <Stat label="Paid Meta records" value={metric(crm.counts.paidMetaRecords)} detail="CRM contacts classified paid Meta" />
           <Stat label="Qualified contacts" value={metric(crm.counts.qualified)} detail="Mapped CRM stage" />
           <Stat label="Booked calls" value={metric(crm.counts.callsBooked)} detail="Mapped CRM stage" />

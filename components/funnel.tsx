@@ -50,7 +50,7 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
     { key: "lead", label: "Impressions", value: metaImpressions, base: metaImpressions, icon: Eye, sourceNote: "Meta" },
     { key: "lead", label: "Link clicks", value: metaLinkClicks, base: metaImpressions, icon: MousePointerClick, sourceNote: "Meta" },
     { key: "lead", label: "Callback form opens", value: callbackFormOpens, base: callbackFormOpens == null ? null : metaLinkClicks, icon: FormInput, sourceNote: callbackFormOpenSource },
-    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: callbackFormOpens ?? metaLinkClicks, icon: UserRound, sourceNote: "Meta · completed form" },
+    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: callbackFormOpens ?? metaLinkClicks, icon: UserRound, sourceNote: "Meta · Lead events" },
     { key: "contacted", label: stageLabel("contacted"), value: crmValue(f.contacted), base: showCrmCohort ? metaLeads : null, icon: UserCheck, sourceNote: crmNote },
     { key: "qualified", label: stageLabel("qualified"), value: crmValue(f.qualified), base: crmValue(f.contacted), icon: UserCheck, sourceNote: crmNote },
     { key: "callBooked", label: stageLabel("callBooked"), value: crmValue(f.callsBooked), base: crmValue(f.qualified), icon: Phone, sourceNote: crmNote },

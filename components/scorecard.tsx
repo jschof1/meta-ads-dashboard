@@ -126,7 +126,7 @@ export function Scorecard({ state, period }: { state: DashboardState; period: Da
         <Card
           label={`${definition.label} inquiries`}
           value={formatCount(selected.leads)}
-          sub="Completed form submissions attributed to a Meta ad"
+          sub="Meta-reported Lead events; one person can trigger more than one"
           current={selected.leads}
           comparison={selectedComparison?.leads ?? null}
           direction="higher"

@@ -447,3 +447,11 @@ model MetaAction {
   @@index([targetId, status])
   @@index([recommendationFingerprint])
 }
+
+// Authenticated operational register; names, tags and provider IDs only.
+// Phones, emails and raw attribution URLs stay in HighLevel.
+model LeadRegisterSnapshot {
+  locationId String @id
+  payload String
+  checkedAt String
+}

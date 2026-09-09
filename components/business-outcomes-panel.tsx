@@ -16,7 +16,7 @@ export function BusinessOutcomesPanel() {
   }, [reload]);
   return <section className="mb-6 rounded-xl border p-5" aria-label="Business outcomes">
     <div className="flex items-center justify-between gap-3"><h2 className="text-base font-semibold">CRM follow-up and client payments</h2><button className="text-sm underline" onClick={() => setReload(r => r + 1)}>Refresh outcomes</button></div>
-    <p className="mt-1 text-sm text-muted-foreground">The scorecard above counts Meta-attributed completed enquiry forms. This panel shows what happened in the CRM afterwards, plus client receipts. Last 30 days · independent of the ad period selector.</p>
+    <p className="mt-1 text-sm text-muted-foreground">The scorecard above counts Meta-reported Lead events, which can include repeat submissions by one person. This panel shows what happened in the CRM afterwards, plus client receipts. Last 30 days · independent of the ad period selector.</p>
     {error && <p role="alert" className="mt-3 text-sm">Could not refresh outcomes. {data ? "The previous result remains below; check its timestamp." : "Refresh to retry."}</p>}
     {!data && !error && <p className="mt-3 text-sm">Reading contacts, calendar and payments…</p>}
     {data && <><div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">{[["New CRM contacts",data.contactsCreated],["New contacts tagged contacted",data.contactedNewContacts],["Sales appointments",data.appointments],["Unique people booked",data.uniqueBookers]].map(([label,value]) => <div key={label}><p className="text-sm text-muted-foreground">{label}</p><p className="text-2xl font-semibold">{value}</p></div>)}</div>

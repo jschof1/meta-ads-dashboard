@@ -111,7 +111,7 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   const crmOpportunityIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmOpportunity")');
   const metaActionIndexes = await db.$queryRawUnsafe('PRAGMA index_list("MetaAction")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register"]);
   for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "RecommendationScopeState", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity", "MetaAction", "AuthRateLimit"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
@@ -174,7 +174,7 @@ test("upgrades a populated PR03 database without dropping durable rows", async (
   assert.equal(campaign.name, "Existing campaign");
   assert.equal(insight.spendMinorUnits, 1234);
   assert.equal(insight.scopeKey, "account");
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register"]);
   await upgraded.$disconnect();
 });
 

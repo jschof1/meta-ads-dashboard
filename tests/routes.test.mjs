@@ -307,6 +307,8 @@ test("protected APIs reject requests without a session", async () => {
     ["POST", "/api/insights/summary"],
     ["POST", "/api/insights/brief"],
     ["POST", "/api/refresh"],
+    ["GET", "/api/lead-register"],
+    ["POST", "/api/lead-register"],
   ];
 
   for (const [method, path] of routes) {
@@ -320,6 +322,7 @@ test("protected APIs reject requests without a session", async () => {
 });
 
 test("cron route requires its bearer secret", async () => {
+  assert.equal((await get("/api/cron/sync-leads")).status, 401);
   const missing = await get("/api/cron/sync-meta");
   assert.equal(missing.status, 401);
 
@@ -568,4 +571,20 @@ test("durable-data routes fail closed instead of using a local fallback when the
 
   const cron = await get("/api/cron/sync-meta", { headers: { authorization: "Bearer " + cronSecret } });
   assert.equal(cron.status, 503);
+});
+
+test("saved lead register is authenticated, location scoped, and preserved after refresh failure", async () => {
+  await stopServer();
+  await startServer({ HIGHLEVEL_LOCATION_ID: "register-location" });
+  const db = createPrismaClient({ url: `file:${databasePath}` });
+  const saved={ locationId:"register-location",checkedAt:"2026-09-09T12:00:00Z",coverageStart:"2026-08-10T12:00:00Z",calendarEnd:"2026-12-08T12:00:00Z",entries:[] };
+  await db.$executeRawUnsafe('INSERT INTO LeadRegisterSnapshot(locationId,payload,checkedAt) VALUES(?,?,?)',"register-location",JSON.stringify(saved),saved.checkedAt);
+  await db.$executeRawUnsafe('INSERT INTO LeadRegisterSnapshot(locationId,payload,checkedAt) VALUES(?,?,?)',"other-location",JSON.stringify({private:"other client"}),saved.checkedAt);
+  const cookie=`${SESSION_COOKIE}=${await createSessionToken(authSecret)}`;
+  const before=await get('/api/lead-register',{headers:{cookie}});
+  assert.equal(before.status,200);assert.match(before.headers.get('cache-control'),/no-store/);assert.deepEqual((await before.json()).data,saved);
+  const crossOrigin=await get('/api/lead-register',{method:'POST',headers:{cookie,origin:'https://other.example'}});assert.equal(crossOrigin.status,403);
+  const failed=await get('/api/lead-register',{method:'POST',headers:{cookie,origin:baseUrl}});assert.equal(failed.status,503);
+  const after=await get('/api/lead-register',{headers:{cookie}});assert.deepEqual((await after.json()).data,saved);
+  await db.$disconnect();
 });

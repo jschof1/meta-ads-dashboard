@@ -22,7 +22,8 @@
   ],
   "vars": {
     "META_WRITES_ENABLED": "false",
-    "HIGHLEVEL_SYNC_ENABLED": "false"
+    "HIGHLEVEL_SYNC_ENABLED": "false",
+    "HIGHLEVEL_LEAD_FORM_ID": "aEwGU42vGjqNm43qwms7"
   },
   "observability": {
     "enabled": true
@@ -33,7 +34,8 @@
   "triggers": {
     "crons": [
       "0 6 * * *",
-      "30 6 * * *"
+      "30 6 * * *",
+      "15 * * * *"
     ]
   }
 }
