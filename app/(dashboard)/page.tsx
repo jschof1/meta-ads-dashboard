@@ -143,7 +143,7 @@ export default function DashboardHome() {
       <section className="flex items-center justify-between mb-3 mt-2">
         <div>
           <h2 className="text-base font-semibold">Creative leaderboard</h2>
-          <p className="text-xs text-muted-foreground">Sorted by CPL. Watch the fatigue column for diagnostic warnings.</p>
+          <p className="text-xs text-muted-foreground">Sorted by cost per inquiry. Watch the fatigue column for diagnostic warnings.</p>
         </div>
         <CreativeBriefGenerator />
       </section>

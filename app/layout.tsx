@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "UK Trade Leads Meta Ads Command Centre",
-  description: "Internal UK Trade Leads command centre for reviewing Meta acquisition and lead quality",
+  description: "Internal UK Trade Leads command centre for reviewing Meta website inquiries and follow-up outcomes",
 };
 
 export default function RootLayout({

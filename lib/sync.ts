@@ -935,6 +935,6 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
 export function describeResultEvent(diagnostic: MetaResultEventDiagnostic): string | null {
   if (!diagnostic.needsConfiguration && diagnostic.value !== null) return null;
   return diagnostic.candidateActionTypes.length > 0
-    ? `Lead/result event unavailable. Candidates: ${diagnostic.candidateActionTypes.join(", ")}.`
-    : "Lead/result event unavailable; configure META_PRIMARY_RESULT_ACTION_TYPE.";
+    ? `Website inquiry/result event unavailable. Candidates: ${diagnostic.candidateActionTypes.join(", ")}.`
+    : "Website inquiry/result event unavailable; configure META_PRIMARY_RESULT_ACTION_TYPE.";
 }
