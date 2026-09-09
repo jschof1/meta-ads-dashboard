@@ -16,6 +16,58 @@ export type LeadEntry = {
 };
 export type LeadRegister = { locationId?: string; checkedAt: string; coverageStart: string; calendarEnd: string; entries: LeadEntry[] };
 
+export type LeadRegisterOutcomes = {
+  checkedAt: string;
+  contactsCreated: number;
+  contactedNewContacts: number;
+  appointments: number;
+  uniqueBookers: number;
+  noShows: number;
+  peopleEnquiring: number;
+  formSubmissions: number;
+  metaSourcedContacts: number;
+  metaContactsBooked: number;
+  metaContactsContacted: number;
+};
+
+function inWindow(value: string, start: number, end: number): boolean {
+  const time = Date.parse(value);
+  return Number.isFinite(time) && time >= start && time <= end;
+}
+
+/**
+ * Derive the operational outcomes from the saved HighLevel register. This
+ * preserves the last complete provider read when a fresh provider call is
+ * temporarily unavailable.
+ */
+export function summarizeLeadRegisterOutcomes(register: LeadRegister): LeadRegisterOutcomes {
+  const end = Date.parse(register.checkedAt);
+  if (!Number.isFinite(end)) throw new Error("Lead register timestamp unavailable");
+  const start = end - 30 * 86400000;
+  const entries = register.entries.filter((entry) => !entry.test);
+  const newContacts = entries.filter((entry) => inWindow(entry.contactCreated, start, end));
+  const contacted = (entry: LeadEntry) => entry.tags.some((tag) => tag.trim().toLowerCase() === "contacted");
+  const appointments = entries.flatMap((entry) => entry.appointments
+    .filter((appointment) => inWindow(appointment.at, start, end))
+    .map((appointment) => ({ ...appointment, contactId: entry.contactId })));
+  const bookedIds = new Set(appointments.map((appointment) => appointment.contactId));
+  const metaContacts = newContacts.filter((entry) => /^(fb|ig|facebook|instagram)$/i.test(entry.metaSource));
+  const formEntries = entries.filter((entry) => entry.submissions.some((submission) => inWindow(submission.at, start, end)));
+  return {
+    checkedAt: register.checkedAt,
+    contactsCreated: newContacts.length,
+    contactedNewContacts: newContacts.filter(contacted).length,
+    appointments: appointments.length,
+    uniqueBookers: bookedIds.size,
+    noShows: appointments.filter((appointment) => /^(no[ _-]?show|noshow)$/i.test(appointment.status.trim())).length,
+    peopleEnquiring: formEntries.length,
+    formSubmissions: formEntries.reduce((count, entry) => count + entry.submissions.filter((submission) => inWindow(submission.at, start, end)).length, 0),
+    metaSourcedContacts: metaContacts.length,
+    metaContactsBooked: metaContacts.filter((entry) => bookedIds.has(entry.contactId)).length,
+    metaContactsContacted: metaContacts.filter(contacted).length,
+  };
+}
+
 // Provider contact IDs, not names or submission counts, define a person here.
 export function reconcileLeads(contacts: Row[], submissions: Row[], events: Row[], start: Date, now: Date, calendarEnd: Date, conversations: Row[] = []): LeadRegister {
   const contactMap = new Map(contacts.map(c => [str(c.id), c]));
