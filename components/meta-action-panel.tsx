@@ -34,7 +34,7 @@ function exactChange(action: MetaActionView, currencyCode: string | null): strin
 
 function evidenceLine(evidence: MetaActionView["evidence"], currencyCode: string | null): string {
   const current = evidence.current;
-  return `Evidence: ${formatMoney(current.spendCents, currencyCode)} spend, ${current.leads == null ? "unknown" : current.leads} leads, ${formatMoney(current.cplCents, currencyCode)} CPL over the matched ${evidence.comparisonDays}d window.`;
+  return `Evidence: ${formatMoney(current.spendCents, currencyCode)} spend, ${current.leads == null ? "unknown" : current.leads} website inquiries, ${formatMoney(current.cplCents, currencyCode)} cost per inquiry over the matched ${evidence.comparisonDays}d window.`;
 }
 
 function recommendationAction(recommendation: DashboardState["recommendations"][number], state: DashboardState): MetaActionView["action"] | null {

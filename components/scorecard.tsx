@@ -124,18 +124,18 @@ export function Scorecard({ state, period }: { state: DashboardState; period: Da
           evidence={mtdEvidence}
         />
         <Card
-          label={`${definition.label} leads`}
+          label={`${definition.label} inquiries`}
           value={formatCount(selected.leads)}
-          sub="Meta-reported lead result"
+          sub="Completed form submissions attributed to a Meta ad"
           current={selected.leads}
           comparison={selectedComparison?.leads ?? null}
           direction="higher"
           evidence={selectedEvidence}
         />
         <Card
-          label={`${definition.label} CPL`}
+          label={`${definition.label} cost per inquiry`}
           value={formatMoney(selected.cplCents, currencyCode)}
-          sub={targets.cpl.targetMinorUnits == null ? "CPL target not set" : `Target ≤ ${targetMoneyLabel(targets.cpl.targetMinorUnits, currencyCode)}`}
+          sub={targets.cpl.targetMinorUnits == null ? "Inquiry-cost target not set" : `Target ≤ ${targetMoneyLabel(targets.cpl.targetMinorUnits, currencyCode)}`}
           current={selected.cplCents}
           comparison={selectedComparison?.cplCents ?? null}
           direction="lower"
@@ -179,9 +179,9 @@ export function Scorecard({ state, period }: { state: DashboardState; period: Da
           evidence={frequencyEvidenceForBucket(selected)}
         />
         <Card
-          label="Learning phase"
+          label="Inquiry learning"
           value={learningValue}
-          sub={sc.learningLeadsTarget == null ? "Weekly learning target not set" : learningPct == null ? "Lead data unavailable" : `${learningPct}% to target`}
+          sub={sc.learningLeadsTarget == null ? "Weekly learning target not set" : learningPct == null ? "Inquiry data unavailable" : `${learningPct}% to target`}
           current={sc.leadsThisWeek}
           comparison={null}
           direction="higher"

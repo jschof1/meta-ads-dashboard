@@ -357,8 +357,8 @@ function warningFor(input: {
   if (input.missingLeadRows > 0) {
     const candidates = input.candidateActionTypes.length > 0
       ? ` Candidate action types: ${input.candidateActionTypes.join(", ")}.`
-      : " No configured lead/result action was returned by Meta.";
-    warnings.push(`${input.missingLeadRows} insight row(s) have unavailable lead results; leads remain missing, not zero.${candidates}`);
+      : " No configured enquiry/result action was returned by Meta.";
+    warnings.push(`${input.missingLeadRows} insight row(s) have unavailable website-inquiry results; inquiries remain missing, not zero.${candidates}`);
   }
   if (input.skipped > 0) warnings.push(`${input.skipped} malformed insight row(s) were skipped.`);
   return warnings.length > 0 ? warnings.join(" ") : null;

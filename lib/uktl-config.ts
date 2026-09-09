@@ -86,15 +86,15 @@ export const UKTL_CONFIG = {
   funnel: [
     {
       key: "lead",
-      label: "Lead",
-      description: "A lead result reported by Meta.",
+      label: "Website inquiry",
+      description: "A completed UKTL enquiry form reported by Meta as its Lead event.",
       source: "meta",
       displayInLinearFunnel: true,
     },
     {
       key: "contacted",
       label: "Contacted",
-      description: "A CRM record with a recorded contact attempt.",
+      description: "A HighLevel CRM record tagged contacted, meaning a sales contact happened.",
       source: "crm",
       displayInLinearFunnel: true,
     },
@@ -180,15 +180,15 @@ This is the internal operating brief for the UK Trade Leads Meta Ads Command Cen
 
 ## Conversion system
 
-Meta provides acquisition signals. The business outcome is lead quality through the CRM stages: lead, contacted, qualified, call booked, call attended, won customer, and lost.
+Meta’s Lead event is the primary acquisition KPI: a completed UKTL enquiry form attributed to an ad. The business outcome follows through the CRM stages: contacted, qualified, call booked, call attended, won customer, and lost.
 
 ## Operating principle
 
-Lead quality beats raw lead volume. Meta-reported leads and CRM-attributed outcomes remain separate until the evidence supports a link between them.
+Inquiry quality beats raw form volume. Meta-reported website inquiries and CRM-attributed outcomes remain separate until the evidence supports a link between them.
 
 ## Measurement rules
 
-Report spend and cost metrics in the currency returned by the Meta account, with en-GB formatting and the account timezone. Report leads, CPL, CPM, link CTR, CPC, and frequency. Preserve missing values as unknown and compare matched historical periods before drawing conclusions.
+Report spend and cost metrics in the currency returned by the Meta account, with en-GB formatting and the account timezone. Report website inquiries, cost per inquiry, CPM, link CTR, CPC, and frequency. Preserve missing values as unknown and compare matched historical periods before drawing conclusions.
 
 ## Targets and budget
 
@@ -196,7 +196,7 @@ Targets, budget, and CAC are optional business inputs. No target is inferred whe
 
 ## Evidence boundary
 
-Do not call a small sample conclusive. Frequency can prompt a review, but it cannot prove fatigue or lead quality. CRM attribution is only claimed at the granularity supported by the stored evidence.
+Do not call a small sample conclusive. Frequency can prompt a review, but it cannot prove fatigue or inquiry quality. CRM attribution is only claimed at the granularity supported by the stored evidence.
 
 ## Privacy
 

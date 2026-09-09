@@ -391,10 +391,10 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
   const evidenceReason = !activity
     ? "No stored spend, impressions or link-click activity is available for this window."
     : currentLeadsMissing
-      ? "Activity is present but the lead result is unavailable; a performance verdict would be unsafe."
+      ? "Activity is present but the website inquiry result is unavailable; a performance verdict would be unsafe."
       : currentSufficient
-        ? "Stored spend, impression and lead totals clear the configured evidence thresholds."
-        : `Stored evidence is below the configured minimum of ${config.evidence.minLeadsForVerdict} leads and ${config.evidence.minImpressionsForRate.toLocaleString("en-GB")} impressions.`;
+        ? "Stored spend, impression and website-inquiry totals clear the configured evidence thresholds."
+        : `Stored evidence is below the configured minimum of ${config.evidence.minLeadsForVerdict} website inquiries and ${config.evidence.minImpressionsForRate.toLocaleString("en-GB")} impressions.`;
   const evidenceSignal = signal({
     id: "evidence",
     status: evidenceStatus,
@@ -415,11 +415,11 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
   const trendReason = !comparisonAvailable
     ? "A matched historical baseline with sufficient evidence is not available."
     : cplDeterioration
-      ? `CPL is ${Math.round(Math.abs(cplChange ?? 0))}% higher than the matched ${input.comparisonDays}d baseline.`
+      ? `Cost per inquiry is ${Math.round(Math.abs(cplChange ?? 0))}% higher than the matched ${input.comparisonDays}d baseline.`
       : leadsDeterioration
-        ? `Leads are ${Math.round(Math.abs(leadsChange ?? 0))}% lower than the matched ${input.comparisonDays}d baseline.`
+        ? `Website inquiries are ${Math.round(Math.abs(leadsChange ?? 0))}% lower than the matched ${input.comparisonDays}d baseline.`
         : cplChange != null && cplChange <= -CHANGE_THRESHOLD_PCT
-          ? `CPL is ${Math.round(Math.abs(cplChange))}% lower than the matched ${input.comparisonDays}d baseline.`
+          ? `Cost per inquiry is ${Math.round(Math.abs(cplChange))}% lower than the matched ${input.comparisonDays}d baseline.`
           : "No material deterioration is evidenced against the matched baseline.";
   const trendSignal = signal({
     id: "matched-trend",
@@ -455,7 +455,7 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
     status: combinedFatigue ? "triggered" : fatigueEvidenceAvailable ? "clear" : "unknown",
     confidence: combinedFatigue ? confidence : fatigueEvidenceAvailable ? confidence : "low",
     reason: combinedFatigue
-      ? "Frequency is rising alongside a material decline in CTR, CPL or leads; this is a combined fatigue signal."
+      ? "Frequency is rising alongside a material decline in CTR, inquiry cost or website inquiries; this is a combined fatigue signal."
       : fatigueEvidenceAvailable
         ? "No combined frequency-and-performance deterioration is evidenced. Frequency alone is not a fatigue verdict."
         : "Fatigue is withheld until matched windows contain sufficient stored evidence.",
@@ -496,10 +496,10 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
       severity: previousHadLeads ? "alert" : "watch",
       confidence: previousHadLeads && previousSufficient ? "high" : confidence,
       reason: currentLeadsMissing
-        ? "Meta activity is stored but the configured lead result is missing, so performance cannot be judged safely."
-        : "The matched baseline contained leads, but the current active period contains none while delivery continues.",
+        ? "Meta activity is stored but the configured website inquiry result is missing, so performance cannot be judged safely."
+        : "The matched baseline contained website inquiries, but the current active period contains none while delivery continues.",
       evidence,
-      proposedAction: "Check the lead event, form path and recent tracking changes before changing the ad.",
+      proposedAction: "Check the enquiry form event, form path and recent tracking changes before changing the ad.",
       signals: [evidenceSignal, trendSignal],
     });
   } else if (combinedFatigue) {
@@ -508,7 +508,7 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
       target: input.target,
       severity: "alert",
       confidence,
-      reason: "Frequency is rising while engagement or lead efficiency is deteriorating in the matched windows.",
+      reason: "Frequency is rising while engagement or inquiry efficiency is deteriorating in the matched windows.",
       evidence,
       proposedAction: "Review the current creative angle and prepare a fresh variant; keep the change approval-gated.",
       signals: [fatigueSignal, trendSignal],
@@ -525,9 +525,9 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
       target: input.target,
       severity: "alert",
       confidence,
-      reason: `CPL is ${Math.round(current.cplCents)} cents above the configured maximum of ${config.targets.cpl.maximumMinorUnits} cents with sufficient evidence.`,
+      reason: `Cost per inquiry is ${Math.round(current.cplCents)} cents above the configured maximum of ${config.targets.cpl.maximumMinorUnits} cents with sufficient evidence.`,
       evidence,
-      proposedAction: "Review lead quality and the landing path, then consider pausing only after human approval.",
+      proposedAction: "Review enquiry quality and the landing path, then consider pausing only after human approval.",
       signals: [evidenceSignal, trendSignal],
     });
   } else if (currentSufficient
@@ -545,9 +545,9 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
       target: input.target,
       severity: "info",
       confidence,
-      reason: `CPL is within the configured target of ${config.targets.cpl.targetMinorUnits} cents with sufficient stored lead evidence.`,
+      reason: `Cost per inquiry is within the configured target of ${config.targets.cpl.targetMinorUnits} cents with sufficient stored inquiry evidence.`,
       evidence,
-      proposedAction: "Review lead quality and capacity, then consider a measured budget increase only with human approval.",
+      proposedAction: "Review enquiry quality and capacity, then consider a measured budget increase only with human approval.",
       signals: [evidenceSignal, trendSignal, learningSignal],
     });
   } else if (!activity || !currentSufficient || learning || isNew) {
@@ -586,7 +586,7 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
       confidence,
       reason: "The matched trend has deteriorated, but the evidence does not meet the rules for an automated action candidate.",
       evidence,
-      proposedAction: "Inspect the creative, lead path and lead quality before deciding whether to change delivery.",
+      proposedAction: "Inspect the creative, enquiry path and enquiry quality before deciding whether to change delivery.",
       signals: [trendSignal, anomalySignal],
     });
   } else {

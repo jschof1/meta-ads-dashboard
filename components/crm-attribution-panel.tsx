@@ -62,9 +62,9 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
       <CardHeader className="border-b border-border">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <CardTitle>HighLevel customer attribution</CardTitle>
+            <CardTitle>HighLevel contact outcomes</CardTitle>
             <CardDescription className="mt-1">
-              {crm.period.label} contact-created cohort · CRM outcomes stay separate from Meta-reported leads.
+              {crm.period.label} contact-created cohort · CRM outcomes stay separate from Meta website inquiries.
             </CardDescription>
           </div>
           <Badge variant={isPartialFreshSnapshot ? "outline" : statusVariant(crm.status)}>
@@ -78,7 +78,7 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
             {crm.dataQuality === "partial"
               ? "HighLevel snapshot is incomplete; totals, rates, costs and revenue are withheld until a complete read succeeds."
               : crm.status === "not_configured"
-              ? "Meta leads are available above, but HighLevel location, pipeline and every funnel-stage mapping are not configured. No CRM outcomes are inferred."
+              ? "Meta website inquiries are available above, but HighLevel location, pipeline and every funnel-stage mapping are not configured. No CRM outcomes are inferred."
               : crm.status === "never"
                 ? "The explicit HighLevel mapping is present, but no successful read-only snapshot is stored yet. CRM counts remain unknown."
                 : crm.status === "disabled"
@@ -89,9 +89,9 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="CRM records" value={metric(crm.counts.crmRecords)} detail="Distinct HighLevel contacts" />
-          <Stat label="Meta leads" value={metric(crm.counts.metaLeads)} detail="Meta-reported result" />
+          <Stat label="Meta website inquiries" value={metric(crm.counts.metaLeads)} detail="Completed form submissions attributed to Meta" />
           <Stat label="Paid Meta records" value={metric(crm.counts.paidMetaRecords)} detail="CRM contacts classified paid Meta" />
-          <Stat label="Qualified leads" value={metric(crm.counts.qualified)} detail="Mapped CRM stage" />
+          <Stat label="Qualified contacts" value={metric(crm.counts.qualified)} detail="Mapped CRM stage" />
           <Stat label="Booked calls" value={metric(crm.counts.callsBooked)} detail="Mapped CRM stage" />
           <Stat label="Attended calls" value={metric(crm.counts.callsAttended)} detail="Showed / attended" />
           <Stat label="Won customers" value={metric(crm.counts.wonCustomers)} detail="Mapped won status" />
@@ -101,12 +101,12 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
         <div>
           <h3 className="text-sm font-semibold">Downstream rates and unit economics</h3>
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Lead → contacted" value={percent(crm.rates.leadToContacted)} />
+            <Stat label="Inquiry → contacted" value={percent(crm.rates.leadToContacted)} />
             <Stat label="Contacted → qualified" value={percent(crm.rates.contactedToQualified)} />
             <Stat label="Qualified → booked" value={percent(crm.rates.qualifiedToBooked)} />
             <Stat label="Show rate" value={percent(crm.rates.showRate)} />
             <Stat label="Close rate" value={percent(crm.rates.closeRate)} />
-            <Stat label="Qualified lead cost" value={money(crm.costs.qualifiedLeadCostMinorUnits, "complete", currency)} />
+            <Stat label="Qualified-contact cost" value={money(crm.costs.qualifiedLeadCostMinorUnits, "complete", currency)} />
             <Stat label="Booked-call cost" value={money(crm.costs.bookedCallCostMinorUnits, "complete", currency)} />
             <Stat label="Customer CAC" value={money(crm.costs.customerCacMinorUnits, "complete", currency)} />
             <Stat label="Attributed revenue" value={money(crm.revenue.minorUnits, crm.revenue.status, currency)} detail={crm.revenue.status === "complete" ? currency ?? "Account currency" : "Not defensible yet"} />
@@ -137,7 +137,7 @@ export function CrmAttributionPanel({ state }: { state: DashboardState }) {
                 <thead className="bg-muted/50 text-muted-foreground">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">Entity</th>
-                    <th className="px-3 py-2 text-right font-medium">Meta CPL</th>
+                    <th className="px-3 py-2 text-right font-medium">Cost / inquiry</th>
                     <th className="px-3 py-2 text-right font-medium">Qualified cost</th>
                     <th className="px-3 py-2 text-right font-medium">Customers</th>
                     <th className="px-3 py-2 text-right font-medium">CAC</th>

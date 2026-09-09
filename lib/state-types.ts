@@ -168,7 +168,7 @@ export type CrmCounts = {
   attributedRecords: number | null;
   /** All contacts classified as paid Meta, including explicit id matches. */
   paidMetaRecords: number | null;
-  /** Meta-reported lead results; deliberately kept separate from CRM contacts. */
+  /** Meta-reported website-inquiry results; deliberately kept separate from CRM contacts. */
   metaLeads: number | null;
   contacted: number | null;
   qualified: number | null;

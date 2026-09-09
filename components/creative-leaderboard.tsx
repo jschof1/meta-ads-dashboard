@@ -109,8 +109,8 @@ function CreativeCard({ ad, period, currencyCode, timezoneName, adManagerUrl }: 
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
           <Metric label={`${period} spend`} value={formatMoney(bucket.spendCents, currencyCode)} />
-          <Metric label={`${period} leads`} value={formatCount(bucket.leads)} />
-          <Metric label={`${period} CPL`} value={formatMoney(bucket.cplCents, currencyCode)} />
+          <Metric label={`${period} inquiries`} value={formatCount(bucket.leads)} />
+          <Metric label={`${period} cost / inquiry`} value={formatMoney(bucket.cplCents, currencyCode)} />
           <Metric label="Link CTR" value={formatPercent(bucket.ctrLink)} />
           <Metric label="CPC" value={formatMoney(bucket.cpcCents, currencyCode)} />
           <Metric label="Avg daily frequency" value={bucket.frequency == null ? "—" : bucket.frequency.toFixed(2)} />
@@ -138,7 +138,7 @@ export function CreativeLeaderboard({ state, period }: { state: DashboardState; 
   const adManagerBase = state.meta.adAccountId ? `https://business.facebook.com/adsmanager/manage/ads?act=${state.meta.adAccountId.replace(/^act_/, "")}` : null;
   return (
     <section className="mb-6" aria-labelledby="creative-leaderboard-heading">
-      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h2 id="creative-leaderboard-heading" className="text-base font-semibold">Creative leaderboard</h2><p className="text-xs text-muted-foreground">{definition.label} metrics, stored creative content and evidence-backed verdicts. Thin samples stay neutral.</p></div><p className="text-[11px] text-muted-foreground">Sorted by {definition.label} CPL.</p></div>
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between"><div><h2 id="creative-leaderboard-heading" className="text-base font-semibold">Creative leaderboard</h2><p className="text-xs text-muted-foreground">{definition.label} metrics, stored creative content and evidence-backed verdicts. Thin samples stay neutral.</p></div><p className="text-[11px] text-muted-foreground">Sorted by {definition.label} cost per inquiry.</p></div>
       {ads.length === 0 ? <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">No ads with stored insights yet. After a successful Meta sync returns ad-level rows, creatives appear here.</div> : <div className="space-y-3">{ads.map((ad) => <CreativeCard key={ad.adId} ad={ad} period={period} currencyCode={state.meta.currencyCode} timezoneName={state.meta.timezoneName} adManagerUrl={adManagerBase ? `${adManagerBase}&selected_ad_ids=${encodeURIComponent(ad.adId)}` : null} />)}</div>}
     </section>
   );

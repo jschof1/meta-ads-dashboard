@@ -31,8 +31,8 @@ function EvidenceLine({ recommendation, currencyCode }: { recommendation: Dashbo
   return (
     <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground tabular-nums">
       <span>Spend {formatMoney(current.spendCents, currencyCode)}</span>
-      <span>Leads {formatNumber(current.leads)}</span>
-      <span>CPL {formatMoney(current.cplCents, currencyCode)}</span>
+      <span>Website inquiries {formatNumber(current.leads)}</span>
+      <span>Cost / inquiry {formatMoney(current.cplCents, currencyCode)}</span>
       <span>Impressions {formatNumber(current.impressions)}</span>
       <span>vs matched {recommendation.evidence.comparisonDays}d {previous ? "available" : "unavailable"}</span>
       <span>Observed {recommendation.lastSeenAt.replace("T", " ").replace("Z", " UTC")}</span>

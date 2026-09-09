@@ -13,7 +13,7 @@ export function evidenceForBucket(bucket: Bucket): EntityEvidence {
     return { status: "unknown", reason: "Impression evidence is unavailable for this period." };
   }
   if (bucket.leads == null) {
-    return { status: "unknown", reason: `Lead results are unavailable; need ${UKTL_CONFIG.evidence.minLeadsForVerdict}+ stored leads before a performance verdict.` };
+    return { status: "unknown", reason: `Website inquiry results are unavailable; need ${UKTL_CONFIG.evidence.minLeadsForVerdict}+ stored inquiries before a performance verdict.` };
   }
   if (bucket.impressions < UKTL_CONFIG.evidence.minImpressionsForRate) {
     return {
@@ -24,7 +24,7 @@ export function evidenceForBucket(bucket: Bucket): EntityEvidence {
   if (bucket.leads < UKTL_CONFIG.evidence.minLeadsForVerdict) {
     return {
       status: "thin",
-      reason: `Thin sample: fewer than ${UKTL_CONFIG.evidence.minLeadsForVerdict} stored leads are available for a verdict.`,
+      reason: `Thin sample: fewer than ${UKTL_CONFIG.evidence.minLeadsForVerdict} stored inquiries are available for a verdict.`,
     };
   }
   if (UKTL_CONFIG.evidence.minSpendMinorUnits != null
@@ -34,7 +34,7 @@ export function evidenceForBucket(bucket: Bucket): EntityEvidence {
       reason: "Thin sample: stored spend has not reached the configured evidence threshold.",
     };
   }
-  return { status: "sufficient", reason: "Stored spend, impression and lead evidence clears the configured thresholds." };
+  return { status: "sufficient", reason: "Stored spend, impression and website-inquiry evidence clears the configured thresholds." };
 }
 
 export function frequencyEvidenceForBucket(bucket: Bucket): EntityEvidence {

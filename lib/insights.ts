@@ -119,12 +119,12 @@ export function scoreFatigue(input: {
 
   if (cplDeteriorating) {
     score += 0.2;
-    reasons.push(`CPL up ${Math.round(Math.abs(cplChange ?? 0))}%`);
+    reasons.push(`cost / inquiry up ${Math.round(Math.abs(cplChange ?? 0))}%`);
   }
 
   if (leadsDeteriorating) {
     score += 0.2;
-    reasons.push(`leads down ${Math.round(Math.abs(leadsChange ?? 0))}%`);
+    reasons.push(`website inquiries down ${Math.round(Math.abs(leadsChange ?? 0))}%`);
   }
 
   if (daysActive != null && daysActive >= 7) {
@@ -236,8 +236,8 @@ export function detectAnomalies(trend: TrendPoint[]): Anomaly[] {
       changePct: Math.round(cplDelta * 100),
       date: latest.date,
       message: cplDelta > 0
-        ? `CPL spiked ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Costlier leads - check creatives and lead quality.`
-        : `CPL improved ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Cheaper leads - compare quality before scaling.`,
+        ? `Cost per inquiry rose ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Check creatives and enquiry quality.`
+        : `Cost per inquiry fell ${Math.abs(Math.round(cplDelta * 100))}% vs 7d avg. Compare enquiry quality before scaling.`,
       severity: isPositive ? "info" : Math.abs(cplDelta) >= 0.4 ? "alert" : "warn",
     });
   }
@@ -313,24 +313,24 @@ export function buildTriggers(input: {
   if (input.cplCentsLast7 == null) {
     triggers.push({
       id: "cpl-band",
-      label: "CPL target",
+      label: "Inquiry-cost target",
       status: "pending",
-      detail: "CPL is unavailable - waiting for stored lead evidence.",
+      detail: "Cost per inquiry is unavailable - waiting for stored inquiry evidence.",
     });
   } else if (cplStatus === "unknown") {
     triggers.push({
       id: "cpl-band",
-      label: "CPL target",
+      label: "Inquiry-cost target",
       status: "pending",
-      detail: "No CPL target is configured; historical comparison remains available.",
+      detail: "No inquiry-cost target is configured; historical comparison remains available.",
     });
   } else {
     const status = cplStatus === "green" ? "ok" : cplStatus === "yellow" ? "watch" : "alert";
     triggers.push({
       id: "cpl-band",
-      label: "CPL target",
+      label: "Inquiry-cost target",
       status,
-      detail: `${formattedCpl ?? "CPL available"} is ${cplStatus === "green" ? "inside" : cplStatus === "yellow" ? "within the acceptable" : "above the"} configured range.`,
+      detail: `${formattedCpl ?? "Cost per inquiry available"} is ${cplStatus === "green" ? "inside" : cplStatus === "yellow" ? "within the acceptable" : "above the"} configured range.`,
     });
   }
 
@@ -347,17 +347,17 @@ export function buildTriggers(input: {
 
   const learningTarget = targets.learningLeadsPerWeek;
   if (learningTarget == null) {
-    triggers.push({ id: "learning", label: "Learning phase", status: "pending", detail: "No learning lead target is configured." });
+    triggers.push({ id: "learning", label: "Inquiry learning", status: "pending", detail: "No weekly inquiry target is configured." });
   } else if (input.leadsThisWeek == null) {
-    triggers.push({ id: "learning", label: "Learning phase", status: "pending", detail: "Lead data is unavailable for this period." });
+    triggers.push({ id: "learning", label: "Inquiry learning", status: "pending", detail: "Inquiry data is unavailable for this period." });
   } else if (input.leadsThisWeek >= learningTarget) {
-    triggers.push({ id: "learning", label: "Learning phase", status: "ok", detail: `${input.leadsThisWeek}/${learningTarget} leads this week. Target reached.` });
+    triggers.push({ id: "learning", label: "Inquiry learning", status: "ok", detail: `${input.leadsThisWeek}/${learningTarget} inquiries this week. Target reached.` });
   } else {
     triggers.push({
       id: "learning",
-      label: "Learning phase",
+      label: "Inquiry learning",
       status: input.leadsThisWeek >= learningTarget * 0.5 ? "watch" : "pending",
-      detail: `${input.leadsThisWeek}/${learningTarget} leads this week.`,
+      detail: `${input.leadsThisWeek}/${learningTarget} inquiries this week.`,
     });
   }
 
@@ -370,7 +370,7 @@ export function buildTriggers(input: {
       detail: `${fatigued.length} creative(s) may be fatiguing: ${fatigued.slice(0, 2).map((a) => a.adName).join(", ")}.`,
     });
   } else if (input.ads.some((ad) => ad.evidenceStatus !== "sufficient")) {
-    triggers.push({ id: "fatigue", label: "Creative fatigue", status: "pending", detail: "Fatigue diagnostic withheld until stored impression and lead evidence clears the configured thresholds." });
+    triggers.push({ id: "fatigue", label: "Creative fatigue", status: "pending", detail: "Fatigue diagnostic withheld until stored impression and website-inquiry evidence clears the configured thresholds." });
   } else {
     triggers.push({ id: "fatigue", label: "Creative fatigue", status: "ok", detail: "No creative has crossed the diagnostic fatigue threshold." });
   }
@@ -407,7 +407,7 @@ export function buildPhase(input: {
     label = "Week 1 - Learning";
     totalDays = 7;
   } else if (d < 14) {
-    label = "Week 2 - First lead efficiency read";
+    label = "Week 2 - First inquiry-efficiency read";
     totalDays = 14;
   } else if (d < 21) {
     label = "Week 3 - Scaling decision";
@@ -422,7 +422,7 @@ export function buildPhase(input: {
   const exitCriteria: { label: string; done: boolean }[] = [];
   const learningTarget = UKTL_CONFIG.targets.learningLeadsPerWeek;
   exitCriteria.push({
-    label: learningTarget == null ? "Learning lead target not set" : `${learningTarget} leads/week`,
+    label: learningTarget == null ? "Weekly inquiry target not set" : `${learningTarget} inquiries/week`,
     done: learningTarget != null && input.leadsThisWeek != null && input.leadsThisWeek >= learningTarget,
   });
   exitCriteria.push({

@@ -82,7 +82,7 @@ test("action panel renders server evidence and only the correct transition contr
   assert.match(proposed, /Pause ad: ACTIVE → PAUSED/);
   assert.match(proposed, /Server-sourced reason shown before approval/);
   assert.match(proposed, /high confidence/);
-  assert.match(proposed, /Evidence: £240\.00 spend, 3 leads, £80\.00 CPL/);
+  assert.match(proposed, /Evidence: £240\.00 spend, 3 website inquiries, £80\.00 cost per inquiry/);
   assert.match(proposed, /Approve</);
   assert.match(proposed, /Reject</);
   assert.doesNotMatch(proposed, /Execute approved change/);

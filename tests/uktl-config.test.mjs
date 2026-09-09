@@ -11,7 +11,7 @@ test("UKTL configuration is typed, single-business, and explicit about optional 
   assert.equal(UKTL_CONFIG.locale, "en-GB");
   assert.equal(UKTL_CONFIG.currencySource, "Meta account");
   assert.deepEqual(UKTL_CONFIG.funnel.map((stage) => stage.label), [
-    "Lead",
+    "Website inquiry",
     "Contacted",
     "Qualified",
     "Call booked",
@@ -25,7 +25,9 @@ test("UKTL configuration is typed, single-business, and explicit about optional 
   assert.equal(UKTL_CONFIG.targets.targetCacMinorUnits, null);
   assert.equal(UKTL_CONFIG.evidence.unknownWhenMissing, true);
   assert.equal(UKTL_CONFIG.evidence.compareMatchedPeriods, true);
-  assert.match(UKTL_CONFIG.brief, /Lead quality beats raw lead volume/);
+  assert.match(UKTL_CONFIG.brief, /Inquiry quality beats raw form volume/);
+  assert.equal(UKTL_CONFIG.funnel[0].description, "A completed UKTL enquiry form reported by Meta as its Lead event.");
+  assert.equal(UKTL_CONFIG.funnel[1].description, "A HighLevel CRM record tagged contacted, meaning a sales contact happened.");
 });
 
 test("money and dates use the Meta account currency and account timezone", () => {
@@ -45,7 +47,7 @@ test("missing CPL targets remain unknown instead of creating a verdict", () => {
   assert.equal(classifyCpl(2500), "unknown");
   assert.deepEqual(classifyAd({ spendCents: 5000, leads: 3, cplCents: 1667, ctrLink: 0.02 }), {
     verdict: "unknown",
-    reason: "No CPL target is configured; compare this ad with its historical baseline.",
+    reason: "No inquiry-cost target is configured; compare this ad with its historical baseline.",
   });
 });
 

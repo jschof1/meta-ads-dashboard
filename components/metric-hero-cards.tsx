@@ -69,7 +69,7 @@ function readingLine(
   comparisonLabel: string,
 ): string {
   if (evidence.status !== "sufficient") return evidence.reason;
-  if (latest == null) return metric === "cpl" ? "Awaiting stored lead evidence." : "Awaiting stored impression evidence.";
+  if (latest == null) return metric === "cpl" ? "Awaiting stored inquiry evidence." : "Awaiting stored impression evidence.";
   const delta = ratioDelta(latest, comparison);
   const trendWord = delta == null ? "steady" : delta > 5 ? "climbing" : delta < -5 ? "improving" : "steady";
   if (!band) {
@@ -81,7 +81,7 @@ function readingLine(
   if (metric === "cpl") {
     if (status === "good") return `Inside the configured target, ${trendWord}.`;
     if (status === "watch") return `Inside the configured acceptable range, ${trendWord}.`;
-    return "Above the configured maximum; review lead quality and trend.";
+    return "Above the configured maximum; review inquiry quality and trend.";
   }
   if (status === "good") return `Auction healthy against target, ${trendWord}.`;
   if (status === "watch") return `Auction inside the configured acceptable range, ${trendWord}.`;
@@ -179,7 +179,7 @@ export function MetricHeroCards({ state, period }: { state: DashboardState; peri
   return (
     <section className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2">
       <HeroCard
-        title={`${definition.label} CPL`}
+        title={`${definition.label} cost per inquiry`}
         Icon={Coins}
         series={cplSeries}
         headline={current.cplCents}

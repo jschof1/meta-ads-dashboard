@@ -250,7 +250,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal(adRecommendation.evidence.learningState, "LEARNING");
   assert.equal(["scale_candidate", "pause_candidate", "creative_refresh"].includes(adRecommendation.type), false);
   assert.equal(state.ads[0].verdict, "too_early");
-  assert.match(state.ads[0].verdictReason, /need 3\+ stored leads/);
+  assert.match(state.ads[0].verdictReason, /need 3\+ stored inquiries/);
   assert.equal(state.ads[0].lastChangeAt, "2026-09-04T10:03:00.000Z");
   assert.equal(state.ads[0].format, "image");
   assert.equal(state.campaigns[0].status, "ACTIVE");
@@ -265,7 +265,7 @@ test("performs the 90-day first sync, persists metadata/insights, and keeps real
   assert.equal(runRow.initialBackfill, true);
   assert.equal(runRow.traceId, "trace-pr03-test");
   assert.deepEqual(JSON.parse(runRow.apiDiagnostics), { attempts: 1, traceId: "trace-pr03-test", appUsage: { call_count: 4 }, adAccountUsage: { acc_id_util_pct: 2 } });
-  assert.match(runRow.warning, /leads remain missing, not zero/);
+  assert.match(runRow.warning, /inquiries remain missing, not zero/);
 });
 
 test("is idempotent and overwrites delayed conversion updates during the recent refresh window", async () => {
@@ -309,7 +309,7 @@ test("does not publish a contradictory recommendation set from a warning-bearing
     ad: [insight("2026-09-05", { actions: [] })],
   } });
   const second = await run(db, warningClient.client, new Date("2026-09-05T12:00:00.000Z"));
-  assert.match(second.warning, /leads remain missing/);
+  assert.match(second.warning, /inquiries remain missing/);
 
   const after = await db.recommendation.findMany({ orderBy: { fingerprint: "asc" } });
   assert.deepEqual(after.map((row) => ({ fingerprint: row.fingerprint, sourceSyncRunId: row.sourceSyncRunId, lifecycle: row.lifecycle })), before.map((row) => ({ fingerprint: row.fingerprint, sourceSyncRunId: row.sourceSyncRunId, lifecycle: row.lifecycle })));

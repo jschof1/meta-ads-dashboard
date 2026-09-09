@@ -30,7 +30,7 @@ export function OperatorHeader({ state, period }: { state: DashboardState; perio
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-primary">Operator overview</p>
         <h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Are the ads healthy?</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-          {accountName} · {definition.label} performance. {comparisonInstruction(period, state.meta.mtdComparisonComparable)}
+          {accountName} · {definition.label} performance measured by completed enquiry forms. {comparisonInstruction(period, state.meta.mtdComparisonComparable)}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

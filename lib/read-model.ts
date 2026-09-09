@@ -777,13 +777,13 @@ export function buildDataWarnings(input: {
     || (input.current.impressions != null && input.current.impressions > 0)
     || (input.current.linkClicks != null && input.current.linkClicks > 0);
   if (hasActivity && input.current.leads == null) {
-    warnings.push({ id: "missing-lead-event", severity: "alert", label: "Lead event missing", detail: "Meta returned activity without a usable configured lead result. Leads and CPL stay unknown; check the result event configuration." });
+    warnings.push({ id: "missing-lead-event", severity: "alert", label: "Inquiry event missing", detail: "Meta returned activity without a usable configured enquiry result. Website inquiries and cost per inquiry stay unknown; check the result event configuration." });
   }
   if (hasActivity && input.current.leads === 0 && input.current.spendCents != null && input.current.spendCents > 0) {
-    warnings.push({ id: "spend-without-results", severity: "warn", label: "Spend without results", detail: "The selected period contains spend but Meta reports zero leads. Check the landing path and result event before changing ads." });
+    warnings.push({ id: "spend-without-results", severity: "warn", label: "Spend without inquiries", detail: "The selected period contains spend but Meta reports zero website inquiries. Check the landing path and form event before changing ads." });
   }
   if (input.comparison.leads != null && input.comparison.leads > 0 && input.current.leads === 0 && hasActivity) {
-    warnings.push({ id: "disappearing-events", severity: "alert", label: "Lead results disappeared", detail: "The comparison period had lead results but the selected period has none while spend continues. Check tracking and recent delivery changes." });
+    warnings.push({ id: "disappearing-events", severity: "alert", label: "Inquiry results disappeared", detail: "The comparison period had website inquiries but the selected period has none while spend continues. Check tracking and recent delivery changes." });
   }
   return warnings;
 }

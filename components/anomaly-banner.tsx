@@ -11,11 +11,11 @@ const STYLES: Record<Anomaly["severity"], { bg: string; text: string; Icon: type
 };
 
 const METRIC_LABEL: Record<Anomaly["metric"], string> = {
-  cpl: "CPL",
+  cpl: "Cost / inquiry",
   cpm: "CPM",
   ctr: "Link CTR",
   spend: "Spend",
-  leads: "Leads",
+  leads: "Website inquiries",
 };
 
 export function AnomalyBanner({ state }: { state: DashboardState }) {

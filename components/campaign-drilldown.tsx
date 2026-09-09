@@ -22,8 +22,8 @@ function MetricStrip({ row, currencyCode, period }: { row: CampaignRow | AdSetRo
   return (
     <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
       <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} spend</div><div className="mt-0.5 font-semibold tabular-nums">{formatMoney(bucket.spendCents, currencyCode)}</div></div>
-      <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} leads</div><div className="mt-0.5 font-semibold tabular-nums">{formatCount(bucket.leads)}</div></div>
-      <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} CPL</div><div className="mt-0.5 font-semibold tabular-nums">{formatMoney(bucket.cplCents, currencyCode)}</div></div>
+      <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} inquiries</div><div className="mt-0.5 font-semibold tabular-nums">{formatCount(bucket.leads)}</div></div>
+      <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} cost / inquiry</div><div className="mt-0.5 font-semibold tabular-nums">{formatMoney(bucket.cplCents, currencyCode)}</div></div>
       <div className="rounded-lg bg-muted/50 p-2"><div className="text-muted-foreground">{period} link CTR</div><div className="mt-0.5 font-semibold tabular-nums">{formatPercent(bucket.ctrLink)}</div></div>
     </div>
   );
@@ -45,11 +45,11 @@ function AdSetCard({ row, currencyCode, period }: { row: AdSetRow; currencyCode:
         <div><span className="text-muted-foreground">Learning</span><p className="mt-0.5 font-medium">{row.learningStage || "Unknown"}</p></div>
         <div><span className="text-muted-foreground">Daily budget</span><p className="mt-0.5 font-medium tabular-nums">{formatMoney(row.dailyBudgetMinor, currencyCode)}</p></div>
         <div><span className="text-muted-foreground">Lifetime budget</span><p className="mt-0.5 font-medium tabular-nums">{formatMoney(row.lifetimeBudgetMinor, currencyCode)}</p></div>
-        <div><span className="text-muted-foreground">{period} CPL</span><p className="mt-0.5 font-medium tabular-nums">{formatMoney(bucket.cplCents, currencyCode)}</p></div>
+        <div><span className="text-muted-foreground">{period} cost / inquiry</span><p className="mt-0.5 font-medium tabular-nums">{formatMoney(bucket.cplCents, currencyCode)}</p></div>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
         <span>{period} spend {formatMoney(bucket.spendCents, currencyCode)}</span>
-        <span>{period} leads {formatCount(bucket.leads)}</span>
+        <span>{period} inquiries {formatCount(bucket.leads)}</span>
         {!row.isCurrent && <span className="text-amber-500">Not current in latest sync</span>}
         <span className={evidence.status === "sufficient" ? "text-emerald-500" : evidence.status === "thin" ? "text-amber-500" : "text-muted-foreground"} title={evidence.reason}>{evidenceLabel(evidence.status)}</span>
       </div>
@@ -83,7 +83,7 @@ function CampaignCard({ row, adSets, currencyCode, timezoneName, period }: { row
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
           <span>{period} spend {formatMoney(bucket.spendCents, currencyCode)}</span>
-          <span>{period} leads {formatCount(bucket.leads)}</span>
+          <span>{period} inquiries {formatCount(bucket.leads)}</span>
           <span className={evidence.status === "sufficient" ? "text-emerald-500" : evidence.status === "thin" ? "text-amber-500" : "text-muted-foreground"} title={evidence.reason}>{evidenceLabel(evidence.status)}</span>
           {row.startDate && <span>Starts {formatStoredDate(row.startDate, timezoneName)}</span>}
         </div>
