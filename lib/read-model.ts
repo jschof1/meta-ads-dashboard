@@ -23,6 +23,7 @@ import { readActiveRecommendationViews } from "@/lib/recommendation-store";
 import { loadHighLevelSettings, type HighLevelSettings } from "@/lib/highlevel-config";
 import { buildCrmMetrics, emptyCrmMetrics } from "@/lib/crm-metrics";
 import { metaActionGate, readMetaActionViews } from "@/lib/meta-actions";
+import { callbackFormOpens } from "@/lib/meta-event-metrics";
 import type { MetaActionGate } from "@/lib/meta-action-types";
 import type {
   ActionLogEntry,
@@ -207,7 +208,10 @@ function markOmittedInsightRowsUnknown(rows: StoredInsight[], latestSuccess: Syn
       ctrLink: null,
       frequency: null,
       resultActionType: null,
-      rawActions: "[]",
+      // The row's metrics are unavailable because the latest successful
+      // refresh omitted it. Preserve that unknown state for any secondary
+      // action metric derived from the raw action payload.
+      rawActions: "null",
     };
   });
 }
@@ -905,6 +909,7 @@ async function buildDashboardStateOnce(options: DashboardStateOptions): Promise<
   const storedAccountId = latestSuccess?.accountId ?? null;
   const accountRows = readableRows.filter((row) => row.level === "account" && row.entityId === storedAccountId);
   const buckets = periodBuckets(accountRows, timeZone, now);
+  const callbackOpens = callbackFormOpens(rowsInRange(accountRows, dateRangeForPeriod("30d", timeZone, now)));
   const trendRange = dateRangeForPeriod("30d", timeZone, now);
   const trend: TrendPoint[] = [];
   for (let date = trendRange.since; date <= trendRange.until; date = addCalendarDays(date, 1)) {
@@ -1026,6 +1031,7 @@ async function buildDashboardStateOnce(options: DashboardStateOptions): Promise<
     funnel: {
       metaPixelImpressions: buckets.last30.impressions,
       metaPixelLinkClicks: buckets.last30.linkClicks,
+      callbackFormOpens: callbackOpens.value,
       leads: buckets.last30.leads,
       contacted: crm.counts.contacted,
       qualified: crm.counts.qualified,

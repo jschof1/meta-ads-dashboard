@@ -143,6 +143,8 @@ export type HeatmapCell = {
 export type FunnelData = {
   metaPixelImpressions: number | null;
   metaPixelLinkClicks: number | null;
+  /** Opens of the Request a callback form, reported by Meta separately from Lead. */
+  callbackFormOpens: number | null;
   leads: number | null;
   contacted: number | null;
   qualified: number | null;

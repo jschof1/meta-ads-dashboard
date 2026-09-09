@@ -4,7 +4,7 @@ import type { DashboardState } from "@/lib/state-types";
 import type { DashboardPeriod } from "@/lib/state-types";
 import { UKTL_CONFIG, type FunnelStageKey } from "@/lib/targets";
 import { currentBucket, periodDefinition } from "@/lib/dashboard-periods";
-import { Eye, MousePointerClick, UserRound, UserCheck, Phone, Trophy, Info } from "lucide-react";
+import { Eye, MousePointerClick, UserRound, UserCheck, Phone, Trophy, Info, FormInput } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 function pct(numerator: number | null, denominator: number | null) {
@@ -37,6 +37,8 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
   const metaImpressions = period === "30d" ? f.metaPixelImpressions : periodBucket.impressions;
   const metaLinkClicks = period === "30d" ? f.metaPixelLinkClicks : periodBucket.linkClicks;
   const metaLeads = period === "30d" ? f.leads : periodBucket.leads;
+  const callbackFormOpens = period === "30d" ? f.callbackFormOpens : null;
+  const callbackFormOpenSource = period === "30d" ? "Meta · intent only" : "Meta · select 30d";
   const showCrmCohort = period === "30d";
   const crmNote = !f.crmConfigured
     ? "CRM data not configured"
@@ -47,7 +49,8 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
   const steps: Step[] = [
     { key: "lead", label: "Impressions", value: metaImpressions, base: metaImpressions, icon: Eye, sourceNote: "Meta" },
     { key: "lead", label: "Link clicks", value: metaLinkClicks, base: metaImpressions, icon: MousePointerClick, sourceNote: "Meta" },
-    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: metaLinkClicks, icon: UserRound, sourceNote: "Meta · completed form" },
+    { key: "lead", label: "Callback form opens", value: callbackFormOpens, base: callbackFormOpens == null ? null : metaLinkClicks, icon: FormInput, sourceNote: callbackFormOpenSource },
+    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: callbackFormOpens ?? metaLinkClicks, icon: UserRound, sourceNote: "Meta · completed form" },
     { key: "contacted", label: stageLabel("contacted"), value: crmValue(f.contacted), base: showCrmCohort ? metaLeads : null, icon: UserCheck, sourceNote: crmNote },
     { key: "qualified", label: stageLabel("qualified"), value: crmValue(f.qualified), base: crmValue(f.contacted), icon: UserCheck, sourceNote: crmNote },
     { key: "callBooked", label: stageLabel("callBooked"), value: crmValue(f.callsBooked), base: crmValue(f.qualified), icon: Phone, sourceNote: crmNote },
@@ -104,7 +107,7 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
                     <div className="text-[10px] text-muted-foreground">from previous stage</div>
                   </>
                 ) : (
-                  <div className="text-muted-foreground">{index < 3 ? "top of funnel" : "unknown"}</div>
+                  <div className="text-muted-foreground">{index < 4 ? "top of funnel" : "unknown"}</div>
                 )}
               </div>
             </div>
@@ -112,6 +115,7 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
         })}
       </div>
       <div className="px-5 pb-4 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
+        <span>Callback form opens: Meta&apos;s automatic <code>SubscribedButtonClick</code> event. It shows a form was opened, not that an enquiry was submitted.</span>
         <span>{lostLabel}: {!f.crmConfigured ? "CRM data not configured" : !showCrmCohort ? "Select 30d for CRM cohort" : f.lostCustomers == null ? "Unknown" : f.lostCustomers.toLocaleString("en-GB")}</span>
         {!f.crmConfigured && <span>Downstream stages stay unknown until CRM attribution is configured.</span>}
         {f.crmConfigured && !showCrmCohort && <span>Downstream CRM counts use the separate last-30-day contact-created cohort.</span>}
