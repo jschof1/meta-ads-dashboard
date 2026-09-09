@@ -350,5 +350,15 @@ The form redirected to `/book-a-call`; a Lead event and PageView were observed
 for pixel `25839137269022721`. The booking redirected to `/thank-you`, and its
 appointment was read back through the calendar API. The test appointment was
 removed after verification and the contact tagged. Only PageView was observed
-on the thank-you page; a separate Meta booking event is not verified. No claim
+on the thank-you page in this initial test; this was superseded by the booking tracking update below. No claim
 of browser/server deduplication or complete conversions-API delivery is made.
+
+### Cross-thread reconciliation — 9 September 2026
+
+The Meta-ads viewer work (thread 01a0812a-1f08-71e3-a7bd-d70e223e5a9a) is already an ancestor of the saved-register release: business outcomes/payment reporting, inquiry terminology and callback opens were retained. The native HighLevel calendar was re-read on 9 September: pixel 25839137269022721, shared form aEwGU42vGjqNm43qwms7, confirmed-booking redirect https://uktradeleads.com/thank-you?booked=1. The published thank-you HTML still contains the guarded Schedule event. The other thread recorded a completed booking test and Meta receipt; this reconciliation did not generate a new booking. The shared form can still generate Lead on booking, so Schedule existing does not establish unique enquiry counting.
+
+The redirect marker is not server verification: its 30-second session guard does not establish event-ID deduplication, and native/calendar plus page tracking should be inspected together before adding another event stream. No tracking, ad optimisation or historic Meta settings were changed in the reconciliation.
+
+Callback-open data remains separate from Lead. No matching action is displayed as unavailable, not an observed zero. No conversion percentage is calculated from callback opens to Lead events or from Meta events to CRM people: the populations are not reconciled cohorts. The saved register uses submission/activity timestamps; the existing business-outcomes panel uses its separately labelled contact-created cohort. Its payments are client receipts, not ad-attributed revenue.
+
+The other thread also records a Google Apps Script automation inviting Richard to newly created primary-calendar events with UKTL in the title. That external automation is independent of this repository and its current execution status was not reverified here. Do not create a duplicate or imply this dashboard schedules invitations.

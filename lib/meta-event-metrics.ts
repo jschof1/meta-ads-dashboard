@@ -39,8 +39,8 @@ function isCallbackFormOpenAction(actionType: string): boolean {
 
 /**
  * Sums the Meta-reported Request a callback form opens from account insight
- * rows. `null` means that Meta did not return readable action data, while 0
- * means that it did return action data but no matching event in the period.
+ * rows. `null` means that Meta did not return this event or readable action data.
+ * Zero requires an explicit matching event with a zero value.
  */
 export function callbackFormOpens(rows: RawActionRow[]): SecondaryEventMetric {
   if (rows.length === 0) return { value: null, actionTypes: [] };
@@ -58,5 +58,5 @@ export function callbackFormOpens(rows: RawActionRow[]): SecondaryEventMetric {
       actionTypes.add(action.action_type);
     }
   }
-  return { value: total, actionTypes: [...actionTypes].sort() };
+  return { value: actionTypes.size ? total : null, actionTypes: [...actionTypes].sort() };
 }

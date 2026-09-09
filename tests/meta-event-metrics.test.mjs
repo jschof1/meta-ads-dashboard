@@ -15,7 +15,9 @@ test("keeps callback-form opens separate from Lead and accepts Meta action-type 
 });
 
 test("distinguishes an observed zero from unavailable Meta action data", () => {
-  assert.equal(callbackFormOpens([{ rawActions: "[]" }]).value, 0);
+  assert.equal(callbackFormOpens([{ rawActions: "[]" }]).value, null);
+  assert.equal(callbackFormOpens([{ rawActions: JSON.stringify([{ action_type: "SubscribedButtonClick", value: "0" }]) }]).value, 0);
+  assert.equal(callbackFormOpens([{ rawActions: JSON.stringify([{ action_type: "offsite_conversion.fb_pixel_lead", value: "41" }]) }]).value, null);
   assert.equal(callbackFormOpens([{ rawActions: "null" }]).value, null);
   assert.equal(callbackFormOpens([{ rawActions: "not json" }]).value, null);
 });

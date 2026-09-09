@@ -26,7 +26,7 @@ test("UKTL configuration is typed, single-business, and explicit about optional 
   assert.equal(UKTL_CONFIG.evidence.unknownWhenMissing, true);
   assert.equal(UKTL_CONFIG.evidence.compareMatchedPeriods, true);
   assert.match(UKTL_CONFIG.brief, /Inquiry quality beats raw form volume/);
-  assert.equal(UKTL_CONFIG.funnel[0].description, "A completed UKTL enquiry form reported by Meta as its Lead event.");
+  assert.equal(UKTL_CONFIG.funnel[0].description, "An ad-attributed Meta Lead event; enquiry and booking submissions can repeat for the same person.");
   assert.equal(UKTL_CONFIG.funnel[1].description, "A HighLevel CRM record tagged contacted, meaning a sales contact happened.");
 });
 

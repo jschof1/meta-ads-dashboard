@@ -87,7 +87,7 @@ export const UKTL_CONFIG = {
     {
       key: "lead",
       label: "Website inquiry",
-      description: "A completed UKTL enquiry form reported by Meta as its Lead event.",
+      description: "An ad-attributed Meta Lead event; enquiry and booking submissions can repeat for the same person.",
       source: "meta",
       displayInLinearFunnel: true,
     },
@@ -180,7 +180,7 @@ This is the internal operating brief for the UK Trade Leads Meta Ads Command Cen
 
 ## Conversion system
 
-Meta’s Lead event is the primary acquisition KPI: a completed UKTL enquiry form attributed to an ad. The business outcome follows through the CRM stages: contacted, qualified, call booked, call attended, won customer, and lost.
+Meta’s Lead event is the primary advertising event KPI, not a unique-person count. The shared UKTL form can emit Lead for both an enquiry and a booking. Use the saved enquiry register for distinct CRM contacts. The business outcome follows through the CRM stages: contacted, qualified, call booked, call attended, won customer, and lost.
 
 ## Operating principle
 

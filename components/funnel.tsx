@@ -50,8 +50,8 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
     { key: "lead", label: "Impressions", value: metaImpressions, base: metaImpressions, icon: Eye, sourceNote: "Meta" },
     { key: "lead", label: "Link clicks", value: metaLinkClicks, base: metaImpressions, icon: MousePointerClick, sourceNote: "Meta" },
     { key: "lead", label: "Callback form opens", value: callbackFormOpens, base: callbackFormOpens == null ? null : metaLinkClicks, icon: FormInput, sourceNote: callbackFormOpenSource },
-    { key: "lead", label: stageLabel("lead"), value: metaLeads, base: callbackFormOpens ?? metaLinkClicks, icon: UserRound, sourceNote: "Meta · Lead events" },
-    { key: "contacted", label: stageLabel("contacted"), value: crmValue(f.contacted), base: showCrmCohort ? metaLeads : null, icon: UserCheck, sourceNote: crmNote },
+    { key: "lead", label: "Meta Lead events", value: metaLeads, base: null, icon: UserRound, sourceNote: "Meta · Lead events" },
+    { key: "contacted", label: stageLabel("contacted"), value: crmValue(f.contacted), base: null, icon: UserCheck, sourceNote: crmNote },
     { key: "qualified", label: stageLabel("qualified"), value: crmValue(f.qualified), base: crmValue(f.contacted), icon: UserCheck, sourceNote: crmNote },
     { key: "callBooked", label: stageLabel("callBooked"), value: crmValue(f.callsBooked), base: crmValue(f.qualified), icon: Phone, sourceNote: crmNote },
     { key: "callAttended", label: stageLabel("callAttended"), value: crmValue(f.callsAttended), base: crmValue(f.callsBooked), icon: Phone, sourceNote: crmNote },
@@ -115,7 +115,8 @@ export function Funnel({ state, period = "30d" }: { state: DashboardState; perio
         })}
       </div>
       <div className="px-5 pb-4 text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-        <span>Callback form opens: Meta&apos;s automatic <code>SubscribedButtonClick</code> event. It shows a form was opened, not that an enquiry was submitted.</span>
+        <span>Callback form opens: Meta&apos;s automatic <code>SubscribedButtonClick</code> event. It shows a form was opened, not that an enquiry was submitted. An unavailable value means Meta did not return this event; it does not establish zero clicks.</span>
+        <span>Meta Lead events can include both enquiry and booking form submissions by the same person. The saved enquiry register groups these by contact. CRM cohorts and Meta events are not matched people, so no conversion rate is calculated between them.</span>
         <span>{lostLabel}: {!f.crmConfigured ? "CRM data not configured" : !showCrmCohort ? "Select 30d for CRM cohort" : f.lostCustomers == null ? "Unknown" : f.lostCustomers.toLocaleString("en-GB")}</span>
         {!f.crmConfigured && <span>Downstream stages stay unknown until CRM attribution is configured.</span>}
         {f.crmConfigured && !showCrmCohort && <span>Downstream CRM counts use the separate last-30-day contact-created cohort.</span>}
