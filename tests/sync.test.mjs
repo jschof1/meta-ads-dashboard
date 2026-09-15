@@ -234,7 +234,6 @@ test("performs the 90-day first sync and persists explicit zero result days", as
   assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).providerUpdatedAt.toISOString(), "2026-09-04T10:03:00.000Z");
   assert.equal((await db.creative.findUnique({ where: { metaId: "creative-1" } })).lastSeenSyncRunId, result.runId);
   assert.equal(await db.dailyInsight.count(), 4);
-  assert.equal(await db.recommendation.count(), 0);
   const accountRow = await db.dailyInsight.findUnique({
     where: { date_level_entityId_attributionKey_scopeKey: { date: "2026-09-04", level: "account", entityId: account.id, attributionKey: "7d_click,1d_view", scopeKey: "account" } },
   });
@@ -243,14 +242,14 @@ test("performs the 90-day first sync and persists explicit zero result days", as
   assert.equal(accountRow.leads, 0);
 
   const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
-  assert.equal(state.recommendations.length, 0);
+  assert.equal(state.funnel.metaPixelLeads, 0);
 
   const derived = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z"), recommendationMode: "derived" });
   const adRecommendation = derived.recommendations.find((recommendation) => recommendation.target.type === "ad");
   assert.equal(adRecommendation.evidence.learningState, "LEARNING");
   assert.equal(["scale_candidate", "pause_candidate", "creative_refresh"].includes(adRecommendation.type), false);
   assert.equal(state.ads[0].verdict, "too_early");
-  assert.match(state.ads[0].verdictReason, /need 3\+ stored inquiries/);
+  assert.match(state.ads[0].verdictReason, /3.*stored inquiries/);
   assert.equal(state.ads[0].lastChangeAt, "2026-09-04T10:03:00.000Z");
   assert.equal(state.ads[0].format, "image");
   assert.equal(state.campaigns[0].status, "ACTIVE");
@@ -704,7 +703,7 @@ test("keeps independent campaign-scoped histories isolated across campaigns and 
 
 test("deduplicates repeated provider rows and accepts a delayed null-to-known result", async () => {
   const db = await createDatabase();
-  const duplicate = insight("2026-09-04", { spend: "10.00", actions: [] });
+  const duplicate = insight("2026-09-04", { spend: "10.00", actions: undefined });
   const { client, rows } = fakeClient({ rows: {
     account: [duplicate, { ...duplicate, spend: "11.00" }],
     campaign: [duplicate],

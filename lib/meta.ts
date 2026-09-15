@@ -7,7 +7,8 @@ import { currencyMinorUnitScale } from "./format";
 
 export const DEFAULT_GRAPH_VERSION = "v25.0";
 const GRAPH_HOST = "graph.facebook.com";
-const DEFAULT_PAGE_SIZE = 100;
+// Creative payloads can exceed Meta's response budget at 100 records.
+const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_MAX_PAGES = 50;
 const DEFAULT_MAX_ITEMS = 10_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -315,6 +316,11 @@ const ENTITY_FIELDS = {
   creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags",
 } as const;
 
+function isOversizedMetaResponse(error: unknown): boolean {
+  return error instanceof MetaApiError && error.code === 1
+    && /reduce the amount of data/i.test(error.message);
+}
+
 function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -591,7 +597,9 @@ export class MetaClient {
   }
 
   private shouldRetry(error: MetaApiError, attempt: number): boolean {
-    return error.transient && attempt <= this.maxRetries;
+    // Repeating an oversized request unchanged cannot reduce its payload.
+    // paginate retries that same cursor with a smaller page instead.
+    return !isOversizedMetaResponse(error) && error.transient && attempt <= this.maxRetries;
   }
 
   private async waitBeforeRetry(error: MetaApiError, attempt: number): Promise<void> {
@@ -609,16 +617,24 @@ export class MetaClient {
     const items: T[] = [];
     let after: string | undefined;
     let pages = 0;
+    let pageSize = this.pageSize;
     let lastDiagnostics: MetaDiagnostics = { attempts: 0 };
     let lastPaging: MetaPaging | undefined;
 
     while (true) {
       if (pages >= this.maxPages) throw new MetaPaginationError(`Meta pagination exceeded the ${this.maxPages}-page safety cap`);
-      const page = await this.requestRaw<T[]>(path, {
-        ...params,
-        limit: String(this.pageSize),
-        ...(after ? { after } : {}),
-      });
+      let page: MetaRequestResult<T[]>;
+      try {
+        page = await this.requestRaw<T[]>(path, {
+          ...params,
+          limit: String(pageSize),
+          ...(after ? { after } : {}),
+        });
+      } catch (error) {
+        if (!isOversizedMetaResponse(error) || pageSize <= 1) throw error;
+        pageSize = Math.max(1, Math.floor(pageSize / 2));
+        continue;
+      }
       if (!Array.isArray(page.data)) {
         throw new MetaApiError("Meta Graph API returned a malformed collection", {
           kind: "response",

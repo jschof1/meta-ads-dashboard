@@ -464,3 +464,22 @@ test("creative requests omit unsupported updated_time while retaining ad timesta
   assert.doesNotMatch(adFields.match(/creative\{([^}]+)\}/)[1], /updated_time/);
   assert.doesNotMatch(calls[1].url.searchParams.get("fields"), /updated_time/);
 });
+
+test("oversized Meta pages shrink at the same cursor without losing earlier rows", async () => {
+  const { client, calls, sleeps } = makeClient((url) => {
+    const after = url.searchParams.get("after");
+    if (!after) return jsonResponse({ data: [{ id: "first" }], paging: { cursors: { after: "next-page" }, next: "https://graph.facebook.com/v25.0/act_123/adcreatives?after=next-page" } });
+    if (Number(url.searchParams.get("limit")) > 25) return jsonResponse({ error: { code: 1, message: "Please reduce the amount of data you're asking for, then retry your request" } }, 500);
+    return jsonResponse({ data: [{ id: "second" }] });
+  }, { pageSize: 100 });
+  const result = await client.paginate("act_123/adcreatives", { fields: "id" });
+  assert.deepEqual(result.data.map(row => row.id), ["first", "second"]);
+  assert.deepEqual(calls.map(call => [call.url.searchParams.get("after"), call.url.searchParams.get("limit")]), [[null,"100"],["next-page","100"],["next-page","50"],["next-page","25"]]);
+  assert.deepEqual(sleeps, []);
+});
+
+test("an oversized single-item page fails instead of returning a partial collection", async () => {
+  const { client, calls } = makeClient(() => jsonResponse({ error: { code: 1, message: "Please reduce the amount of data you're asking for, then retry your request" } }, 500), { pageSize: 1 });
+  await assert.rejects(client.paginate("act_123/adcreatives"), /reduce the amount of data/);
+  assert.equal(calls.length, 1);
+});

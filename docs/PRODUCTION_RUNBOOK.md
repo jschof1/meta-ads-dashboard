@@ -362,3 +362,25 @@ The redirect marker is not server verification: its 30-second session guard does
 Callback-open data remains separate from Lead. No matching action is displayed as unavailable, not an observed zero. No conversion percentage is calculated from callback opens to Lead events or from Meta events to CRM people: the populations are not reconciled cohorts. The saved register uses submission/activity timestamps; the existing business-outcomes panel uses its separately labelled contact-created cohort. Its payments are client receipts, not ad-attributed revenue.
 
 The other thread also records a Google Apps Script automation inviting Richard to newly created primary-calendar events with UKTL in the title. That external automation is independent of this repository and its current execution status was not reverified here. Do not create a duplicate or imply this dashboard schedules invitations.
+
+### Meta creative pagination recovery — 15 September 2026
+
+The scheduled sync failed on 12–15 September with Graph code 1 / HTTP 500:
+“Please reduce the amount of data you're asking for, then retry your request”.
+Direct endpoint checks isolated this to `/adcreatives` at a page size of 100;
+account, campaign, ad-set and ad reads still succeeded. This was a response-size
+failure, not expired credentials. A complete read with smaller pages returned
+227 creative records.
+
+The client now starts collections at 50 records and halves the page size when
+Meta explicitly reports this oversized-data error. It retries the same cursor,
+retains earlier pages, and keeps the existing page/item caps. A failing
+single-record page still fails the sync; partial results are never published.
+Unchanged oversized requests are not retried as generic transient errors.
+Authentication and ordinary transient-error handling are unchanged.
+
+Validation: all 324 tests passed, including mid-pagination recovery and the
+single-item failure case; typecheck, lint and the Cloudflare build passed.
+The sync fixtures were updated to distinguish omitted actions (unknown) from
+explicit empty actions (zero), matching the earlier deployed reporting fix.
+Cloudflare version: `9580ddc7-9728-4ff2-acea-abb4ec8cb01a`.
