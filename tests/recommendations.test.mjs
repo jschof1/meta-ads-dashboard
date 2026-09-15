@@ -80,6 +80,7 @@ function analysis(overrides = {}) {
     config: overrides.config ?? configWith({ cpl: { targetMinorUnits: 1500, acceptableMinorUnits: 2500, maximumMinorUnits: 3500 } }),
     target: overrides.target ?? { type: "ad", id: "ad-1", name: "Trade lead creative" },
     comparisonDays: overrides.comparisonDays ?? 7,
+    ranges: overrides.ranges,
     current,
     previous,
     cumulative,
@@ -235,8 +236,8 @@ test("distinguishes recovery, decline and possible tracking failure", () => {
     current: metrics({ spendCents: 6000, impressions: 6000, leads: null, linkClicks: 120, frequency: 1.2 }),
     previous: metrics({ spendCents: 6000, impressions: 6000, leads: 4, linkClicks: 120, frequency: 1.2 }),
   });
-  assert.equal(tracking.recommendations[0].type, "possible_tracking_issue");
-  assert.equal(tracking.recommendations[0].severity, "alert");
+  assert.equal(tracking.recommendations[0].type, "monitor");
+  assert.equal(tracking.recommendations[0].severity, "info");
 });
 
 test("holds or monitors paused, new and learning entities", () => {
@@ -367,4 +368,33 @@ test("reads only validated active recommendations in the exact dashboard scope",
   assert.equal(views[0].target.id, recommendation.target.id);
   assert.equal(views[0].evidence.evidenceVersion, 1);
   assert.equal("signals" in views[0], false);
+});
+
+test("a tiny incomplete latest day is a reporting notice, not a tracking alarm", () => {
+  const result = analysis({
+    current: metrics({ spendCents: 3445, impressions: 966, leads: null, linkClicks: 3 }),
+    previous: metrics({ spendCents: 3154, impressions: 655, leads: 2, linkClicks: 7 }),
+    ranges: { current: { since: "2026-09-09", until: "2026-09-15" }, previous: null, cumulative: null },
+    series: [
+      { date: "2026-09-14", metrics: metrics({ spendCents: 736, impressions: 249, leads: 0, linkClicks: 1 }) },
+      { date: "2026-09-15", metrics: metrics({ spendCents: 4, impressions: 5, leads: null, linkClicks: 0 }) },
+    ],
+  });
+  assert.equal(result.recommendations[0].type, "monitor");
+  assert.equal(result.recommendations[0].severity, "info");
+  assert.match(result.recommendations[0].reason, /Only the latest day/);
+  assert.equal(result.recommendations[0].evidence.current.leads, null);
+  assert.ok(!result.recommendations.some(row => row.type === "possible_tracking_issue"));
+});
+
+test("zero leads with just three clicks does not establish a tracking problem", () => {
+  const result = analysis({ current: metrics({ spendCents: 3445, impressions: 966, leads: 0, linkClicks: 3 }), previous: metrics({ spendCents: 3154, impressions: 655, leads: 2, linkClicks: 7 }) });
+  assert.ok(!result.recommendations.some(row => row.type === "possible_tracking_issue"));
+});
+
+test("zero leads after comparable substantial traffic retains a cautious tracking check", () => {
+  const result = analysis({ current: metrics({ spendCents: 6000, impressions: 6000, leads: 0, linkClicks: 120 }), previous: metrics({ spendCents: 6000, impressions: 6000, leads: 4, linkClicks: 120 }) });
+  assert.equal(result.recommendations[0].type, "possible_tracking_issue");
+  assert.equal(result.recommendations[0].severity, "watch");
+  assert.match(result.recommendations[0].reason, /does not prove/);
 });

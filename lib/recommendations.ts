@@ -347,7 +347,6 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
   const previousSufficient = previous != null && hasSufficientEvidence(previous, config);
   const activity = hasActivity(current);
   const currentLeadsMissing = activity && current.leads == null;
-  const previousHadLeads = previous?.leads != null && previous.leads > 0;
   const cplChange = evidence.deltas.cplPct;
   const ctrChange = evidence.deltas.ctrPct;
   const leadsChange = evidence.deltas.leadsPct;
@@ -489,17 +488,39 @@ export function analyseRecommendations(input: RecommendationAnalysisInput): Reco
   });
   signals.push(budgetSignal);
 
-  if (currentLeadsMissing || (activity && current.leads === 0 && previousHadLeads)) {
+  const currentSeries = series.filter(point => evidence.ranges.current
+    && point.date >= evidence.ranges.current.since && point.date <= evidence.ranges.current.until);
+  const missingLeadDays = currentSeries.filter(point => point.metrics.leads == null);
+  const onlyLatestDayMissing = missingLeadDays.length === 1
+    && missingLeadDays[0].date === evidence.ranges.current?.until
+    && currentSeries.length > 1;
+  const comparableTrafficWithoutLeads = activity && current.leads === 0 && previousSufficient
+    && current.impressions != null && current.impressions >= config.evidence.minImpressionsForRate
+    && current.linkClicks != null && previous?.linkClicks != null
+    && previous.linkClicks > 0 && current.linkClicks >= previous.linkClicks;
+
+  if (currentLeadsMissing) {
+    addRecommendation(recommendations, {
+      type: "monitor",
+      target: input.target,
+      severity: "info",
+      confidence: "low",
+      reason: onlyLatestDayMissing
+        ? "Only the latest day has an unavailable Lead result. That incomplete daily row makes the period total unavailable; it does not establish a broken form or pixel."
+        : "Meta has not supplied a complete Lead result for this period. This is a reporting gap, not evidence that the form or pixel is broken.",
+      evidence,
+      proposedAction: "Refresh after Meta updates its reporting, or compare the same full-period report in Ads Manager. If the gap persists across completed days, investigate the data connection before changing tracking or the ad.",
+      signals: [evidenceSignal, trendSignal],
+    });
+  } else if (comparableTrafficWithoutLeads) {
     addRecommendation(recommendations, {
       type: "possible_tracking_issue",
       target: input.target,
-      severity: previousHadLeads ? "alert" : "watch",
-      confidence: previousHadLeads && previousSufficient ? "high" : confidence,
-      reason: currentLeadsMissing
-        ? "Meta activity is stored but the configured website inquiry result is missing, so performance cannot be judged safely."
-        : "The matched baseline contained website inquiries, but the current active period contains none while delivery continues.",
+      severity: "watch",
+      confidence,
+      reason: "Meta reports zero Lead events despite at least as many link clicks as a sufficiently evidenced comparison period that had leads. This warrants a check, but does not prove a tracking failure.",
       evidence,
-      proposedAction: "Check the enquiry form event, form path and recent tracking changes before changing the ad.",
+      proposedAction: "Compare the same period in Ads Manager and check the enquiry journey before changing the ad. Zero leads can also reflect conversion performance.",
       signals: [evidenceSignal, trendSignal],
     });
   } else if (combinedFatigue) {

@@ -49,7 +49,7 @@ function RecommendationCard({ recommendation, currencyCode }: { recommendation: 
         <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${style.text}`} />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 className="text-sm font-semibold">{TYPE_LABELS[recommendation.type]}</h3>
+            <h3 className="text-sm font-semibold">{recommendation.type === "monitor" && recommendation.evidence.current.leads == null ? "Lead reporting incomplete" : TYPE_LABELS[recommendation.type]}</h3>
             <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{recommendation.confidence} confidence</span>
             <span className="text-xs text-muted-foreground">· {recommendation.target.name}</span>
           </div>

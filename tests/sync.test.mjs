@@ -1067,6 +1067,6 @@ test("campaign-budget ad sets and format-specific creatives remain current and m
   assert.equal(state.meta.metadataStaleCount, 0);
   assert.equal(state.adSets[0].dailyBudgetMinor, null);
   assert.equal(state.adSets[0].learningStage, null);
-  assert.ok(state.recommendations.some(row => row.type === "possible_tracking_issue"));
+  assert.ok(state.recommendations.some(row => row.type === "monitor" && row.reason.includes("reporting gap")));
   assert.ok(state.recommendations.every(row => !["scale_candidate", "pause_candidate", "creative_refresh"].includes(row.type)));
 });

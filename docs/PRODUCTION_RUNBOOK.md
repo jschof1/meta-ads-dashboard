@@ -404,3 +404,19 @@ The UI labels the intentionally disabled Meta write gate as Read-only mode and
 links to Ads Manager. No write gate, campaign, budget or optimisation setting
 was enabled or changed. Recommendation empty states distinguish the first sync
 from incomplete entity data or no currently supported recommendation.
+
+### Incomplete Lead reporting is not a tracking-failure diagnosis
+
+Missing period Lead totals now produce an informational monitor recommendation,
+labelled Lead reporting incomplete. When only the final daily row is missing,
+the explanation identifies that row rather than suggesting the form is broken.
+The stored result remains unknown; the change does not invent zero results.
+The next step is refreshing/comparing the same full-period Meta report, then
+investigating the data connection if completed-day gaps persist.
+
+A known zero only produces a cautious possible-tracking check when the prior
+period has sufficient evidence, current impressions meet the existing minimum,
+and current link clicks are at least the positive prior-period count. Tiny
+samples such as the Outdoor Walking ad's three clicks no longer qualify.
+Regression cases cover the 4p/five-impression missing final day, the low-traffic
+known-zero case, and a genuinely comparable high-traffic zero result.
