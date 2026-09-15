@@ -133,14 +133,15 @@ export function MetaActionPanel({ state }: { state: DashboardState }) {
       <div className="mb-4 flex items-start gap-3">
         <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
         <div>
-          <h2 id="meta-actions-title" className="text-base font-semibold">Approval-gated Meta actions</h2>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Recommendations never call Meta. Prepare the exact change, approve it, then execute it as a separate server request.</p>
+          <h2 id="meta-actions-title" className="text-base font-semibold">Ad controls</h2>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Review recommendations before making changes to your ads.</p>
         </div>
       </div>
 
-      <div className={`mb-4 rounded-lg border p-3 text-xs ${state.meta.actionGate.status === "ready" ? "border-emerald-500/25 bg-emerald-500/5" : "border-amber-500/25 bg-amber-500/5"}`} role="status">
-        <p className="font-medium">{state.meta.actionGate.status === "ready" ? "Server write gate is enabled" : state.meta.actionGate.status === "misconfigured" ? "Server write gate is misconfigured" : "Server write gate is disabled"}</p>
-        <p className="mt-1 text-muted-foreground">{state.meta.actionGate.message}</p>
+      <div className={`mb-4 rounded-lg border p-3 text-xs ${state.meta.actionGate.status === "ready" ? "border-emerald-500/25 bg-emerald-500/5" : state.meta.actionGate.status === "disabled" ? "border-border bg-muted/30" : "border-amber-500/25 bg-amber-500/5"}`} role="status">
+        <p className="font-medium">{state.meta.actionGate.status === "ready" ? "Ad changes enabled" : state.meta.actionGate.status === "misconfigured" ? "Ad controls need configuration" : "Read-only mode"}</p>
+        <p className="mt-1 text-muted-foreground">{state.meta.actionGate.status === "disabled" ? "Meta writes are disabled in this dashboard. You can review performance and recommendations here, and make ad changes in Ads Manager." : state.meta.actionGate.message}</p>
+        {state.meta.actionGate.status === "disabled" && state.meta.adAccountId && <a className="mt-2 inline-block underline" href={`https://business.facebook.com/adsmanager/manage/campaigns?act=${encodeURIComponent(state.meta.adAccountId.replace(/^act_/, ""))}`} target="_blank" rel="noreferrer">Open Ads Manager</a>}
       </div>
 
       {error && <div className="mb-4 rounded-lg border border-destructive/25 bg-destructive/5 p-3 text-xs text-destructive" role="alert">{error}</div>}

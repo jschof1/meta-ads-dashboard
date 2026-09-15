@@ -70,7 +70,7 @@ export function RecommendationPanel({ state }: { state: DashboardState }) {
       <div className="mb-4 flex items-start gap-3">
         <ShieldQuestion className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
         <div>
-          <h2 id="recommendations-title" className="text-base font-semibold">Deterministic recommendations</h2>
+          <h2 id="recommendations-title" className="text-base font-semibold">Recommended next steps</h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Evidence-backed candidates from stored UK Trade Leads data. They never change Meta automatically.</p>
         </div>
         {visible.length > 0 && <span className="ml-auto text-xs text-muted-foreground">{visible.length} active</span>}
@@ -78,7 +78,7 @@ export function RecommendationPanel({ state }: { state: DashboardState }) {
       {visible.length === 0 ? (
         <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
           <Clock className="h-4 w-4 shrink-0" />
-          No recommendation is available until a successful stored sync supplies evidence.
+          {!state.meta.lastSuccessfulSyncAt ? "Run the first sync to check for recommended next steps." : state.meta.metadataStaleCount > 0 ? "The sync completed, but some entity records are incomplete. Recommendations will resume when those records are current." : "No supported recommendation is currently available. Any missing evidence is listed in the data-quality notices above."}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">

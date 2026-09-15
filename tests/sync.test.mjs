@@ -1051,3 +1051,22 @@ test("skips provider insight rows outside the requested range", async () => {
   assert.match(result.warning, /malformed insight row/);
   assert.equal(await db.dailyInsight.count(), 0);
 });
+
+test("campaign-budget ad sets and format-specific creatives remain current and missing leads produce advice", async () => {
+  const db = await createDatabase();
+  const adSet = { ...metadata.adSets[0] };
+  delete adSet.daily_budget;
+  delete adSet.lifetime_budget;
+  delete adSet.learning_stage_info;
+  const creative = { id: "creative-1", name: "Image creative", thumbnail_url: "https://example.com/image.jpg" };
+  const missing = insight("2026-09-04", { actions: undefined });
+  const { client } = fakeClient({ metadata: { ...metadata, adSets: [adSet], creatives: [creative] }, rows: { account: [missing], campaign: [missing], adset: [missing], ad: [missing] } });
+  const result = await run(db, client);
+  assert.match(result.warning, /unavailable/);
+  const state = await buildDashboardState({ db, now: new Date("2026-09-04T12:00:00.000Z") });
+  assert.equal(state.meta.metadataStaleCount, 0);
+  assert.equal(state.adSets[0].dailyBudgetMinor, null);
+  assert.equal(state.adSets[0].learningStage, null);
+  assert.ok(state.recommendations.some(row => row.type === "possible_tracking_issue"));
+  assert.ok(state.recommendations.every(row => !["scale_candidate", "pause_candidate", "creative_refresh"].includes(row.type)));
+});

@@ -384,3 +384,23 @@ single-item failure case; typecheck, lint and the Cloudflare build passed.
 The sync fixtures were updated to distinguish omitted actions (unknown) from
 explicit empty actions (zero), matching the earlier deployed reporting fix.
 Cloudflare version: `9580ddc7-9728-4ff2-acea-abb4ec8cb01a`.
+
+### Entity freshness and recommendations — 15 September 2026
+
+The previous freshness check required every creative-format field and an
+unrequested creative `updated_time`, plus an ad-set-owned budget. It incorrectly
+marked all 26 returned ads and the campaign-budget ad set as stale. Freshness
+now requires core identity/status fields and format-appropriate creative data;
+omitted entities and ID-only partial responses still remain stale. Optional
+budget, learning and creative values are not invented.
+
+Recommendations may be persisted after a complete current-metadata sync with
+missing result metrics: those missing values are inputs to the engine's
+tracking/hold advice. Invalid account timezones and stale entities still block
+persistence, and the latest-success run-ID guard remains. The regression checks
+that missing lead values do not produce scale, pause or creative-refresh advice.
+
+The UI labels the intentionally disabled Meta write gate as Read-only mode and
+links to Ads Manager. No write gate, campaign, budget or optimisation setting
+was enabled or changed. Recommendation empty states distinguish the first sync
+from incomplete entity data or no currently supported recommendation.

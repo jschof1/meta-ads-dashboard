@@ -135,34 +135,22 @@ function hasProviderField(value: object, field: string): boolean {
 const CURRENT_METADATA_FIELDS = {
   campaign: {
     required: ["name", "objective", "status", "effective_status", "updated_time"],
-    alternatives: [["daily_budget", "lifetime_budget"]],
+    alternatives: [],
   },
   adSet: {
-    required: ["campaign_id", "name", "status", "effective_status", "learning_stage_info", "updated_time"],
-    alternatives: [["daily_budget", "lifetime_budget"]],
+    // Campaign-budget ad sets omit both budget fields; learning status is optional.
+    required: ["campaign_id", "name", "status", "effective_status", "updated_time"],
+    alternatives: [],
   },
   ad: {
     required: ["name", "status", "effective_status", "campaign_id", "adset_id", "creative_id", "updated_time"],
     alternatives: [],
   },
   creative: {
-    required: [
-      "name",
-      "title",
-      "body",
-      "call_to_action_type",
-      "thumbnail_url",
-      "image_hash",
-      "image_url",
-      "video_id",
-      "object_id",
-      "link_url",
-      "object_url",
-      "asset_feed_spec",
-      "url_tags",
-      "updated_time",
-    ],
-    alternatives: [],
+    // Creative formats have different fields. updated_time is not requested
+    // by the creative endpoint, and image/video fields cannot all be required.
+    required: ["name"],
+    alternatives: [["thumbnail_url", "image_url", "video_id", "object_story_spec", "asset_feed_spec"]],
   },
 } as const;
 
@@ -866,9 +854,11 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
       // commit. This keeps provider ingestion and deterministic analysis
       // separate while making a retry idempotent through the fingerprint.
       const state = await buildDashboardState({ db, now: completedAt, recommendationMode: "derived" });
+      // Missing result metrics are evidence for tracking/hold recommendations;
+      // the recommendation engine already withholds unsupported performance actions.
       // Another sync can finish after this run releases its ingestion lease.
       // Never label a newer dashboard's evidence with this older run's ID.
-      if (warning == null && state.meta.metadataStaleCount === 0 && state.meta.lastSuccessfulSyncRunId === run.id) {
+      if (validAccountTimeZone && state.meta.metadataStaleCount === 0 && state.meta.lastSuccessfulSyncRunId === run.id) {
         await persistRecommendationLifecycle(db, {
           accountId,
           campaignId: runCampaignId,
