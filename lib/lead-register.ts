@@ -1,4 +1,4 @@
-import { createHighLevelClient } from "@/lib/highlevel";
+import { createHighLevelClient, HighLevelApiError } from "@/lib/highlevel";
 import { loadHighLevelSettings } from "@/lib/highlevel-config";
 import { prisma, withDatabaseClient } from "@/lib/db";
 
@@ -29,6 +29,53 @@ export type LeadRegisterOutcomes = {
   metaContactsBooked: number;
   metaContactsContacted: number;
 };
+
+export function leadRegisterFailureDiagnostic(error: unknown): { stage: string; status: number | null } {
+  if (error instanceof HighLevelApiError) return { stage: error.operation, status: error.status };
+  if (error instanceof LeadRegisterProviderError) return { stage: error.stage, status: error.status };
+  return { stage: "unclassified", status: null };
+}
+
+export class LeadRegisterProviderError extends Error {
+  readonly name = "LeadRegisterProviderError";
+  constructor(readonly stage: string, readonly status: number | null = null) {
+    super(`Lead register ${stage} request failed`);
+  }
+}
+
+export async function readLeadRegisterProvider(
+  path: string,
+  stage: string,
+  token: string,
+  version: string,
+  fetcher: typeof fetch = fetch,
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+): Promise<Row> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response: Response;
+    try {
+      response = await fetcher(`https://services.leadconnectorhq.com${path}`, {
+        headers: { Authorization: `Bearer ${token}`, Version: version },
+        redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      throw new LeadRegisterProviderError(stage);
+    }
+    if (response.ok) {
+      try { return obj(await response.json()); }
+      catch { throw new LeadRegisterProviderError(stage); }
+    }
+    if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+      const retryAfter = Number(response.headers.get("retry-after"));
+      await sleep(Number.isFinite(retryAfter) && retryAfter > 0
+        ? Math.min(2_000, retryAfter * 1000)
+        : 250 * 2 ** attempt);
+      continue;
+    }
+    throw new LeadRegisterProviderError(stage, response.status);
+  }
+  throw new LeadRegisterProviderError(stage);
+}
 
 function inWindow(value: string, start: number, end: number): boolean {
   const time = Date.parse(value);
@@ -125,16 +172,14 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
   const formId = process.env.HIGHLEVEL_LEAD_FORM_ID, calendarId = process.env.HIGHLEVEL_SALES_CALENDAR_ID;
   if (!config.token || !validId(config.locationId) || !validId(formId) || !validId(calendarId)) throw new Error("Lead register connection unavailable");
   const start = new Date(+now - 90 * 86400000), calendarEnd = new Date(+now + 90 * 86400000);
-  async function read(path: string): Promise<Row> {
-    const r = await fetch(`https://services.leadconnectorhq.com${path}`, { headers: { Authorization: `Bearer ${config.token}`, Version: config.apiVersion }, redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error("Lead register provider unavailable");
-    return r.json();
+  async function read(path: string, stage: string): Promise<Row> {
+    return readLeadRegisterProvider(path, stage, config.token!, config.apiVersion);
   }
   async function submissions() {
     const rows: Row[] = [];
     for (let page=1; page<=Math.ceil(config.maxRecords/100);page++) {
       const q = new URLSearchParams({locationId:config.locationId!,formId:formId!,startAt:start.toISOString().slice(0,10),endAt:now.toISOString().slice(0,10),limit:"100",page:String(page)});
-      const d=await read(`/forms/submissions?${q}`), meta=obj(d.meta);
+      const d=await read(`/forms/submissions?${q}`, "submissions"), meta=obj(d.meta);
       if (!Array.isArray(d.submissions) || typeof meta.total !== "number") throw new Error("Submission collection incomplete");
       rows.push(...d.submissions as Row[]);
       if (!meta.nextPage) { if(rows.length!==meta.total) throw new Error("Submission collection incomplete"); return rows; }
@@ -147,7 +192,7 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
     for(let page=0;page<Math.ceil(config.maxRecords/100);page++) {
       const q=new URLSearchParams({locationId:config.locationId!,limit:"100",sort:"desc",sortBy:"last_message_date"});
       if(cursor)q.set("startAfterDate",cursor);
-      const d=await read(`/conversations/search?${q}`);
+      const d=await read(`/conversations/search?${q}`, "conversations");
       if(!Array.isArray(d.conversations))throw new Error("Conversation collection incomplete");
       const items=d.conversations as Row[];
       if(!items.length)return rows;
@@ -159,7 +204,7 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
     }
     throw new Error("Conversation collection exceeds limit");
   }
-  const [contacts, forms, calendar, inbox] = await Promise.all([createHighLevelClient({config}).listContacts(), submissions(), read(`/calendars/events?${new URLSearchParams({locationId:config.locationId,calendarId,startTime:String(+start),endTime:String(+calendarEnd)})}`), conversations()]);
+  const [contacts, forms, calendar, inbox] = await Promise.all([createHighLevelClient({config}).listContacts(), submissions(), read(`/calendars/events?${new URLSearchParams({locationId:config.locationId,calendarId,startTime:String(+start),endTime:String(+calendarEnd)})}`, "calendar"), conversations()]);
   if(contacts.truncated || !Array.isArray(calendar.events)) throw new Error("Lead register collection incomplete");
   return { ...reconcileLeads(contacts.items,forms,calendar.events as Row[],start,now,calendarEnd,inbox), locationId: config.locationId };
 }

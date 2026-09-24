@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcileLeads, mergeRegister, summarizeLeadRegisterOutcomes } from '../lib/lead-register.ts';
+import { reconcileLeads, mergeRegister, summarizeLeadRegisterOutcomes, readLeadRegisterProvider, leadRegisterFailureDiagnostic } from '../lib/lead-register.ts';
 const start=new Date('2026-08-10T23:00:00Z'), now=new Date('2026-09-09T12:00:00Z'), end=new Date('2026-12-08T12:00:00Z');
 const sub=(id,contactId,at='2026-09-08T15:00:00Z')=>({id,contactId,createdAt:at,others:{funneEventData:{page_url:'/book-a-call'}}});
 test('deduplicates form and calendar submissions by contact and includes returning enquiries',()=>{
@@ -38,4 +38,16 @@ test('derives contacted, booking and no-show outcomes from the saved register',(
  ],new Date('2026-08-10T12:00:00Z'),new Date('2026-09-09T12:00:00Z'),end);
  const outcomes=summarizeLeadRegisterOutcomes(r);
  assert.deepEqual({people:outcomes.peopleEnquiring,submissions:outcomes.formSubmissions,contacted:outcomes.contactedNewContacts,booked:outcomes.uniqueBookers,noShows:outcomes.noShows,metaBooked:outcomes.metaContactsBooked},{people:1,submissions:2,contacted:1,booked:1,noShows:1,metaBooked:1});
+});
+test('retries transient lead-register provider failures and reports only safe diagnostics',async()=>{
+ let calls=0;const delays=[];
+ const fetcher=async()=>{calls++;return calls<3?new Response('',{status:calls===1?429:503}):Response.json({events:[]});};
+ const result=await readLeadRegisterProvider('/calendars/events','calendar','private-token','v3',fetcher,async ms=>delays.push(ms));
+ assert.deepEqual(result,{events:[]});assert.equal(calls,3);assert.deepEqual(delays,[250,500]);
+ calls=0;
+ await assert.rejects(()=>readLeadRegisterProvider('/forms/submissions','submissions','private-token','v3',async()=>{calls++;return new Response('',{status:401});}),error=>{
+  assert.deepEqual(leadRegisterFailureDiagnostic(error),{stage:'submissions',status:401});
+  assert.equal(JSON.stringify(error).includes('private-token'),false);return true;
+ });
+ assert.equal(calls,1);
 });
