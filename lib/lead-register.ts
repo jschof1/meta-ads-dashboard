@@ -65,11 +65,14 @@ export async function readLeadRegisterProvider(
       try { return obj(await response.json()); }
       catch { throw new LeadRegisterProviderError(stage); }
     }
-    if ((response.status === 429 || response.status >= 500) && attempt < 2) {
+    if ((response.status === 429 && attempt < 1) || (response.status >= 500 && attempt < 2)) {
       const retryAfter = Number(response.headers.get("retry-after"));
-      await sleep(Number.isFinite(retryAfter) && retryAfter > 0
-        ? Math.min(2_000, retryAfter * 1000)
-        : 250 * 2 ** attempt);
+      const interval = Number(response.headers.get("x-ratelimit-interval-milliseconds"));
+      const delay = response.status === 429
+        ? Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000
+          : Number.isFinite(interval) && interval > 0 ? interval : 10_000
+        : 250 * 2 ** attempt;
+      await sleep(Math.min(10_000, delay));
       continue;
     }
     throw new LeadRegisterProviderError(stage, response.status);

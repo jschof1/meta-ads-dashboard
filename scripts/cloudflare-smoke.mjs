@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readdir } from "node:fs/promises";
 
 // Read-only deployment verification apart from normal login/logout bookkeeping.
 // Supply credentials through the environment; never print them or raw responses.
 const base = process.env.DASHBOARD_SMOKE_URL;
 const password = process.env.DASHBOARD_PASSWORD;
+const expectedMigrations = (await readdir(new URL("../prisma/migrations/", import.meta.url), { withFileTypes: true }))
+  .filter((entry) => entry.isDirectory()).length;
 assert.ok(base && new URL(base).protocol === "https:", "An HTTPS DASHBOARD_SMOKE_URL is required");
 assert.ok(password, "DASHBOARD_PASSWORD is required");
 const headers = { "user-agent": "UKTL-deployment-verification/1.0" };
@@ -42,7 +45,7 @@ for (let session = 0; session < 2; session++) {
   const diagnostics = await response.json();
   assert.equal(diagnostics.database.status, "ok");
   assert.equal(diagnostics.migrations.status, "ok");
-  assert.equal(diagnostics.migrations.appliedCount, 7);
+  assert.equal(diagnostics.migrations.appliedCount, expectedMigrations);
   assert.equal(diagnostics.meta.actionGate.writesEnabled, false);
   const concurrentReads = await Promise.all(["/api/diagnostics", "/api/dashboard/state", "/api/dashboard/state"].map((path) =>
     get(path, { headers: { cookie } })));

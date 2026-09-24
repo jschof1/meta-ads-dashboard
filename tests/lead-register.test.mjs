@@ -43,7 +43,7 @@ test('retries transient lead-register provider failures and reports only safe di
  let calls=0;const delays=[];
  const fetcher=async()=>{calls++;return calls<3?new Response('',{status:calls===1?429:503}):Response.json({events:[]});};
  const result=await readLeadRegisterProvider('/calendars/events','calendar','private-token','v3',fetcher,async ms=>delays.push(ms));
- assert.deepEqual(result,{events:[]});assert.equal(calls,3);assert.deepEqual(delays,[250,500]);
+ assert.deepEqual(result,{events:[]});assert.equal(calls,3);assert.deepEqual(delays,[10000,500]);
  calls=0;
  await assert.rejects(()=>readLeadRegisterProvider('/forms/submissions','submissions','private-token','v3',async()=>{calls++;return new Response('',{status:401});}),error=>{
   assert.deepEqual(leadRegisterFailureDiagnostic(error),{stage:'submissions',status:401});
