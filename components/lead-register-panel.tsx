@@ -15,10 +15,11 @@ export function LeadRegisterPanel(){
    const changes=leadRegisterChanges(data,updated);
    setData(updated);
    window.dispatchEvent(new CustomEvent<LeadRegister>("lead-register:updated",{detail:updated}));
-   setRefreshResult(changes?`Refresh complete at ${format(updated.checkedAt)} (UK time). ${changes.newLeadContacts} new contacts in this view and ${changes.newFormSubmissions} new form submission receipts since this page loaded.`:`Refresh complete at ${format(updated.checkedAt)} (UK time). The saved register is ready.`);
+   setRefreshResult(changes?`Refresh complete at ${format(updated.checkedAt)} (UK time). ${changes.newLeadContacts} additional ${changes.newLeadContacts===1?"contact is":"contacts are"} visible in this view, with ${changes.newFormSubmissions} new form submission ${changes.newFormSubmissions===1?"receipt":"receipts"} since this page loaded.`:`Refresh complete at ${format(updated.checkedAt)} (UK time). The saved register is ready.`);
   }catch(e){setError(e instanceof Error?e.message:"Refresh failed");}finally{setBusy(false);}
  }
- const [viewedAt]=useState(()=>Date.now());
+ const [viewedAt,setViewedAt]=useState(()=>Date.now());
+ useEffect(()=>{const timer=window.setInterval(()=>setViewedAt(Date.now()),60_000);return()=>window.clearInterval(timer);},[]);
  const cutoff=Date.parse(data?.checkedAt || "")-30*86400000;
  const recent=data?.entries.filter(e=>Date.parse(e.contactCreated)>=cutoff||Date.parse(e.lastConversationAt)>=cutoff||e.submissions.some(s=>Date.parse(s.at)>=cutoff))??[];
  const formLeads=recent.filter(e=>leadEvidence(e,cutoff)==="form");
