@@ -135,6 +135,25 @@ test("retries transient provider responses without following provider-controlled
   assert.deepEqual(sleeps, [1000]);
 });
 
+test("waits for HighLevel's rate-limit window before retrying contact reads", async () => {
+  const config = loadHighLevelSettings(env());
+  let attempts = 0;
+  const sleeps = [];
+  const client = createHighLevelClient({
+    config,
+    sleep: async (milliseconds) => { sleeps.push(milliseconds); },
+    fetcher: async () => {
+      attempts += 1;
+      return attempts === 1
+        ? new Response("busy", { status: 429, headers: { "x-ratelimit-interval-milliseconds": "10000" } })
+        : response({ contacts: [{ id: "contact-1" }], total: 1 });
+    },
+  });
+  assert.equal((await client.listContacts()).items.length, 1);
+  assert.equal(attempts, 2);
+  assert.deepEqual(sleeps, [10000]);
+});
+
 test("fails closed on malformed responses and provider errors without exposing the token", async () => {
   const config = loadHighLevelSettings(env());
   const malformed = createHighLevelClient({

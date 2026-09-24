@@ -115,9 +115,11 @@ function pipelineFrom(payload: Record<string, unknown>, operation: string): High
 
 function retryAfterMilliseconds(response: Response): number | null {
   const raw = response.headers.get("retry-after")?.trim();
-  if (!raw) return null;
   const seconds = Number(raw);
-  return Number.isFinite(seconds) && seconds >= 0 ? Math.min(5_000, Math.round(seconds * 1_000)) : null;
+  if (raw && Number.isFinite(seconds) && seconds >= 0) return Math.min(10_000, Math.round(seconds * 1_000));
+  if (response.status !== 429) return null;
+  const interval = Number(response.headers.get("x-ratelimit-interval-milliseconds"));
+  return Number.isFinite(interval) && interval > 0 ? Math.min(10_000, Math.round(interval)) : 10_000;
 }
 
 function isRetryable(status: number): boolean {
@@ -169,7 +171,7 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
       }
 
       if (!response.ok) {
-        if (isRetryable(response.status) && attempt < maxRetries) {
+        if (isRetryable(response.status) && attempt < (response.status === 429 ? 1 : maxRetries)) {
           await sleep(retryAfterMilliseconds(response) ?? Math.min(2_000, 250 * 2 ** attempt));
           continue;
         }
