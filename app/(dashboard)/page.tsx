@@ -129,14 +129,14 @@ export default function DashboardHome() {
       <SyncNotice state={state} />
       <SystemDiagnosticsPanel />
       <DataQualityPanel state={state} period={period} />
-      <RecommendationPanel state={state} />
-      <MetaActionPanel state={state} />
-      <AISummaryPanel state={state} />
       <AnomalyBanner state={state} />
       <Scorecard state={state} period={period} />
       <MetricHeroCards state={state} period={period} />
       <LeadRegisterPanel />
       <BusinessOutcomesPanel />
+      <RecommendationPanel state={state} />
+      <MetaActionPanel state={state} />
+      <AISummaryPanel state={state} />
       <Funnel state={state} period={period} />
       <CampaignDrilldown state={state} period={period} />
 

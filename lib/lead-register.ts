@@ -10,6 +10,7 @@ export type LeadEntry = {
   contactId: string; name: string; contactFound: boolean; contactCreated: string;
   lastConversationAt: string; lastMessageChannel: string;
   source: string; tags: string[]; test: boolean; metaSource: string;
+  formOrigin?: boolean;
   submissions: { id: string; at: string; page: string; source: string }[];
   appointments: { id: string; at: string; status: string }[];
   checkedAt: string;
@@ -25,6 +26,7 @@ export type LeadRegisterOutcomes = {
   noShows: number;
   peopleEnquiring: number;
   formSubmissions: number;
+  formOriginWithoutReceipt: number;
   metaSourcedContacts: number;
   metaContactsBooked: number;
   metaContactsContacted: number;
@@ -103,6 +105,7 @@ export function summarizeLeadRegisterOutcomes(register: LeadRegister): LeadRegis
   const bookedIds = new Set(appointments.map((appointment) => appointment.contactId));
   const metaContacts = newContacts.filter((entry) => /^(fb|ig|facebook|instagram)$/i.test(entry.metaSource));
   const formEntries = entries.filter((entry) => entry.submissions.some((submission) => inWindow(submission.at, start, end)));
+  const formOriginWithoutReceipt = entries.filter((entry) => entry.formOrigin && inWindow(entry.contactCreated, start, end) && !entry.submissions.some((submission) => inWindow(submission.at, start, end)));
   return {
     checkedAt: register.checkedAt,
     contactsCreated: newContacts.length,
@@ -112,6 +115,7 @@ export function summarizeLeadRegisterOutcomes(register: LeadRegister): LeadRegis
     noShows: appointments.filter((appointment) => /^(no[ _-]?show|noshow)$/i.test(appointment.status.trim())).length,
     peopleEnquiring: formEntries.length,
     formSubmissions: formEntries.reduce((count, entry) => count + entry.submissions.filter((submission) => inWindow(submission.at, start, end)).length, 0),
+    formOriginWithoutReceipt: formOriginWithoutReceipt.length,
     metaSourcedContacts: metaContacts.length,
     metaContactsBooked: metaContacts.filter((entry) => bookedIds.has(entry.contactId)).length,
     metaContactsContacted: metaContacts.filter(contacted).length,
@@ -119,7 +123,7 @@ export function summarizeLeadRegisterOutcomes(register: LeadRegister): LeadRegis
 }
 
 // Provider contact IDs, not names or submission counts, define a person here.
-export function reconcileLeads(contacts: Row[], submissions: Row[], events: Row[], start: Date, now: Date, calendarEnd: Date, conversations: Row[] = []): LeadRegister {
+export function reconcileLeads(contacts: Row[], submissions: Row[], events: Row[], start: Date, now: Date, calendarEnd: Date, conversations: Row[] = [], formId = ""): LeadRegister {
   const contactMap = new Map(contacts.map(c => [str(c.id), c]));
   if (contactMap.size !== contacts.length || contacts.some(c => !validId(c.id))) throw new Error("Contact collection inconsistent");
   const selected = new Set(contacts.filter(c => Date.parse(str(c.dateAdded)) >= +start && Date.parse(str(c.dateAdded)) <= +now).map(c => str(c.id)));
@@ -144,11 +148,13 @@ export function reconcileLeads(contacts: Row[], submissions: Row[], events: Row[
   }
   const entries = [...selected].map(contactId => {
     const c = contactMap.get(contactId), tags = Array.isArray(c?.tags) ? c.tags.filter((t): t is string => typeof t === "string").map(t => t.slice(0,100)) : [];
+    const attribution = obj(c?.attributionSource), createdBy = obj(c?.createdBy);
+    const formOrigin = validId(formId) && ((str(createdBy.source).toUpperCase() === "FORM" && str(createdBy.sourceId) === formId) || (str(attribution.medium).toLowerCase() === "form" && str(attribution.mediumId) === formId));
     const own = grouped.get(contactId) ?? [];
     const conversation=conversationMap.get(contactId);
     return { contactId, name: str(c?.contactName) || [str(c?.firstName),str(c?.lastName)].filter(Boolean).join(" ") || "Contact unavailable",
       lastConversationAt: conversation ? new Date(Number(conversation.lastMessageDate)).toISOString() : "", lastMessageChannel: str(conversation?.lastMessageType).replace("TYPE_", ""),
-      contactFound: !!c, contactCreated: str(c?.dateAdded), source: str(c?.source).slice(0,200) || "Unspecified", tags,
+      contactFound: !!c, contactCreated: str(c?.dateAdded), source: str(c?.source).slice(0,200) || "Unspecified", tags, formOrigin,
       test: tags.includes("uktl-tracking-test"), metaSource: own.find(s => /^(fb|ig|facebook|instagram)$/i.test(s.source))?.source || str(obj(c?.attributionSource).utmSource).slice(0,100),
       submissions: own.sort((a,b) => a.at.localeCompare(b.at)),
       appointments: events.filter(e => e.contactId === contactId && !e.deleted && Date.parse(str(e.startTime)) >= +start && Date.parse(str(e.startTime)) <= +calendarEnd).map(e => ({ id: str(e.id), at: str(e.startTime), status: str(e.appointmentStatus) || "unknown" })), checkedAt: now.toISOString(),
@@ -165,7 +171,7 @@ export function mergeRegister(previous: LeadRegister | null, fresh: LeadRegister
     // Preserve previously observed submissions when the rolling provider window advances.
     const submissions = new Map(old?.submissions.map(s => [s.id,s]) ?? []);
     entry.submissions.forEach(s => submissions.set(s.id,s));
-    map.set(entry.contactId, { ...entry, submissions: [...submissions.values()].sort((a,b)=>a.at.localeCompare(b.at)) });
+    map.set(entry.contactId, { ...entry, formOrigin: entry.formOrigin || old?.formOrigin || false, submissions: [...submissions.values()].sort((a,b)=>a.at.localeCompare(b.at)) });
   }
   return { ...fresh, coverageStart: previous && previous.coverageStart < fresh.coverageStart ? previous.coverageStart : fresh.coverageStart, entries: [...map.values()] };
 }
@@ -209,7 +215,7 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
   }
   const [contacts, forms, calendar, inbox] = await Promise.all([createHighLevelClient({config}).listContacts(), submissions(), read(`/calendars/events?${new URLSearchParams({locationId:config.locationId,calendarId,startTime:String(+start),endTime:String(+calendarEnd)})}`, "calendar"), conversations()]);
   if(contacts.truncated || !Array.isArray(calendar.events)) throw new Error("Lead register collection incomplete");
-  return { ...reconcileLeads(contacts.items,forms,calendar.events as Row[],start,now,calendarEnd,inbox), locationId: config.locationId };
+  return { ...reconcileLeads(contacts.items,forms,calendar.events as Row[],start,now,calendarEnd,inbox,formId), locationId: config.locationId };
 }
 
 export async function readLeadRegister(): Promise<LeadRegister | null> {

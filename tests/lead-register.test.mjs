@@ -18,8 +18,9 @@ test('does not accept inconsistent or repeated submission IDs',()=>{
 });
 test('preserves older people and submissions as provider window advances and rejects late stale responses',()=>{
  const old=reconcileLeads([{id:'a',dateAdded:'2026-08-12'}],[sub('old','a')],[],start,now,end);
+ old.entries[0].formOrigin=true;
  const fresh=reconcileLeads([{id:'b',dateAdded:'2026-09-10'}],[sub('new','a','2026-09-10')],[],start,new Date('2026-09-11'),end);
- const merged=mergeRegister(old,fresh);assert.equal(merged.entries.length,2);assert.equal(merged.entries.find(e=>e.contactId==='a').submissions.length,2);assert.deepEqual(mergeRegister(merged,old),merged);
+ const merged=mergeRegister(old,fresh);assert.equal(merged.entries.length,2);assert.equal(merged.entries.find(e=>e.contactId==='a').submissions.length,2);assert.equal(merged.entries.find(e=>e.contactId==='a').formOrigin,true);assert.deepEqual(mergeRegister(merged,old),merged);
 });
 test('applies precise timestamp boundaries rather than provider date-only filtering',()=>{
  const r=reconcileLeads([], [sub('before','a','2026-08-10T22:59:59Z'),sub('inside','b','2026-08-10T23:00:00Z'),sub('future','c','2026-09-09T12:00:01Z')],[],start,now,end);
@@ -54,6 +55,20 @@ test('shows new CRM lead tags without form receipts separately from confirmed fo
  assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='payment'),cutoff),null);
  assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='test'),cutoff),null);
  assert.deepEqual(leadRegisterChanges(old,fresh),{newFormSubmissions:1,newLeadContacts:1});
+});
+test('preserves configured form creation evidence when provider omits its submission receipt',()=>{
+ const formId='configured-form';
+ const register=reconcileLeads([
+  {id:'form-attribution',dateAdded:'2026-09-09T09:00:00Z',source:'UK Trade Leads LEAD FORM',attributionSource:{medium:'form',mediumId:formId,url:'https://private.example/?token=secret'}},
+  {id:'form-creator',dateAdded:'2026-09-09T10:00:00Z',source:'payment_link',tags:['currentclient'],createdBy:{source:'FORM',sourceId:formId}},
+  {id:'other-form',dateAdded:'2026-09-09T11:00:00Z',attributionSource:{medium:'form',mediumId:'other-form'}},
+ ],[],[],start,now,end,[],formId);
+ const cutoff=+now-30*86400000;
+ assert.equal(leadEvidence(register.entries.find(e=>e.contactId==='form-attribution'),cutoff),'form-origin');
+ assert.equal(leadEvidence(register.entries.find(e=>e.contactId==='form-creator'),cutoff),'form-origin');
+ assert.equal(leadEvidence(register.entries.find(e=>e.contactId==='other-form'),cutoff),null);
+ assert.deepEqual({receipts:summarizeLeadRegisterOutcomes(register).formSubmissions,peopleWithReceipts:summarizeLeadRegisterOutcomes(register).peopleEnquiring,formOriginWithoutReceipt:summarizeLeadRegisterOutcomes(register).formOriginWithoutReceipt},{receipts:0,peopleWithReceipts:0,formOriginWithoutReceipt:2});
+ assert.equal(JSON.stringify(register).includes('private.example'),false);
 });
 test('retries transient lead-register provider failures and reports only safe diagnostics',async()=>{
  let calls=0;const delays=[];

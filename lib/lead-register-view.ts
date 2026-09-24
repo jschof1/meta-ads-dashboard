@@ -1,8 +1,9 @@
 import type { LeadEntry, LeadRegister } from "@/lib/lead-register";
 
-export function leadEvidence(entry: LeadEntry, cutoff: number): "form" | "crm-lead" | null {
+export function leadEvidence(entry: LeadEntry, cutoff: number): "form" | "form-origin" | "crm-lead" | null {
   if (entry.test) return null;
   if (entry.submissions.some((submission) => Date.parse(submission.at) >= cutoff)) return "form";
+  if (entry.formOrigin && Date.parse(entry.contactCreated) >= cutoff) return "form-origin";
   if (Date.parse(entry.contactCreated) >= cutoff && entry.tags.some((tag) => tag.trim().toLowerCase() === "new lead")) return "crm-lead";
   return null;
 }
