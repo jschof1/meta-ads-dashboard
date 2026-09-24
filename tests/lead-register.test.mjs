@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reconcileLeads, mergeRegister, summarizeLeadRegisterOutcomes, readLeadRegisterProvider, leadRegisterFailureDiagnostic } from '../lib/lead-register.ts';
+import { leadEvidence, leadRegisterChanges } from '../lib/lead-register-view.ts';
 const start=new Date('2026-08-10T23:00:00Z'), now=new Date('2026-09-09T12:00:00Z'), end=new Date('2026-12-08T12:00:00Z');
 const sub=(id,contactId,at='2026-09-08T15:00:00Z')=>({id,contactId,createdAt:at,others:{funneEventData:{page_url:'/book-a-call'}}});
 test('deduplicates form and calendar submissions by contact and includes returning enquiries',()=>{
@@ -38,6 +39,21 @@ test('derives contacted, booking and no-show outcomes from the saved register',(
  ],new Date('2026-08-10T12:00:00Z'),new Date('2026-09-09T12:00:00Z'),end);
  const outcomes=summarizeLeadRegisterOutcomes(r);
  assert.deepEqual({people:outcomes.peopleEnquiring,submissions:outcomes.formSubmissions,contacted:outcomes.contactedNewContacts,booked:outcomes.uniqueBookers,noShows:outcomes.noShows,metaBooked:outcomes.metaContactsBooked},{people:1,submissions:2,contacted:1,booked:1,noShows:1,metaBooked:1});
+});
+test('shows new CRM lead tags without form receipts separately from confirmed form enquiries',()=>{
+ const old=reconcileLeads([{id:'form',dateAdded:'2026-09-01',tags:['new lead']}],[sub('s1','form')],[],start,now,end);
+ const fresh=reconcileLeads([
+  {id:'form',dateAdded:'2026-09-01',tags:['new lead']},
+  {id:'crm',dateAdded:'2026-09-09T10:00:00Z',tags:['New Lead']},
+  {id:'payment',dateAdded:'2026-09-09T11:00:00Z',source:'payment_link'},
+  {id:'test',dateAdded:'2026-09-09T11:00:00Z',tags:['new lead','uktl-tracking-test']},
+ ],[sub('s1','form'),sub('s2','form','2026-09-09T11:30:00Z')],[],start,now,end);
+ const cutoff=+now-30*86400000;
+ assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='form'),cutoff),'form');
+ assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='crm'),cutoff),'crm-lead');
+ assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='payment'),cutoff),null);
+ assert.equal(leadEvidence(fresh.entries.find(e=>e.contactId==='test'),cutoff),null);
+ assert.deepEqual(leadRegisterChanges(old,fresh),{newFormSubmissions:1,newLeadContacts:1});
 });
 test('retries transient lead-register provider failures and reports only safe diagnostics',async()=>{
  let calls=0;const delays=[];
