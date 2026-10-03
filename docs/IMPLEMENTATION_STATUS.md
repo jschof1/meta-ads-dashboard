@@ -4,22 +4,41 @@ Source of truth: [MASTER_PLAN.md](./MASTER_PLAN.md), the work-item specification
 implementation PRs and [production runbook](./PRODUCTION_RUNBOOK.md). GitHub
 issues are disabled for this repository.
 
+## Current verification — 3 October 2026
+
+PR01–PR10 code is merged, including PR #20 on 8 September. The application is
+live on the existing Cloudflare Worker and Turso database; no Vercel setup or
+new database is needed. The earlier September credential requests are obsolete.
+Production auth, eight migrations, durable dashboard reads, today's successful
+scheduled Meta import and a fresh manual import were verified directly.
+The saved HighLevel enquiry register is also populated and fresh. Meta writes
+remain disabled, with no executed actions recorded.
+
+PR10 acceptance remains `BLOCKED`: compatible dependency security updates are
+being verified, but the high-severity upstream `braces` advisory has no published
+patched release and still fails the unchanged audit gate. The signed-in
+Cloudflare dashboard can access the exact Worker and its existing GitHub
+integration; new provider credentials are not the immediate blocker. Stage-based CRM
+attribution remains unavailable; qualification is deliberately undefined and
+must not be manufactured from pipeline names. See the dated evidence and exact
+remaining gate in [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md).
+
 | PR | Work item | Status | Branch | Dependencies | External gate |
 |---:|---|---|---|---|---|
 | [01](https://github.com/jschof1/meta-ads-dashboard/pull/11) | Secure and reproducible baseline | COMPLETE | `codex/implement-pr01-from-feat/01-secure-baseline` | — | None |
-| [02](https://github.com/jschof1/meta-ads-dashboard/pull/12) | Production-grade Meta read client | COMPLETE | `codex/implement-pr02-from-main/02-meta-read-client` | PR01 | Real Meta credentials for final validation only |
-| [03](https://github.com/jschof1/meta-ads-dashboard/pull/13) | Durable sync and historical data model | COMPLETE | `codex/implement-pr03-from-main/03-sync-data-model` | PR02 | Meta credentials for end-to-end validation |
+| [02](https://github.com/jschof1/meta-ads-dashboard/pull/12) | Production-grade Meta read client | COMPLETE | `codex/implement-pr02-from-main/02-meta-read-client` | PR01 | Read credentials recovered; live imports verified |
+| [03](https://github.com/jschof1/meta-ads-dashboard/pull/13) | Durable sync and historical data model | COMPLETE | `codex/implement-pr03-from-main/03-sync-data-model` | PR02 | Scheduled and manual durable imports verified |
 | [04](https://github.com/jschof1/meta-ads-dashboard/pull/14) | Convert product to UK Trade Leads | COMPLETE | `codex/implement-pr04-from-main/04-uktl-domain-model` | PR03 | Targets optional |
-| [05](https://github.com/jschof1/meta-ads-dashboard/pull/15) | Operator dashboard v2 | COMPLETE | `codex/implement-pr05-from-main/05-operator-dashboard` | PR04 | Live Meta account/token validation remains pending |
+| [05](https://github.com/jschof1/meta-ads-dashboard/pull/15) | Operator dashboard v2 | COMPLETE | `codex/implement-pr05-from-main/05-operator-dashboard` | PR04 | Live account and database-backed reads verified |
 | [06](https://github.com/jschof1/meta-ads-dashboard/pull/16) | Evidence-based recommendation engine | COMPLETE | `codex/implement-pr06-from-main/06-recommendation-engine` | PR05 | Targets improve recommendations but may be unknown |
 | [07](https://github.com/jschof1/meta-ads-dashboard/pull/17) | Trustworthy AI analyst | COMPLETE | `codex/implement-pr07-from-main/07-ai-analyst` | PR06 | Synthetic live Anthropic validation passed; production configuration pending |
-| [08](https://github.com/jschof1/meta-ads-dashboard/pull/18) | HighLevel CRM attribution | COMPLETE | `codex/implement-pr08-from-main/08-highlevel-attribution` | PR07 | Read access/contract validated; business stage mapping and runtime token pending |
+| [08](https://github.com/jschof1/meta-ads-dashboard/pull/18) | HighLevel CRM attribution | COMPLETE | `codex/implement-pr08-from-main/08-highlevel-attribution` | PR07 | Runtime token/enquiry register operational; stage-based attribution unavailable |
 | [09](https://github.com/jschof1/meta-ads-dashboard/pull/19) | Approval-gated Meta actions | COMPLETE | `codex/implement-pr09-from-main/09-approved-meta-actions` | PR01, PR02, PR06, explicit approval | Meta write permission; disabled by default |
-| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | BLOCKED | `feat/10-production-ready` | PR01–PR09 (PR08 may be explicitly deferred) | Code delivered by PR #20; Cloudflare/Turso deployed; live Meta sync and reconciliation remain open |
+| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | BLOCKED | `feat/10-production-ready` (merged) | PR01–PR09 (PR08 may be explicitly deferred) | Unpatched upstream security advisory blocks audit/release; see current acceptance |
 
 Allowed statuses: `NOT STARTED`, `ACTIVE`, `BLOCKED`, `IN REVIEW`, `COMPLETE`.
 
-## PR10 code delivery and production acceptance
+## Historical PR10 code delivery — September 2026
 
 The safe implementation is complete. Clean install, lint, typecheck, all 300
 automated tests, production build, remote HTTPS/libSQL scale/rollback checks,
@@ -35,11 +54,11 @@ Merging the verified hardening does not mark the system launched or waive any
 production test. PR01–PR10 code is merged. A follow-up Cloudflare migration
 replaces the original Vercel hosting choice under Jack's 2026-09-08 direction.
 
-Cloudflare Workers deployment and Turso Free provisioning are complete. Live
+Cloudflare Workers deployment and Turso Free provisioning were completed. Live
 login, protected API boundaries, database reachability and all seven migration
-checks passed. Meta still requires its read token/account and matching-date
-reconciliation. Optional HighLevel still requires business mapping and its
-runtime token. See [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md).
+checks passed. Meta and HighLevel tokens were subsequently connected; the
+October verification above supersedes the earlier credential blockers.
+See [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md).
 PR09 remains disabled; no live Meta mutation was attempted.
 
 ## Update rules

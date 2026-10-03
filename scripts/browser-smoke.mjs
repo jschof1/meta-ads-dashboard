@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as wait } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { deepStrictEqual } from "node:assert/strict";
 import { chromium } from "playwright";
 import { createClient } from "@libsql/client";
 import { PrismaClient } from "@prisma/client";
@@ -19,6 +20,7 @@ const password = "browser-smoke-password";
 const authSecret = "browser-smoke-auth-secret-that-is-at-least-32-characters";
 const cronSecret = "browser-smoke-cron-secret-that-is-at-least-32-characters";
 const sessionCookieName = "uktl_dashboard_session";
+const highLevelLocationId = "browser-smoke-location";
 const smokeNow = new Date();
 
 function assert(condition, message) {
@@ -107,6 +109,35 @@ async function seedSmokeDatabase(connection) {
   const fingerprint = `${accountId}|account|${attributionKey}|browser-smoke-pause`;
   const now = smokeNow;
   const today = now.toISOString().slice(0, 10);
+  const checkedAt = now.toISOString();
+  const enquiryAt = new Date(now.getTime() - 86_400_000).toISOString();
+  // The enquiry and outcomes panels read a durable register independently of
+  // live HighLevel credentials. Two receipts from one person must stay distinct.
+  const leadRegister = {
+    locationId: highLevelLocationId,
+    checkedAt,
+    coverageStart: new Date(now.getTime() - 90 * 86_400_000).toISOString(),
+    calendarEnd: new Date(now.getTime() + 90 * 86_400_000).toISOString(),
+    entries: [{
+      contactId: "browser-smoke-contact",
+      name: "Browser smoke enquiry",
+      contactFound: true,
+      contactCreated: enquiryAt,
+      lastConversationAt: "",
+      lastMessageChannel: "",
+      source: "Browser smoke form",
+      tags: [],
+      test: false,
+      metaSource: "",
+      formOrigin: true,
+      submissions: [
+        { id: "browser-smoke-receipt-1", at: enquiryAt, page: "/smoke-form", source: "Browser smoke form" },
+        { id: "browser-smoke-receipt-2", at: checkedAt, page: "/smoke-form", source: "Browser smoke form" },
+      ],
+      appointments: [],
+      checkedAt,
+    }],
+  };
   const db = new PrismaClient({ adapter: new PrismaLibSQL(connection) });
   try {
     await db.syncRun.create({
@@ -193,8 +224,12 @@ async function seedSmokeDatabase(connection) {
         updatedAt: now,
       },
     });
+    await db.leadRegisterSnapshot.create({
+      data: { locationId: highLevelLocationId, payload: JSON.stringify(leadRegister), checkedAt },
+    });
     const stored = await db.dailyInsight.findUnique({ where: { id: "browser-smoke-insight" } });
     assert(stored?.spendMinorUnits === 10_000 && stored.currencyCode === "GBP", "expected remote fixture readback of GBP 100.00");
+    return leadRegister;
   } finally {
     await db.$disconnect();
   }
@@ -227,6 +262,7 @@ async function runFixture(directory, evidenceDirectory) {
   let page;
   const browserIssues = [];
   const unexpectedRequests = [];
+  const applicationRequests = [];
   try {
     assert(process.env.NODE_ENV === "production", "browser fixture must run with NODE_ENV=production");
     const tls = await readSmokeCertificate(directory);
@@ -284,19 +320,20 @@ async function runFixture(directory, evidenceDirectory) {
       HIGHLEVEL_TOKEN: "",
       HIGHLEVEL_PRIVATE_INTEGRATION_TOKEN: "",
       HIGHLEVEL_SYNC_ENABLED: "false",
+      HIGHLEVEL_LOCATION_ID: highLevelLocationId,
     };
     const appDirectory = await isolatedProductionApp(directory);
     await runCommand(process.execPath, [join(root, "scripts", "apply-turso-migrations.mjs")], {
       cwd: appDirectory, env: { ...appEnv, TURSO_MIGRATION_CONFIRM: "yes" }, logPath: join(evidenceDirectory, "migrations.log"),
     });
-    await seedSmokeDatabase(connection);
+    const leadRegister = await seedSmokeDatabase(connection);
     evidence.checks.push("production Turso migrations and GBP 100.00 seed/readback via remote adapters");
     console.log("Browser smoke: official sqld verified, HTTPS/JWT checked, remote migrations and fixture ready");
 
     const upstreamPort = await unusedLoopbackPort();
     const requestedPort = process.env.BROWSER_SMOKE_PORT === undefined ? 0 : Number(process.env.BROWSER_SMOKE_PORT);
     assert(Number.isInteger(requestedPort) && requestedPort >= 0 && requestedPort <= 65535, "BROWSER_SMOKE_PORT must be an integer from 0 to 65535");
-    nextProxy = await startHttpsProxy({ tls, upstreamPort, port: requestedPort });
+    nextProxy = await startHttpsProxy({ tls, upstreamPort, port: requestedPort, onRequest: (request) => applicationRequests.push(request) });
     const baseUrl = nextProxy.url;
     evidence.application = { url: baseUrl, command: "next start", dotenvIsolated: true, metaWritesEnabled: false };
     server = startProcess(process.execPath, [nextBin, "start", appDirectory, "--hostname", "127.0.0.1", "--port", String(upstreamPort)], {
@@ -321,7 +358,7 @@ async function runFixture(directory, evidenceDirectory) {
     });
     page = await context.newPage();
     page.on("console", (message) => {
-      if (message.type() === "error" || message.type() === "warning") browserIssues.push(message.type() + ": " + message.text());
+      if (message.type() === "error" || message.type() === "warning") browserIssues.push(message.type() + ": " + message.text() + " at " + message.location().url);
     });
     page.on("pageerror", (error) => browserIssues.push("pageerror: " + error.message));
 
@@ -346,6 +383,30 @@ async function runFixture(directory, evidenceDirectory) {
     assert(/;\s*Secure(?:;|$)/i.test(setCookie) && /;\s*HttpOnly(?:;|$)/i.test(setCookie), "expected Secure and HttpOnly on the login response itself");
     evidence.sessionCookie = { name: cookie.name, secure: cookie.secure, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, path: cookie.path };
     evidence.checks.push("browser login; Secure/HttpOnly/Strict cookie present and hidden from document.cookie");
+
+    const registerResponse = await context.request.get("/api/lead-register");
+    assert(registerResponse.status() === 200, "expected stored lead register without live HighLevel credentials");
+    deepStrictEqual(await registerResponse.json(), { data: leadRegister }, "saved register must match the durable fixture");
+    const registerPanel = page.getByRole("region", { name: "Saved enquiry register", exact: true });
+    await registerPanel.getByRole("link", { name: "Browser smoke enquiry", exact: true }).waitFor();
+    assert(await registerPanel.getByRole("row").count() === 2, "expected one saved contact plus the register header");
+    const outcomesPanel = page.getByRole("region", { name: "HighLevel contact outcomes", exact: true });
+    await outcomesPanel.getByText("2 form submission receipts from 1 people.", { exact: false }).waitFor();
+    assert(await registerPanel.getByRole("alert").count() === 0 && await outcomesPanel.getByRole("alert").count() === 0, "saved enquiry and outcome panels must load without errors");
+    evidence.checks.push("durable enquiry register readback and both panels show two receipts from one person without live HighLevel credentials");
+
+    // Exercise expected provider failures through the API request context, so
+    // browser console errors remain unconditional failures during the UI flow.
+    const failedRefresh = await context.request.post("/api/lead-register", { headers: { Origin: baseUrl } });
+    assert(failedRefresh.status() === 503, "unconfigured HighLevel refresh must fail closed");
+    deepStrictEqual(await failedRefresh.json(), { error: "Refresh failed. The last complete saved register has been preserved." });
+    const preservedRegister = await context.request.get("/api/lead-register");
+    assert(preservedRegister.status() === 200, "saved register must remain readable after provider refresh failure");
+    deepStrictEqual(await preservedRegister.json(), { data: leadRegister }, "failed provider refresh must preserve the complete saved register");
+    const businessOutcomes = await context.request.get("/api/business-outcomes");
+    assert(businessOutcomes.status() === 200, "optional live business reporting must return its configuration state");
+    deepStrictEqual(await businessOutcomes.json(), { status: "not_configured", error: "Business reporting is not configured." });
+    evidence.checks.push("unconfigured provider refresh returns explicit 503 and preserves saved register; optional live business reporting stays not_configured");
 
     const diagnostics = page.locator('section[aria-label="System diagnostics"]');
     await diagnostics.getByRole("heading", { name: "System diagnostics" }).waitFor();
@@ -448,6 +509,7 @@ async function runFixture(directory, evidenceDirectory) {
     }
     evidence.finishedAt = new Date().toISOString();
     await saveJson(evidenceDirectory, "browser-issues.json", { browserIssues, unexpectedRequests });
+    await saveJson(evidenceDirectory, "application-requests.json", applicationRequests);
     await saveJson(evidenceDirectory, "result.json", evidence);
   }
 }

@@ -1,10 +1,14 @@
 # Production verification and recovery runbook
 
-Status (2026-09-08): deployed on Cloudflare Workers with a Turso Free database
-in Ireland. Live login, protected API boundaries, database access and all seven
-migration checks passed. See [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md).
-Meta credentials and matching-date reconciliation remain outstanding; optional
-HighLevel mapping/token and AI are not configured. Meta writes remain disabled.
+Status (2026-10-03): deployed on the existing Cloudflare Worker and Turso database.
+Live login, protected API boundaries, database access and all eight migration
+checks pass. Meta scheduled/manual imports work; HighLevel's saved enquiry
+register is operational. Stage-based CRM attribution and optional AI remain
+unconfigured, and Meta writes remain disabled. Current CI is blocked by an
+unpatched upstream security advisory despite compatible dependency updates.
+The signed-in Cloudflare dashboard provides access to the existing Worker.
+See [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md) and the
+[Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md) record.
 
 ## Local evidence completed
 
@@ -176,8 +180,9 @@ issue, and run a new sync. Do not repair a failure by writing zero metrics.
 
 ## Manual Meta reconciliation
 
-This has not been run against the production account from this checkout. When
-the Meta read gate is available, record the following in the delivery ticket:
+Live reconciliation was recorded on 8–9 September; the latest bounded check is
+in [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md). For each repeat check,
+record the following in the delivery ticket:
 
 1. UTC timestamp, deployment commit, Graph version, account ID, and the exact
    `since`/`until` dates.
@@ -228,11 +233,12 @@ the documented location-scoped pipeline list returned 200. The application now
 uses that list and requires exactly one matching pipeline ID with the correct
 location. See the [official pipeline-list contract](https://marketplace.gohighlevel.com/docs/ghl/opportunities/get-pipelines/).
 
-The business mapping is still pending: several sales pipelines exist, and
-contacted/qualified/attended meanings cannot be inferred from their stage names.
-Do not copy a short-lived Work OS OAuth access token into deployment settings.
-Use a suitably scoped, long-lived UKTL private integration for the application's
-`HIGHLEVEL_TOKEN`, once the pipeline/stage choices are confirmed. Sample a small
+The September 8 clarification below supersedes the original stage-mapping
+request: contacted is a tag, bookings are calendar evidence, and qualification
+is undefined and not a priority. Do not invent five stages or infer attendance
+from a booking. The application's private-integration `HIGHLEVEL_TOKEN` is
+already configured; do not replace it with a short-lived Work OS OAuth token.
+Keep stage-based sync disabled. Sample a small
 set of returned provider IDs and
 record location/pipeline scope, stage/status, created/updated dates, explicit
 Meta ad/campaign IDs, currency, and dashboard classification. Do not record
@@ -242,9 +248,10 @@ won customers are not being conflated.
 
 ## Remaining external release gates
 
-- **Hosting and storage:** provisioned and verified on Cloudflare Workers and
-  Turso Free. Live database/auth/migration diagnostics passed on 2026-09-08.
-  See the Cloudflare deployment record for identifiers and repeatable commands.
+- **Hosting and storage:** provisioned; live database/auth/eight-migration checks
+  passed again on 2026-10-03. The signed-in Cloudflare dashboard accesses this
+  Worker and the existing GitHub integration. CLI helper tokens return 403, but
+  that is not proof new credentials are necessary. No replacement resources.
 - **Meta reads:** connected on 2026-09-08 to UK Trade Leads | AG Digital Studio.
   Graph v26, GBP/Europe-London, website Lead pixel event and 7d-click/1d-view
   attribution are configured. The initial 90-day sync stored 1,330 rows;
@@ -252,13 +259,18 @@ won customers are not being conflated.
   Some daily rows omit lead results, so period lead/CPL totals remain unknown
   and the sync shows a data warning. See the Cloudflare deployment record.
   Renew the read-only system-user token before 2026-11-07.
-- **CRM:** confirm the business pipeline and semantic stages described above,
-  then configure an application-specific read-only integration token. Contact
-  and opportunity API contract checks do not prove the chosen funnel mapping.
+- **CRM:** the private integration and durable enquiry register are operational.
+  The stage-based attribution model is not configured; the actual tag/calendar
+  workflow does not supply the assumed stages. Qualification remains unknown,
+  bookings do not establish attendance, and receipts are not attributed ROAS.
 - **Meta mutations:** remain disabled. No live mutation was attempted. This
   requires a separate explicit approval, suitable permissions and budget bounds.
-- **Production acceptance:** deployed authentication and migration state passed; successful live
-  actual scheduled-provider results and CRM integration remain open. The initial Meta sync and closed-day reconciliation passed. Local/CI checks do not replace those observations.
+- **Production acceptance:** successful scheduled Meta runs and manual imports
+  are now directly verified, not merely registered cron schedules. The security
+  update must pass all automated gates (currently blocked by upstream `braces`),
+  be deployed, and pass live readback.
+  Do not mark PR10 complete or enable stage-based attribution without its
+  remaining acceptance evidence. See the dated current-acceptance record.
 
 GitHub issues are disabled for this repository, so the implementation PR and
 this runbook hold the remaining release-gate record.

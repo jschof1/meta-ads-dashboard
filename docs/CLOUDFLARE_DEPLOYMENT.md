@@ -3,12 +3,18 @@
 Cloudflare Workers replaces the original Vercel plan under Jack's 2026-09-08
 instruction. No Vercel account or project is required.
 
+Current checks and access gates are recorded in
+[3 October acceptance](./LIVE_ACCEPTANCE_2026-10-03.md). The initial version and
+September checks below are historical, not a claim about the latest deployed
+commit. Eight migrations now apply. Meta reads and the HighLevel enquiry
+register are connected; no new database or provider-token setup is required.
+
 ## Live resources
 
 - App: https://uktl-meta-dashboard.jackschofield1.workers.dev
 - Cloudflare account: `1d7541992ccacf0931ee0e385daa5e08`
 - Worker: `uktl-meta-dashboard`
-- Verified deployment version: `1558053e-9f19-494b-949f-a80313869609`.
+- Initial verified deployment version: `1558053e-9f19-494b-949f-a80313869609`.
 - Turso organization: `jschof1`, **Free** plan (confirmed in dashboard).
 - Database: `uktl-meta-dashboard`, SQLite/libSQL, Ireland (`aws-eu-west-1`).
 - Database ID: `01a08139-ff01-77b7-93ee-0b0135e9a00f`.
