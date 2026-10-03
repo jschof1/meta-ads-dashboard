@@ -95,14 +95,33 @@ direct Meta API versus database, not a newly inspected Ads Manager screen.
 - Production browser-smoke fixtures now include the durable enquiry register
   and its location ID. The previous fixture generated six `/api/lead-register`
   503s after later UI additions. The check now proves two receipts belong to
-  one person, verifies missing-provider refresh returns an explicit error and
-  preserves saved data, and still rejects every unexpected browser error.
+  one person, clicks the refresh control with no provider token, verifies its
+  visible error, retained row and restored button, and checks unchanged durable
+  data. An isolated failure page allows exactly its one expected 503 resource
+  error; all other console/runtime errors and external requests still fail.
 - Fresh local lint, typecheck, 332 tests, production Next.js build, remote
   HTTPS/libSQL scale/rollback smoke, 12 production-browser checks, Cloudflare
   build and Wrangler deployment dry run passed. The final browser run completed
-  at `2026-10-03T13:01:33.420Z` against the rebuilt production application.
+  at `2026-10-03T13:09:27.946Z` against the rebuilt production application.
   These checks do not override the failing security audit or establish that
   these changes are deployed. The final CI result must be inspected separately.
+
+## Review and delivery
+
+- Follow-up [PR #26](https://github.com/jschof1/meta-ads-dashboard/pull/26)
+  contains the actual dependency, smoke-test and documentation changes. It is
+  draft and must remain unmerged while the security gate is red.
+- Independent standards and spec/security reviews found a non-fail-fast shell
+  recipe and missing browser-level refresh-failure assertions. The recipe now
+  chains every gate with `&&`; a hermetic shell simulation confirms a failed
+  audit stops before all later commands, without executing deployment. The
+  browser correction described above passed a fresh run. Neither correction
+  changes application behaviour or weakens the audit.
+- The first [follow-up CI run](https://github.com/jschof1/meta-ads-dashboard/actions/runs/37125123060)
+  was inspected in full: its only job installed successfully, then failed at
+  the unchanged audit with the eight `braces` paths. Later verification steps
+  were skipped by the fail-fast workflow; their local passes are not CI passes.
+  Final-head check status and review disposition are recorded on the PR.
 
 ## Smallest remaining release gate
 

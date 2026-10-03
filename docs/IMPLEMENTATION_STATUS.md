@@ -23,6 +23,9 @@ are not the immediate blocker. Stage-based CRM
 attribution remains unavailable; qualification is deliberately undefined and
 must not be manufactured from pipeline names. See the dated evidence and exact
 remaining gate in [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md).
+The bounded release repair is pushed in draft [PR #26](https://github.com/jschof1/meta-ads-dashboard/pull/26).
+Local checks pass; the inspected CI audit remains red, so no merge or release
+has been performed.
 
 | PR | Work item | Status | Branch | Dependencies | External gate |
 |---:|---|---|---|---|---|
