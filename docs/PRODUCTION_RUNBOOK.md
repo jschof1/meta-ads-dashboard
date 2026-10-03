@@ -6,7 +6,8 @@ checks pass. Meta scheduled/manual imports work; HighLevel's saved enquiry
 register is operational. Stage-based CRM attribution and optional AI remain
 unconfigured, and Meta writes remain disabled. Current CI is blocked by an
 unpatched upstream security advisory despite compatible dependency updates.
-The signed-in Cloudflare dashboard provides access to the existing Worker.
+The existing encrypted local Wrangler OAuth session and signed-in Cloudflare
+dashboard provide access to the existing Worker; no new token is needed.
 See [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md) and the
 [Cloudflare deployment](./CLOUDFLARE_DEPLOYMENT.md) record.
 
@@ -249,9 +250,11 @@ won customers are not being conflated.
 ## Remaining external release gates
 
 - **Hosting and storage:** provisioned; live database/auth/eight-migration checks
-  passed again on 2026-10-03. The signed-in Cloudflare dashboard accesses this
-  Worker and the existing GitHub integration. CLI helper tokens return 403, but
-  that is not proof new credentials are necessary. No replacement resources.
+  passed again on 2026-10-03. Modern local Wrangler recovered the existing
+  encrypted OAuth login through macOS Keychain and confirmed Workers write
+  scope on the correct account. The old global CLI/helper-token failures are
+  superseded; no new credentials or replacement resources are needed. The
+  signed-in dashboard is also available; its GitHub integration is unconnected.
 - **Meta reads:** connected on 2026-09-08 to UK Trade Leads | AG Digital Studio.
   Graph v26, GBP/Europe-London, website Lead pixel event and 7d-click/1d-view
   attribution are configured. The initial 90-day sync stored 1,330 rows;

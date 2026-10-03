@@ -73,10 +73,14 @@ direct Meta API versus database, not a newly inspected Ads Manager screen.
   CI and September's test count do not certify the current release.
 - Both helper credentials `CLOUDFLARE_PAGES_TOKEN` and `CLOUDFLARE_API_KEY` verify
   as active, but read requests for this Worker's deployments return HTTP 403.
-  Global Wrangler has no logged-in operator session. **This is a CLI limitation,
-  not an account access blocker:** the existing signed-in browser accesses the
-  correct Worker and its GitHub connection controls. Do not request wider
-  tokens before using that existing route when a release is eligible.
+  The old global Wrangler 4.46 did not find an operator session. A subsequent
+  local check with Homebrew Node and the already-installed Wrangler 4.147.0
+  **did** recover the existing encrypted OAuth session through macOS Keychain:
+  `whoami` confirmed the correct account and `workers_scripts` write scope.
+  No credentials were read/exported and no new authorisation was granted.
+  Hosting access is not blocked; do not request a wider token or change browser
+  permissions. The signed-in dashboard also accesses the correct Worker and
+  its existing GitHub connection controls.
 
 ## Bounded repairs prepared in this resumption
 
@@ -94,7 +98,9 @@ direct Meta API versus database, not a newly inspected Ads Manager screen.
   one person, verifies missing-provider refresh returns an explicit error and
   preserves saved data, and still rejects every unexpected browser error.
 - Fresh local lint, typecheck, 332 tests, production Next.js build, remote
-  HTTPS/libSQL scale/rollback smoke and 12 production-browser checks passed.
+  HTTPS/libSQL scale/rollback smoke, 12 production-browser checks, Cloudflare
+  build and Wrangler deployment dry run passed. The final browser run completed
+  at `2026-10-03T13:01:33.420Z` against the rebuilt production application.
   These checks do not override the failing security audit or establish that
   these changes are deployed. The final CI result must be inspected separately.
 
@@ -109,10 +115,10 @@ The required input is a supported patched dependency path, not another
 Meta/Turso/HighLevel token or invented CRM mapping.
 
 Once that upstream gate is resolved and every check is green, the owning agent
-can use the signed-in dashboard's existing GitHub integration to connect this
-repository to this exact Worker, with a build/deploy command preserving all
-verification gates and no preview exposure. Alternatively reuse an authorised
-Wrangler session. Preserve current runtime secrets, crons and false write flag;
+can reuse the verified local encrypted Wrangler session to release to this
+exact Worker. The dashboard's existing GitHub integration is an alternative,
+but remains unconnected: any future connection must preserve all verification
+gates and avoid preview exposure. Preserve current runtime secrets, crons and false write flag;
 do not create another Worker or paid resource. Verify the actual released
 version and repeat live smoke checks. PR10 remains incomplete until that release
 evidence and documented integration boundaries are resolved or explicitly

@@ -15,10 +15,11 @@ The saved HighLevel enquiry register is also populated and fresh. Meta writes
 remain disabled, with no executed actions recorded.
 
 PR10 acceptance remains `BLOCKED`: compatible dependency security updates are
-being verified, but the high-severity upstream `braces` advisory has no published
-patched release and still fails the unchanged audit gate. The signed-in
-Cloudflare dashboard can access the exact Worker and its existing GitHub
-integration; new provider credentials are not the immediate blocker. Stage-based CRM
+locally verified, but the high-severity upstream `braces` advisory has no published
+patched release and still fails the unchanged audit gate. The existing encrypted
+Wrangler OAuth session is verified with current local tooling; the signed-in
+Cloudflare dashboard also accesses the exact Worker. New provider credentials
+are not the immediate blocker. Stage-based CRM
 attribution remains unavailable; qualification is deliberately undefined and
 must not be manufactured from pipeline names. See the dated evidence and exact
 remaining gate in [current acceptance](./LIVE_ACCEPTANCE_2026-10-03.md).

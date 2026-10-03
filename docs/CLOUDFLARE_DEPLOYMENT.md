@@ -35,11 +35,22 @@ Sources checked 2026-09-08: [Workers pricing](https://developers.cloudflare.com/
 
 ## Build and deploy
 
+Release only the merged, independently reviewed commit with every CI gate green.
+The commands below are sequential gates, not permission to bypass a failing audit.
+The 3 October follow-up has **not** been deployed: its upstream dependency audit
+is still red. An existing encrypted OAuth operator session was verified using
+current local Wrangler; do not infer missing access from the old global CLI.
+
 ```bash
 npm ci
+npm audit --audit-level=high
 npm run lint
 npm run typecheck
 npm test
+npm run test:remote-sync
+npm run build
+npx playwright install chromium
+npm run test:browser
 npm run build:cloudflare
 npx wrangler deploy --dry-run
 npm run deploy:cloudflare
