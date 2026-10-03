@@ -42,17 +42,17 @@ is still red. An existing encrypted OAuth operator session was verified using
 current local Wrangler; do not infer missing access from the old global CLI.
 
 ```bash
-npm ci
-npm audit --audit-level=high
-npm run lint
-npm run typecheck
-npm test
-npm run test:remote-sync
-npm run build
-npx playwright install chromium
-npm run test:browser
-npm run build:cloudflare
-npx wrangler deploy --dry-run
+npm ci &&
+npm audit --audit-level=high &&
+npm run lint &&
+npm run typecheck &&
+npm test &&
+npm run test:remote-sync &&
+npm run build &&
+npx playwright install chromium &&
+npm run test:browser &&
+npm run build:cloudflare &&
+npx wrangler deploy --dry-run &&
 npm run deploy:cloudflare
 ```
 

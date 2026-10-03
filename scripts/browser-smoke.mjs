@@ -395,11 +395,44 @@ async function runFixture(directory, evidenceDirectory) {
     assert(await registerPanel.getByRole("alert").count() === 0 && await outcomesPanel.getByRole("alert").count() === 0, "saved enquiry and outcome panels must load without errors");
     evidence.checks.push("durable enquiry register readback and both panels show two receipts from one person without live HighLevel credentials");
 
-    // Exercise expected provider failures through the API request context, so
-    // browser console errors remain unconditional failures during the UI flow.
-    const failedRefresh = await context.request.post("/api/lead-register", { headers: { Origin: baseUrl } });
-    assert(failedRefresh.status() === 503, "unconfigured HighLevel refresh must fail closed");
-    deepStrictEqual(await failedRefresh.json(), { error: "Refresh failed. The last complete saved register has been preserved." });
+    // Isolate the intentional 503 in its own page. The main browser flow keeps
+    // unconditional error rejection; this page allows exactly that one resource
+    // error, and must show it to the operator without losing rows or staying busy.
+    const failurePage = await context.newPage();
+    const failureConsole = [];
+    const failurePageErrors = [];
+    const refreshError = "Refresh failed. The last complete saved register has been preserved.";
+    failurePage.on("console", (message) => {
+      if (message.type() === "error" || message.type() === "warning") {
+        failureConsole.push({ type: message.type(), text: message.text(), url: message.location().url });
+      }
+    });
+    failurePage.on("pageerror", (error) => failurePageErrors.push(error.message));
+    try {
+      await failurePage.goto("/", { waitUntil: "domcontentloaded" });
+      const failedPanel = failurePage.getByRole("region", { name: "Saved enquiry register", exact: true });
+      const savedContact = failedPanel.getByRole("link", { name: "Browser smoke enquiry", exact: true });
+      await savedContact.waitFor();
+      const refreshButton = failedPanel.getByRole("button", { name: "Refresh and save enquiries", exact: true });
+      const [failedRefresh] = await Promise.all([
+        failurePage.waitForResponse((response) => response.url() === `${baseUrl}/api/lead-register` && response.request().method() === "POST"),
+        refreshButton.click(),
+      ]);
+      assert(failedRefresh.status() === 503, "unconfigured HighLevel refresh must fail closed");
+      deepStrictEqual(await failedRefresh.json(), { error: refreshError });
+      await failedPanel.getByRole("alert").getByText(refreshError, { exact: true }).waitFor();
+      assert(await savedContact.isVisible() && await failedPanel.getByRole("row").count() === 2, "failed refresh must preserve the displayed saved contact");
+      assert(await refreshButton.isEnabled(), "failed refresh must restore the refresh button");
+      await failurePage.screenshot({ path: join(evidenceDirectory, "enquiry-refresh-failure.png"), fullPage: true });
+    } finally {
+      await failurePage.close();
+      await saveJson(evidenceDirectory, "expected-refresh-failure.json", { failureConsole, failurePageErrors });
+    }
+    assert(failurePageErrors.length === 0, "expected no runtime errors during failed refresh");
+    assert(failureConsole.length === 1 && failureConsole[0].type === "error"
+      && failureConsole[0].url === `${baseUrl}/api/lead-register`
+      && /^Failed to load resource: the server responded with a status of 503 \(Service Unavailable\)$/.test(failureConsole[0].text),
+    "failed-refresh browser may emit only its single expected 503 resource error");
     const preservedRegister = await context.request.get("/api/lead-register");
     assert(preservedRegister.status() === 200, "saved register must remain readable after provider refresh failure");
     deepStrictEqual(await preservedRegister.json(), { data: leadRegister }, "failed provider refresh must preserve the complete saved register");
