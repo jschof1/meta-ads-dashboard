@@ -103,6 +103,7 @@ function smokeEvidence(today) {
 
 async function seedSmokeDatabase(connection) {
   const accountId = "act_browser_smoke";
+  const leadRegisterLocationId = "loc_browser_smoke";
   const attributionKey = "7d_click,1d_view";
   const runId = "browser-smoke-sync";
   const targetId = "ad-browser-smoke";
@@ -140,6 +141,19 @@ async function seedSmokeDatabase(connection) {
   };
   const db = new PrismaClient({ adapter: new PrismaLibSQL(connection) });
   try {
+    await db.leadRegisterSnapshot.create({
+      data: {
+        locationId: leadRegisterLocationId,
+        checkedAt: now.toISOString(),
+        payload: JSON.stringify({
+          locationId: leadRegisterLocationId,
+          checkedAt: now.toISOString(),
+          coverageStart: new Date(now.getTime() - 90 * 86400000).toISOString(),
+          calendarEnd: new Date(now.getTime() + 90 * 86400000).toISOString(),
+          entries: [],
+        }),
+      },
+    });
     await db.syncRun.create({
       data: {
         id: runId,
@@ -319,6 +333,7 @@ async function runFixture(directory, evidenceDirectory) {
       ANTHROPIC_API_KEY: "",
       HIGHLEVEL_TOKEN: "",
       HIGHLEVEL_PRIVATE_INTEGRATION_TOKEN: "",
+      HIGHLEVEL_LOCATION_ID: "loc_browser_smoke",
       HIGHLEVEL_SYNC_ENABLED: "false",
       HIGHLEVEL_LOCATION_ID: highLevelLocationId,
     };

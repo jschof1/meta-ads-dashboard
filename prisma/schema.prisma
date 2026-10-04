@@ -455,3 +455,12 @@ model LeadRegisterSnapshot {
   payload String
   checkedAt String
 }
+
+// Distributed lease prevents the scheduled refresh and dashboard button from
+// starting duplicate paginated reads against the same HighLevel location.
+model LeadRegisterSyncLease {
+  locationId String @id
+  owner      String
+  expiresAt  DateTime
+  updatedAt  DateTime @updatedAt
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiSession } from "@/lib/api-auth";
-import { readLeadRegister, syncLeadRegister } from "@/lib/lead-register";
+import { LeadRegisterSyncAlreadyRunningError, readLeadRegister, syncLeadRegister } from "@/lib/lead-register";
 export const dynamic="force-dynamic";
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -18,5 +18,5 @@ export async function POST(request: Request) {
   try { const parsed=new URL(origin || ""); sameOrigin=["http:","https:"].includes(parsed.protocol) && parsed.origin===origin && parsed.host===(request.headers.get("host") || new URL(request.url).host); } catch { /* Invalid origin. */ }
   if(!sameOrigin) return NextResponse.json({error:"Invalid origin"},{status:403,headers});
   try {return NextResponse.json({data:await syncLeadRegister()},{headers});}
-  catch {return NextResponse.json({error:"Refresh failed. The last complete saved register has been preserved."},{status:503,headers});}
+  catch (error) {if(error instanceof LeadRegisterSyncAlreadyRunningError)return NextResponse.json({error:"An enquiry refresh is already running. Try again shortly."},{status:409,headers:{...headers,"Retry-After":"30"}});return NextResponse.json({error:"Refresh failed. The last complete saved register has been preserved."},{status:503,headers});}
 }
