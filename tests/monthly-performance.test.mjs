@@ -28,7 +28,7 @@ test("missing days label partial and suppress comparison without converting miss
   assert.equal(result.months[1].coverage, "partial"); assert.equal(result.months[1].days, 29);
   assert.equal(result.months[0].comparison, null); assert.equal(result.months[0].outcomes, null);
 });
-test("account totals never double count entity levels, months are capped at twelve", () => {
+test("account totals never double count entity levels and exclude dates before the reporting baseline", () => {
   const result = report([row("2025-01-01"), ...range("2026-09-01", "2026-10-14"), row("2026-09-01", { level: "ad", entityId: "ad1", spendMinorUnits: 10000 }), row("2026-09-01", { entityId: "act_other", spendMinorUnits: 999999 })], { names: { ad1: "Real ad" } });
   assert.equal(result.months.length, 2); assert.equal(result.months[1].metrics.spend, 30000);
   assert.equal(result.months[1].ads[0].name, "Real ad"); assert.equal(result.months[1].ads[0].spendShare, 1 / 3);
@@ -53,4 +53,16 @@ test("current HighLevel month is partial and exported report contains aggregate 
 test("month comparisons reject a missing prior date and a shorter prior month", () => {
   const result = report([...range("2026-02-01", "2026-03-31")], { now: new Date("2026-03-31T15:00:00Z") });
   assert.equal(result.months[0].comparison, null);
+});
+
+test("November 2025 remains reportable after it is older than twelve months", () => {
+  const result = report([...range("2025-11-20", "2025-11-30"), row("2026-12-01")], { now: new Date("2026-12-02T12:00:00Z") });
+  assert.equal(result.months.length, 14);
+  const november = result.months.at(-1);
+  assert.equal(november.month, "2025-11");
+  assert.equal(november.metrics.spend, 11000);
+  assert.equal(november.days, 11);
+  assert.equal(november.expectedDays, 30);
+  assert.equal(november.coverage, "partial");
+  assert.equal(result.months.find(m => m.month === "2026-01").metrics.spend, null, "missing months remain unknown");
 });
