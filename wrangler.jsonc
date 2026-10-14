@@ -23,6 +23,7 @@
   "vars": {
     "META_WRITES_ENABLED": "false",
     "HIGHLEVEL_SYNC_ENABLED": "false",
+    "CUSTOMER_JOURNEY_SYNC_ENABLED": "false",
     "HIGHLEVEL_LEAD_FORM_ID": "aEwGU42vGjqNm43qwms7"
   },
   "observability": {
@@ -35,7 +36,8 @@
     "crons": [
       "0 6 * * *",
       "30 6 * * *",
-      "45 * * * *"
+      "45 * * * *",
+      "15 7 * * *"
     ]
   }
 }

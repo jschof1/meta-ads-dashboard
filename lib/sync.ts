@@ -96,6 +96,8 @@ export type SyncOptions = {
   initialBackfillDays?: number;
   recentRefreshDays?: number;
   leaseSeconds?: number;
+  // Operator backfills reuse the existing idempotent writer; bounded to one month.
+  range?: MetaInsightDateRange;
   // Injectable only for deterministic tests; production uses the wall clock.
   clock?: () => Date;
 };
@@ -263,7 +265,7 @@ function normalizeInsight(
   const cpmMinorUnits = metricOrDerived(toOptionalMinorUnits(row.cpm, currencyCode), spendMinorUnits, impressions, 1_000);
   const ctrLink = linkClicks !== null && impressions !== null && impressions > 0
     ? linkClicks / impressions
-    : toOptionalFloat(row.ctr);
+    : row.inline_link_click_ctr !== undefined ? (toOptionalFloat(row.inline_link_click_ctr) ?? NaN) / 100 : null;
   const frequency = toOptionalFloat(row.frequency)
     ?? (impressions !== null && reach !== null && reach > 0 ? impressions / reach : null);
 
@@ -284,7 +286,7 @@ function normalizeInsight(
       : null,
     cpcMinorUnits,
     cpmMinorUnits,
-    ctrLink,
+    ctrLink: ctrLink !== null && Number.isFinite(ctrLink) ? ctrLink : null,
     frequency,
     resultActionType: diagnostic.primaryActionType ?? null,
     rawActions: json(row.actions, "null"),
@@ -566,12 +568,20 @@ export async function syncMeta(options: SyncOptions = {}): Promise<SyncResult> {
     const accountTimeZone = account.timezone_name || "UTC";
     const validAccountTimeZone = isValidTimeZone(accountTimeZone);
     const timeZone = validAccountTimeZone ? accountTimeZone : "UTC";
-    const range = chooseSyncRange({
+    if (options.range) {
+      const { since, until } = options.range;
+      const length = (Date.parse(until) - Date.parse(since)) / 86_400_000 + 1;
+      if (!isDateInRange(since, { since, until }) || !isDateInRange(until, { since, until }) || length < 1 || length > 31
+        || until > new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now)) {
+        throw new Error("Meta backfill requires a valid past range of at most 31 days");
+      }
+    }
+    const range = options.range ? { ...options.range, initialBackfill: true } : chooseSyncRange({
       timeZone,
       now,
       hasSuccessfulSync: Boolean(previousSuccess),
       initialBackfillDays: options.initialBackfillDays ?? positiveInteger(process.env.META_INITIAL_BACKFILL_DAYS, 90),
-      recentRefreshDays: options.recentRefreshDays ?? positiveInteger(process.env.META_RECENT_REFRESH_DAYS, 7),
+      recentRefreshDays: options.recentRefreshDays ?? positiveInteger(process.env.META_RECENT_REFRESH_DAYS, 35),
     });
     const requestRange = insightRange(range);
 

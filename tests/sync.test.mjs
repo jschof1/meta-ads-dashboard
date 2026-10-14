@@ -197,6 +197,20 @@ async function run(db, client, now = new Date("2026-09-04T12:00:00.000Z"), optio
   return syncMeta({ db, client, now, clock: () => now, initialBackfillDays: 90, recentRefreshDays: 7, ...options });
 }
 
+test("bounded historical refreshes replace daily rows without adding spend twice and preserve link CTR semantics", async () => {
+  const db = await createDatabase();
+  const { client, calls } = fakeClient({ rows: { ad: [insight("2026-02-04", { ctr: "99.99", inline_link_clicks: undefined, inline_link_click_ctr: "1.25" })] } });
+  const options = { range: { since: "2026-02-01", until: "2026-02-28" } };
+  await run(db, client, new Date("2026-09-04T12:00:00Z"), options);
+  const row = await db.dailyInsight.findFirst();
+  assert.equal(row.ctrLink, 0.0125);
+  await run(db, client, new Date("2026-09-04T12:01:00Z"), options);
+  assert.equal(await db.dailyInsight.count(), 1);
+  assert.equal((await db.dailyInsight.findFirst()).spendMinorUnits, row.spendMinorUnits);
+  assert.deepEqual(calls[0].range, options.range);
+  await assert.rejects(() => run(db, client, undefined, { range: { since: "2026-02-01", until: "2026-03-31" } }), /range/i);
+});
+
 test("performs the 90-day first sync and persists explicit zero result days", async () => {
   const db = await createDatabase();
   const { client, calls } = fakeClient({ rows: {

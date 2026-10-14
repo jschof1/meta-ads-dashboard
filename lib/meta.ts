@@ -45,12 +45,14 @@ export type MetaInsightRow = {
   clicks?: string;
   inline_link_clicks?: string;
   ctr?: string;
+  inline_link_click_ctr?: string;
   cpc?: string;
   cpm?: string;
   frequency?: string;
   date_start?: string;
   date_stop?: string;
   actions?: MetaInsightAction[];
+  attribution_setting?: string;
 };
 
 export type MetaRateLimitUsage = Record<string, number>;
@@ -204,6 +206,8 @@ export type MetaAdSet = {
   start_time?: string;
   end_time?: string;
   learning_stage_info?: unknown;
+  attribution_spec?: unknown;
+  promoted_object?: unknown;
   updated_time?: string;
 };
 
@@ -278,6 +282,7 @@ const FIELDS_AD = [
   "reach",
   "clicks",
   "inline_link_clicks",
+  "inline_link_click_ctr",
   "ctr",
   "cpc",
   "cpm",
@@ -285,6 +290,7 @@ const FIELDS_AD = [
   "date_start",
   "date_stop",
   "actions",
+  "attribution_setting",
 ].join(",");
 
 const FIELDS_AGGREGATE = [
@@ -301,17 +307,19 @@ const FIELDS_AGGREGATE = [
   "reach",
   "clicks",
   "inline_link_clicks",
+  "inline_link_click_ctr",
   "ctr",
   "cpc",
   "cpm",
   "frequency",
   "actions",
+  "attribution_setting",
 ].join(",");
 
 const ENTITY_FIELDS = {
   account: "id,name,account_status,currency,timezone_name,timezone_offset_hours_utc,business_name",
   campaigns: "id,name,objective,status,effective_status,daily_budget,lifetime_budget,start_time,stop_time,updated_time",
-  adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info,updated_time",
+  adSets: "id,campaign_id,name,status,effective_status,optimization_goal,billing_event,daily_budget,lifetime_budget,start_time,end_time,learning_stage_info,attribution_spec,promoted_object,updated_time",
   ads: "id,name,status,effective_status,campaign_id,adset_id,updated_time,creative{id,thumbnail_url,image_hash,image_url,video_id,link_url,object_url,object_story_spec,asset_feed_spec}",
   creatives: "id,name,title,body,call_to_action_type,thumbnail_url,image_hash,image_url,video_id,object_id,link_url,object_url,object_story_spec,asset_feed_spec,url_tags",
 } as const;

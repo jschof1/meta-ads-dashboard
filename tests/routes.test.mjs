@@ -308,6 +308,7 @@ test("protected APIs reject requests without a session", async () => {
     ["POST", "/api/insights/brief"],
     ["POST", "/api/refresh"],
     ["GET", "/api/lead-register"],
+    ["GET", "/api/acquisition"],
     ["POST", "/api/lead-register"],
   ];
 
