@@ -70,7 +70,7 @@ function Preview({ ad }: { ad: AdRow }) {
   const image = imageState === "primary" ? primaryImage : imageState === "fallback" ? fallbackImage : null;
   if (image) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
+      // oxlint-disable-next-line nextjs/no-img-element
       <img
         src={image}
         alt={`Preview of ${ad.adName}`}
