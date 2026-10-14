@@ -20,12 +20,26 @@ const releases = {
   "linux-x64": ["x86_64-unknown-linux-gnu", "71720fc8648c19efef416efebd47145ef59b62e198770533530a858e1336879f"],
 };
 
-export function safeSmokeEnvironment() {
+export function safeSmokeEnvironment(env = process.env) {
   return Object.fromEntries(
     ["PATH", "HOME", "USERPROFILE", "CI", "LANG", "LC_ALL", "TMPDIR"]
-      .filter((name) => process.env[name] !== undefined)
-      .map((name) => [name, process.env[name]]),
+      .filter((name) => env[name] !== undefined)
+      .map((name) => [name, env[name]]),
   );
+}
+
+// A hosted runner may require its supplied proxy to download the pinned public
+// fixture. Keep that transport configuration in the downloader only; application
+// and database children still receive the isolated environment above.
+export function smokeDownloadEnvironment(env = process.env) {
+  return {
+    ...safeSmokeEnvironment(env),
+    ...Object.fromEntries(
+      ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy"]
+        .filter((name) => env[name] !== undefined)
+        .map((name) => [name, env[name]]),
+    ),
+  };
 }
 
 export function startProcess(command, args, { logPath, ...options }) {
@@ -248,7 +262,7 @@ async function startSqld({ directory, evidenceDirectory, tls }) {
   const env = safeSmokeEnvironment();
   await runCommand("curl", ["--disable", "--fail", "--silent", "--show-error", "--location", "--proto", "=https", "--proto-redir", "=https",
     "--connect-timeout", "15", "--max-time", "90", "--retry", "2", "--output", archivePath, downloadUrl], {
-    cwd: directory, env, logPath: join(evidenceDirectory, "download.log"),
+    cwd: directory, env: smokeDownloadEnvironment(), logPath: join(evidenceDirectory, "download.log"),
   });
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(archivePath)) hash.update(chunk);
@@ -256,7 +270,7 @@ async function startSqld({ directory, evidenceDirectory, tls }) {
   if (actualChecksum !== checksum) throw new Error(`sqld checksum mismatch for ${asset}: expected ${checksum}, got ${actualChecksum}; refusing to extract or execute`);
   const releaseEvidence = { version: SQLD_VERSION, platform, downloadUrl, sha256: actualChecksum, verified: true };
   await writeFile(join(evidenceDirectory, "sqld-release.json"), JSON.stringify(releaseEvidence, null, 2) + "\n");
-  await runCommand("tar", ["-xJf", archivePath, "-C", directory], {
+  await runCommand("tar", ["--no-same-owner", "-xJf", archivePath, "-C", directory], {
     cwd: directory, env, logPath: join(evidenceDirectory, "extract.log"),
   });
   const binary = join(directory, `libsql-server-${target}`, "sqld");
