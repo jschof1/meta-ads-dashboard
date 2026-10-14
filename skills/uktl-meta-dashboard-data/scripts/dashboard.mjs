@@ -218,7 +218,7 @@ async function main() {
     console.log(JSON.stringify({ written: path.resolve(options.out), format: options.format, containsContactDetails: Boolean(options.details) }));
   } else process.stdout.write(output);
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => {
     console.error(error instanceof SafeError ? error.message : error?.code === 'EEXIST' ? 'Output already exists; choose a new filename' : 'Unable to read or write dashboard data; check access and configuration');
     process.exitCode = 1;

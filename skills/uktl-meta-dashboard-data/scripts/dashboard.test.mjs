@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { parseOptions, registerSummary, adsSummary, connect, run, csv } from './dashboard.mjs';
 
 const now = new Date('2026-10-14T14:10:00Z');
@@ -78,4 +83,14 @@ test('CSV quotes multiline fields and neutralises spreadsheet formulas; flags va
   assert.ok(value.includes('"-3"'));
   assert.throws(() => parseOptions(['status', '--format', 'csv']), /CSV requires/);
   assert.throws(() => parseOptions(['enquiries', '--days', '0']), /Days/);
+});
+
+test('installed reader runs through a skill-directory symlink', { skip: process.platform === 'win32' }, () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'uktl-skill-link-'));
+  try {
+    const folder = path.dirname(fileURLToPath(import.meta.url));
+    fs.symlinkSync(folder, path.join(temp, 'scripts'));
+    const output = execFileSync(process.execPath, [path.join(temp, 'scripts/dashboard.mjs'), 'links'], { encoding: 'utf8' });
+    assert.equal(JSON.parse(output).worker, 'uktl-meta-dashboard');
+  } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
