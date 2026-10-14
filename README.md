@@ -24,6 +24,12 @@ Next.js 16.3 · React 19 · Tailwind 4 · shadcn · Recharts · Prisma with libS
 
 ## Local install
 
+For agent access from another machine, use the bundled
+[UKTL dashboard data skill](skills/uktl-meta-dashboard-data/SKILL.md).
+Its portable Node reader opens links, reads saved ad/enquiry data, exports JSON
+or CSV, and checks sync timestamps using the live dashboard password. It needs
+no local database or npm install and performs no provider refresh or ad changes.
+
 ```bash
 git clone https://github.com/jschof1/meta-ads-dashboard
 cd meta-ads-dashboard
