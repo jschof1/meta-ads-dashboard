@@ -19,6 +19,8 @@ test("monthly storage isolates account/scope/attribution and withholds rows omit
         CREATE TABLE SyncRun(id TEXT, accountId TEXT, attributionKey TEXT, campaignId TEXT, status TEXT, finishedAt TEXT, timezoneName TEXT, currencyCode TEXT, requestedSince TEXT, requestedUntil TEXT);
         CREATE TABLE DailyInsight(date TEXT, level TEXT, entityId TEXT, attributionKey TEXT, scopeKey TEXT, syncRunId TEXT, currencyCode TEXT, spendMinorUnits INT, impressions INT, linkClicks INT, leads INT, resultActionType TEXT, rawActions TEXT);
         CREATE TABLE Campaign(metaId TEXT, name TEXT); CREATE TABLE Ad(metaId TEXT, name TEXT);
+        INSERT INTO SyncRun VALUES('history','act_1','7d_click,1d_view',NULL,'SUCCEEDED','2025-12-01T06:00:00Z','Europe/London','GBP','2025-11-01','2025-11-30');
+        INSERT INTO DailyInsight VALUES('2025-11-20','account','act_1','7d_click,1d_view','account','history','GBP',1000,100,10,2,'offsite_conversion.fb_pixel_lead','[]');
         INSERT INTO SyncRun VALUES('old','act_1','7d_click,1d_view',NULL,'SUCCEEDED','2026-09-01T06:00:00Z','Europe/London','GBP','2026-08-01','2026-09-01');
         INSERT INTO SyncRun VALUES('new','act_1','7d_click,1d_view',NULL,'SUCCEEDED','2026-09-02T06:00:00Z','Europe/London','GBP','2026-09-02','2026-09-02');
         INSERT INTO SyncRun VALUES('other','act_2','7d_click,1d_view',NULL,'SUCCEEDED','2026-09-02T06:00:00Z','Europe/London','GBP','2026-09-01','2026-09-02');
@@ -33,6 +35,9 @@ test("monthly storage isolates account/scope/attribution and withholds rows omit
     assert.equal(result.months[0].days, 2);
     assert.equal(result.months[0].metrics.spend, null, "omitted latest-day receipt is unknown");
     assert.equal(result.months[0].metrics.leads, null, "omitted rows cannot be recovered as zero");
+    const later = await readMonthlyPerformance(new Date("2026-12-02T12:00:00Z"), db);
+    assert.equal(later.months.at(-1).month, "2025-11", "storage retains the agreed baseline past twelve months");
+    assert.equal(later.months.at(-1).metrics.spend, 1000);
     assert.equal(result.metaCheckedAt, "2026-09-02T06:00:00.000Z");
     const beforeOmission = await readMonthlyPerformance(new Date("2026-09-01T12:00:00Z"), db);
     assert.equal(beforeOmission.months[0].metrics.spend, 1000, "other scopes and accounts must not contribute");

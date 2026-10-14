@@ -1,6 +1,6 @@
 import { prisma, withDatabaseClient } from "./db";
 import { accountLocalDate } from "./periods";
-import { buildMonthlyReport, type MonthlyInsight } from "./monthly-performance";
+import { buildMonthlyReport, MONTHLY_HISTORY_START, type MonthlyInsight } from "./monthly-performance";
 import type { LeadRegister } from "./lead-register";
 import { recoverStoredResult } from "./stored-result-events";
 
@@ -19,8 +19,7 @@ export async function readMonthlyPerformance(now = new Date(), db = prisma) {
       const run = success.rows[0];
       const timezone = String(run?.timezoneName || "UTC"), currency = String(run?.currencyCode || "GBP");
       const today = accountLocalDate(now, timezone);
-      const [year, month] = today.split("-").map(Number);
-      const since = new Date(Date.UTC(year, month - 12, 1)).toISOString().slice(0, 10);
+      const since = MONTHLY_HISTORY_START;
       const saved = run ? await tx.execute({
         sql: 'SELECT d.* FROM DailyInsight d JOIN SyncRun s ON s.id=d.syncRunId WHERE s.accountId=? AND s.attributionKey=? AND s.campaignId IS ? AND s.status=\'SUCCEEDED\' AND d.attributionKey=? AND d.scopeKey=? AND d.date>=? AND d.date<=? ORDER BY d.date,d.entityId',
         args: [...args, attribution, campaignId || "account", since, today],

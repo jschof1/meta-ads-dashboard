@@ -9,7 +9,8 @@ independent of the overview's rolling period selector.
 
 - Reads one database transaction through the existing authenticated session.
   `/api/dashboard/monthly` never calls Meta, HighLevel or other providers.
-- Maximum twelve calendar months of saved history, scoped to the configured
+- Saved ad history from 1 November 2025 onward, retained as time passes rather
+  than hidden by a rolling twelve-month cutoff. Reporting is scoped to the configured
   account, campaign scope and attribution window, from successful imports only.
 - Days omitted by the latest successful refresh remain unknown. Currency
   mismatches, missing metrics and missing lead receipts remain unavailable.
@@ -47,8 +48,18 @@ independent of the overview's rolling period selector.
 cover weighted rates, missing values, currency, scope/account/attribution isolation,
 receipt reinterpretation, latest-import omissions, timezone boundaries, partial
 months, matched comparisons, cancellation/test exclusions, deduplication,
-aggregate-only export, bounded history and route authentication.
+aggregate-only export, retained November 2025 history and route authentication.
 
 No database migration is required. The production schema and hourly HighLevel
 import remain unchanged. Deployment still requires the existing repository CI
 and security gate; a feature build is not a production release.
+
+## Historical import
+
+Run `npm run backfill:meta-history` with the existing operator environment to
+import Meta daily account, campaign, ad-set and ad history from 1 November 2025.
+This uses the existing paced, leased, atomic Meta import and preserves its scope,
+attribution, result-event and currency contracts. It changes saved reporting
+records only, never campaigns, tracking tags or HighLevel data. Subsequent
+scheduled imports continue refreshing recent days and retain the earlier rows.
+Missing delivery days remain partial coverage, not fabricated zero results.

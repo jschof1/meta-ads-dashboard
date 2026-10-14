@@ -1,6 +1,9 @@
 import type { LeadRegister } from "./lead-register";
 import { accountLocalDate, addCalendarDays } from "./periods";
 
+// Retain the agreed reporting baseline as time passes; this is not a rolling window.
+export const MONTHLY_HISTORY_START = "2025-11-01";
+
 export type MonthlyInsight = {
   date: string; level: string; entityId: string; currencyCode: string | null;
   spendMinorUnits: number | null; impressions: number | null; linkClicks: number | null; leads: number | null;
@@ -94,9 +97,7 @@ export function buildMonthlyReport(input: {
   metaCheckedAt: string | null; register: LeadRegister | null; names?: Record<string, string>; now?: Date;
 }): MonthlyReport {
   const now = input.now ?? new Date(), today = accountLocalDate(now, input.timezone), thisMonth = today.slice(0, 7);
-  let oldest = thisMonth;
-  for (let i = 0; i < 11; i++) oldest = previousMonth(oldest);
-  const rows = input.rows.filter(r => r.date >= `${oldest}-01` && r.date <= today);
+  const rows = input.rows.filter(r => r.date >= MONTHLY_HISTORY_START && r.date <= today);
   const accounts = rows.filter(r => r.level === "account" && r.entityId === input.accountId);
   const first = accounts.map(r => r.date.slice(0, 7)).sort()[0];
   const months: PerformanceMonth[] = [];
