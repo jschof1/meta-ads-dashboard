@@ -6,6 +6,7 @@ export type AttributionTouch = {
   adSetId: string | null;
   adId: string | null;
   paidMeta: boolean;
+  hierarchyConflict: boolean;
 };
 export type AttributionPair = { first: AttributionTouch; latest: AttributionTouch; firstConflict: boolean };
 export type MetaIdentity = { adId: string; adSetId: string | null; campaignId: string | null };
@@ -13,7 +14,12 @@ type Row = Record<string, unknown>;
 export const object = (v: unknown): Row => v && typeof v === "object" && !Array.isArray(v) ? v as Row : {};
 export const boundedText = (v: unknown): string | null => typeof v === "string" && v.trim() ? v.trim().slice(0, 256) : null;
 const metaId = (v: unknown) => /^\d{6,32}$/.test(String(v ?? "")) ? String(v) : null;
-const empty = (): AttributionTouch => ({ source: null, medium: null, campaignId: null, adSetId: null, adId: null, paidMeta: false });
+const empty = (): AttributionTouch => ({ source: null, medium: null, campaignId: null, adSetId: null, adId: null, paidMeta: false, hierarchyConflict: false });
+// UTM fields are user-controlled. Retain channel categories only, so an email,
+// full URL, token or personal name placed in a UTM cannot enter the snapshot.
+const sources = new Set(["fb_ad", "meta", "meta_ads", "facebook_ads", "instagram_ads", "facebook", "instagram", "fb", "ig", "google", "bing", "tiktok", "linkedin", "youtube", "email", "sms", "referral", "direct", "direct traffic", "organic", "organic search", "social", "social media", "paid social", "paid search", "crm ui", "other"]);
+const media = new Set(["paid_social", "paid-social", "cpc", "ppc", "cpm", "organic", "social", "email", "referral", "form", "website", "landing_page", "call", "chat", "direct", "none", "sms"]);
+const metaSources = new Set(["fb_ad", "meta", "meta_ads", "facebook_ads", "instagram_ads", "facebook", "instagram", "fb", "ig"]);
 
 export function readAttributionTouch(value: unknown, identities: MetaIdentity[]): AttributionTouch {
   const row = object(value);
@@ -23,17 +29,22 @@ export function readAttributionTouch(value: unknown, identities: MetaIdentity[])
     if (url.protocol === "https:" || url.protocol === "http:") query = url.searchParams;
   } catch { /* URL is optional. Never persist it or its click IDs. */ }
   const get = (...keys: string[]) => keys.map(k => row[k] ?? query.get(k)).find(v => boundedText(v));
-  const source = boundedText(get("utmSource", "utm_source", "source", "sessionSource"))?.toLowerCase() ?? null;
-  const medium = boundedText(get("utmMedium", "utm_medium", "medium"));
+  const rawSource = boundedText(get("utmSource", "utm_source", "source", "sessionSource"))?.toLowerCase() ?? null;
+  const rawMedium = boundedText(get("utmMedium", "utm_medium", "medium"))?.toLowerCase() ?? null;
+  const source = rawSource ? sources.has(rawSource) ? rawSource : "other" : null;
+  const medium = rawMedium ? media.has(rawMedium) ? rawMedium : "other" : null;
   let campaignId = metaId(get("metaCampaignId", "facebookCampaignId", "campaignId", "campaign_id", "campaign"));
   let adSetId = metaId(get("metaAdSetId", "adSetId", "adsetId", "adset_id"));
   let adId = metaId(get("metaAdId", "facebookAdId", "adId", "ad_id", "h_ad_id"));
-  const metaSource = ["fb_ad", "meta", "meta_ads", "facebook_ads", "instagram_ads", "facebook", "instagram", "fb", "ig"].includes(source ?? "");
+  const metaSource = metaSources.has(source ?? "");
   const explicitPaid = ["fb_ad", "meta_ads", "facebook_ads", "instagram_ads"].includes(source ?? "");
   // A Google click id or browser cookie alone cannot prove a paid Meta visit.
   const paidMeta = explicitPaid || (metaSource && Boolean(row.fbclid || query.get("fbclid") || /^(paid[_-]?social|cpc|ppc)$/i.test(medium ?? "")));
   const identity = identities.find(a => a.adId === adId);
-  if (identity && (!campaignId || campaignId === identity.campaignId) && (!adSetId || adSetId === identity.adSetId)) {
+  const hierarchyConflict = Boolean((identity && ((campaignId && campaignId !== identity.campaignId) || (adSetId && adSetId !== identity.adSetId)))
+    || (adSetId && campaignId && identities.some(a => a.adSetId === adSetId) && !identities.some(a => a.adSetId === adSetId && a.campaignId === campaignId)));
+  if (hierarchyConflict) { adId = null; adSetId = null; campaignId = null; }
+  else if (identity) {
     campaignId = identity.campaignId;
     adSetId = identity.adSetId;
   } else adId = null;
@@ -41,7 +52,7 @@ export function readAttributionTouch(value: unknown, identities: MetaIdentity[])
   if (campaignId && !identities.some(a => a.campaignId === campaignId)) campaignId = null;
   // Explicit IDs must belong to this account. Cross-channel generic IDs fail closed.
   if (source && !metaSource) { adId = null; adSetId = null; campaignId = null; }
-  return { source, medium, campaignId, adSetId, adId, paidMeta: paidMeta || Boolean(adId || adSetId || campaignId) };
+  return { source, medium, campaignId, adSetId, adId, paidMeta: paidMeta || Boolean(adId || adSetId || campaignId), hierarchyConflict };
 }
 
 export function preserveAttribution(raw: Row, identities: MetaIdentity[], previous?: AttributionPair): AttributionPair {
@@ -51,9 +62,18 @@ export function preserveAttribution(raw: Row, identities: MetaIdentity[], previo
   // A missing first touch is different from a known organic/direct first touch.
   const hasFirst = (t: AttributionTouch) => Boolean(t.source || t.medium || t.adId || t.campaignId);
   const original = previous && hasFirst(previous.first) ? previous.first : first;
-  const firstConflict = Boolean(previous?.firstConflict || (previous && hasFirst(previous.first) && hasFirst(first)
-    && JSON.stringify(previous.first) !== JSON.stringify(first)));
-  return { first: hasFirst(original) ? original : empty(), latest, firstConflict };
+  const conflictingIds = ["campaignId", "adSetId", "adId"].some(key => {
+    const k = key as "campaignId" | "adSetId" | "adId"; return original[k] && first[k] && original[k] !== first[k];
+  });
+  const sameChannel = (!original.source || !first.source || original.source === first.source)
+    && (!original.medium || !first.medium || original.medium === "other" || first.medium === "other" || original.medium === first.medium);
+  const canEnrich = sameChannel && !conflictingIds && !original.hierarchyConflict && !first.hierarchyConflict
+    && (!original.source || metaSources.has(original.source) || !(first.adId || first.adSetId || first.campaignId));
+  const enriched = canEnrich ? { ...original, source: original.source ?? first.source, medium: original.medium ?? first.medium,
+    campaignId: original.campaignId ?? first.campaignId, adSetId: original.adSetId ?? first.adSetId, adId: original.adId ?? first.adId,
+    paidMeta: original.paidMeta || first.paidMeta } : original;
+  const firstConflict = Boolean(previous?.firstConflict || first.hierarchyConflict || (previous && hasFirst(previous.first) && hasFirst(first) && (!sameChannel || conflictingIds)));
+  return { first: hasFirst(enriched) ? enriched : empty(), latest, firstConflict };
 }
 
 export type IdentityEvidence = { customerId: string; contactId: string; evidence: "stripe_metadata" | "ghl_payment_id" };

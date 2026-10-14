@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { object, boundedText as text, preserveAttribution, resolveCustomerIdentities, type IdentityEvidence, type MetaIdentity } from "./acquisition-attribution";
 
-const touch = z.object({ source: z.string().nullable(), medium: z.string().nullable(), campaignId: z.string().nullable(), adSetId: z.string().nullable(), adId: z.string().nullable(), paidMeta: z.boolean() });
+const touch = z.object({ source: z.string().nullable(), medium: z.string().nullable(), campaignId: z.string().nullable(), adSetId: z.string().nullable(), adId: z.string().nullable(), paidMeta: z.boolean(), hierarchyConflict: z.boolean().default(false) });
 export const journeySnapshotSchema = z.object({
   version: z.literal(1), accountId: z.literal("acct_1OuZwXBUDoaLc39G"), locationId: z.string(), checkedAt: z.iso.datetime(),
   calendarSince: z.string(), qualificationConfigured: z.boolean(),
@@ -20,6 +20,7 @@ type Row = Record<string, unknown>;
 export type StripeReadSnapshot = { accountId: string; livemode: boolean; complete: boolean; checkedAt: string; customers: Row[]; charges: Row[]; subscriptions: Row[] };
 export const UKTL_STRIPE_ACCOUNT = "acct_1OuZwXBUDoaLc39G";
 export const UKTL_LOCATION = "IYjyc7Efk0yAOzpSO9FM";
+export const UKTL_META_ACCOUNT = "act_1357893439073996";
 const iso = (value: unknown): string | null => {
   const date = typeof value === "number" ? new Date(value * 1000) : new Date(String(value ?? ""));
   return Number.isFinite(+date) ? date.toISOString() : null;
@@ -71,12 +72,15 @@ export function normalizeCustomerJourney(input: {
     const leadEvidence = receipts.length ? "submission" : formOrigin ? "form_origin" : tags.includes("new lead") ? "tag" : "none";
     const opportunities = input.opportunities.filter(o => (o.contactId ?? object(o.contact).id) === c.id);
     const appointments = input.events.filter(e => e.contactId === c.id && !e.deleted && !["cancelled", "canceled", "invalid"].includes(String(e.appointmentStatus)));
+    const observed = previous.get(String(c.id));
     return {
       id: String(c.id), createdAt: iso(c.dateAdded), leadAt: receipts[0] ?? (leadEvidence !== "none" ? iso(c.dateAdded) : null), leadEvidence,
       attribution: preserveAttribution(c, input.identities, previous.get(String(c.id))?.attribution),
-      qualified: qualificationConfigured ? tags.includes(input.qualifiedTag) || opportunities.some(o => o.pipelineId === input.pipelineId && input.qualifiedStageIds?.includes(String(o.pipelineStageId))) : null,
-      won: opportunities.some(o => o.pipelineId === input.pipelineId && o.status === "won") ? true : opportunities.length ? false : null,
-      booked: appointments.length > 0, attended: appointments.some(e => e.appointmentStatus === "showed"),
+      // These are witnessed journey milestones, not a replacement for current
+      // CRM state. Progressing or removing a tag cannot erase an observed step.
+      qualified: qualificationConfigured ? observed?.qualified === true || tags.includes(input.qualifiedTag) || opportunities.some(o => o.pipelineId === input.pipelineId && input.qualifiedStageIds?.includes(String(o.pipelineStageId))) : null,
+      won: observed?.won === true || opportunities.some(o => o.pipelineId === input.pipelineId && o.status === "won") ? true : opportunities.length ? false : null,
+      booked: observed?.booked === true || appointments.length > 0, attended: observed?.attended === true || appointments.some(e => e.appointmentStatus === "showed"),
       customerIds: [...resolved.matched].filter(([, contactId]) => contactId === c.id).map(([customerId]) => customerId),
     };
   });
@@ -107,7 +111,7 @@ export function normalizeCustomerJourney(input: {
       unmatchedCustomers: input.stripe.customers.filter(c => !resolved.matched.has(String(c.id)) && !resolved.ambiguous.has(String(c.id))).length,
       ambiguousCustomers: resolved.ambiguous.size,
       unmappedAdContacts: normalizedContacts.filter(c => c.attribution.first.paidMeta && !c.attribution.first.adId).length,
-      attributionConflicts: normalizedContacts.filter(c => c.attribution.firstConflict).length,
+      attributionConflicts: normalizedContacts.filter(c => c.attribution.firstConflict || c.attribution.latest.hierarchyConflict).length,
       unmatchedCharges: charges.filter(c => !c.contactId).length,
     },
   });

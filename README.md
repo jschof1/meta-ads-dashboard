@@ -18,6 +18,14 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 
 Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
+## Verified customer acquisition (prepared release)
+
+The acquisition panel adds daily/weekly/monthly/custom Meta comparisons and independently verified CRM/Stripe contact-created cohorts, with first/latest attribution, captured revenue/refunds, subscription states and 30/90-day retention. Missing stable ad IDs and qualification evidence remain visible. It uses the current database and authenticated saved-data reads; loading the page does not query Stripe or HighLevel.
+
+See the [14 October audit](docs/CUSTOMER_ACQUISITION_AUDIT_2026-10-14.md) and [phased release checklist](docs/CUSTOMER_ACQUISITION_RELEASE.md) for historical recovery, reconciliation, remaining tracking gaps, safe testing and production approval. The customer schedule at 07:15 UTC is disabled by default. It requires `CUSTOMER_JOURNEY_SYNC_ENABLED=true`, an account-verified restricted `STRIPE_READ_KEY`, existing HighLevel read access and the exact sales calendar/form/pipeline configuration. Qualification mappings stay blank until verified. No new conversion sender is included.
+
+Meta refreshes default to 35 days to restate delayed results. Existing deployments with an explicit `META_RECENT_REFRESH_DAYS` retain their configured override until the release changes it. Historical imports use `scripts/backfill-meta.mts`, which plans without provider calls unless its explicit approval/apply gates are met.
+
 ## Stack
 
 Next.js 16.3 · React 19 · Tailwind 4 · shadcn · Recharts · Prisma with libSQL/local SQLite · Anthropic SDK · Cloudflare cron.

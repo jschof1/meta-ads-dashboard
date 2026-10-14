@@ -44,12 +44,38 @@ test("first-touch survives return visits, absent provider fields and conflicting
   assert.equal(preserveAttribution({ attributionSource: touch }, identities, direct).first.source, "direct traffic");
 });
 
+test("the same original touch can gain newly verified IDs without overwriting its channel", () => {
+  const pending = preserveAttribution({ attributionSource: touch }, []);
+  const enriched = preserveAttribution({ attributionSource: touch }, identities, pending);
+  assert.equal(enriched.first.adId, "111111111"); assert.equal(enriched.firstConflict, false);
+  const organic = preserveAttribution({ attributionSource: { utmSource: "google" } }, identities);
+  const missingSource = preserveAttribution({ attributionSource: { adId: "111111111" } }, identities, organic);
+  assert.equal(missingSource.first.source, "google"); assert.equal(missingSource.first.adId, null);
+});
+
+test("contradictory owned hierarchy IDs quarantine all advert attribution", () => {
+  const catalogue = [...identities, { adId: "444444444", adSetId: "555555555", campaignId: "666666666" }];
+  for (const raw of [{ utmSource: "fb_ad", adId: "111111111", adset_id: "555555555", campaign_id: "666666666" }, { utmSource: "fb_ad", adset_id: "222222222", campaign_id: "666666666" }]) {
+    const parsed = readAttributionTouch(raw, catalogue);
+    assert.equal(parsed.adId, null); assert.equal(parsed.adSetId, null); assert.equal(parsed.campaignId, null); assert.equal(parsed.hierarchyConflict, true);
+    assert.equal(preserveAttribution({ attributionSource: raw }, catalogue).firstConflict, true);
+  }
+});
+
 test("ambiguous customer/contact identities stay unresolved", () => {
   const { matched, ambiguous } = resolveCustomerIdentities([
     { customerId: "cus_one", contactId: "c1", evidence: "stripe_metadata" },
     { customerId: "cus_one", contactId: "c2", evidence: "ghl_payment_id" },
   ], new Set(["c1", "c2"]));
   assert.equal(matched.size, 0); assert.equal(ambiguous.size, 1);
+});
+
+test("arbitrary UTM values cannot persist customer details or credentials", () => {
+  const privateTouch = readAttributionTouch({ utmSource: "person@example.test", utmMedium: "https://private.example/secret-token", adId: "111111111" }, identities);
+  assert.equal(privateTouch.source, "other"); assert.equal(privateTouch.medium, "other"); assert.equal(privateTouch.adId, null);
+  const known = readAttributionTouch({ ...touch, utmMedium: "A customer's personal name" }, identities);
+  assert.equal(known.adId, "111111111"); assert.equal(known.medium, "other");
+  assert.equal(JSON.stringify([privateTouch, known]).includes("private.example"), false);
 });
 
 test("full synthetic ad-to-CRM-to-payment journey uses IDs and stores no private details", () => {
@@ -111,6 +137,20 @@ test("replacement subscriptions prevent false churn and qualification requires e
   const c = cohortMetrics(s, new Set(["contact1"]), 10000, "2026-02-28"); assert.equal(c.churned, 0); assert.equal(c.retained90, 1);
 });
 
+test("observed qualification and attendance survive later stage progression", () => {
+  const input = fixture(); input.qualifiedStageIds = ["verified-stage"]; input.opportunities[0].pipelineStageId = "verified-stage";
+  const previous = normalizeCustomerJourney(input);
+  input.opportunities[0].pipelineStageId = "won-stage"; input.events = [];
+  const next = normalizeCustomerJourney({ ...input, previous });
+  assert.equal(next.contacts[0].qualified, true); assert.equal(next.contacts[0].attended, true); assert.equal(next.contacts[0].booked, true);
+});
+
+test("unresolved canceled subscriptions are censored rather than counted as retained", () => {
+  const input = fixture(); input.stripe.subscriptions[0].status = "canceled";
+  const result = cohortMetrics(normalizeCustomerJourney(input), new Set(["contact1"]), 10000, "2026-02-28");
+  assert.equal(result.subscriptionUnknown, 1); assert.equal(result.eligible30, 0); assert.equal(result.retained30, 0); assert.equal(result.eligible90, 0); assert.equal(result.churned, 0);
+});
+
 const insight = (date, values = {}) => ({ date, level: "ad", entityId: "111111111", spendMinorUnits: 10000, impressions: 2000, clicks: 100, linkClicks: 50, leads: 10, frequency: 1.5, reach: 1333, ...values });
 const run = { requestedSince: "2026-01-01", requestedUntil: "2026-10-13", finishedAt: new Date("2026-10-14T06:00:00Z") };
 test("comparisons aggregate numerators, avoid cross-day reach sums and expose sparse historical coverage", () => {
@@ -127,6 +167,18 @@ test("comparisons aggregate numerators, avoid cross-day reach sums and expose sp
 
 test("invalid dates, future dates and unsupported dimensions are rejected", () => {
   for (const params of [{ since: "2026-02-30", until: "2026-03-01" }, { since: "2025-01-01" }, { until: "2099-01-01" }, { level: "account" }, { touch: "name" }]) assert.throws(() => acquisitionQuery(new URLSearchParams(params), new Date("2026-10-14")));
+});
+
+test("latest-touch return visits cannot create zero acquisition costs or profitability advice", () => {
+  const snapshot = normalizeCustomerJourney(fixture());
+  const returningTouch = readAttributionTouch({ utmSource: "fb_ad", adId: "444444444" }, [{ adId: "444444444", adSetId: "555555555", campaignId: "333333333" }]);
+  snapshot.contacts = Array.from({ length: 10 }, (_, n) => ({ ...snapshot.contacts[0], id: `contact${n}`, attribution: { ...snapshot.contacts[0].attribution, latest: returningTouch } }));
+  snapshot.charges = snapshot.contacts.map((contact, n) => ({ ...snapshot.charges[0], id: `ch_${n}`, contactId: contact.id }));
+  const query = acquisitionQuery(new URLSearchParams({ since: "2026-02-01", until: "2026-02-28", compareSince: "2026-03-01", compareUntil: "2026-03-31", touch: "latest" }), new Date("2026-10-14"));
+  const report = buildAcquisitionReport({ query, insights: [insight("2026-10-01", { entityId: "444444444" })], runs: [run], journey: snapshot, names: new Map() });
+  assert.equal(report.rows[0].current.customers.payingCustomers, 10); assert.equal(report.rows[0].current.metrics.spendCents, 0);
+  assert.equal(report.rows[0].current.customers.costPerCustomer, null); assert.equal(report.rows[0].current.customers.costPerMeeting, null);
+  assert.doesNotMatch(report.rows[0].recommendation, /exceeds cohort spend|considering more budget/);
 });
 
 test("Stripe adapter checks the exact live account before paginated GET-only reads", async () => {

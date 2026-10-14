@@ -4,10 +4,10 @@ import { prisma } from "./db";
 import { createHighLevelClient } from "./highlevel";
 import { loadHighLevelSettings } from "./highlevel-config";
 import { readLeadRegisterProvider } from "./lead-register";
-import { normalizeCustomerJourney, journeySnapshotSchema, UKTL_LOCATION, UKTL_STRIPE_ACCOUNT, type JourneySnapshot } from "./customer-journey";
+import { normalizeCustomerJourney, journeySnapshotSchema, UKTL_LOCATION, UKTL_STRIPE_ACCOUNT, UKTL_META_ACCOUNT, type JourneySnapshot } from "./customer-journey";
 import { readStripeSnapshot } from "./stripe-read";
 import { accountLocalDate } from "./periods";
-import type { MetaIdentity } from "./acquisition-attribution";
+import { ownedAcquisitionCatalogue } from "./acquisition-catalogue";
 
 type Row = Record<string, unknown>;
 const scope = { locationId: UKTL_LOCATION, stripeAccountId: UKTL_STRIPE_ACCOUNT };
@@ -54,7 +54,8 @@ export async function syncCustomerJourney(db: PrismaClient = prisma) {
   if (process.env.CUSTOMER_JOURNEY_SYNC_ENABLED !== "true") throw new Error("Customer journey sync is disabled");
   const config = loadHighLevelSettings();
   const calendarId = process.env.HIGHLEVEL_SALES_CALENDAR_ID, formId = process.env.HIGHLEVEL_LEAD_FORM_ID;
-  if (!config.token || config.locationId !== UKTL_LOCATION || !config.pipelineId || !/^[A-Za-z0-9_-]+$/.test(calendarId ?? "") || !/^[A-Za-z0-9_-]+$/.test(formId ?? "")) throw new Error("Customer journey provider configuration unavailable");
+  const accountId = `act_${process.env.META_AD_ACCOUNT_ID?.replace(/^act_/, "")}`;
+  if (!config.token || config.locationId !== UKTL_LOCATION || accountId !== UKTL_META_ACCOUNT || process.env.META_CAMPAIGN_ID || !config.pipelineId || !/^[A-Za-z0-9_-]+$/.test(calendarId ?? "") || !/^[A-Za-z0-9_-]+$/.test(formId ?? "")) throw new Error("Customer journey provider configuration unavailable");
   return storeJourneyRun(db, async previous => {
     // Share pacing across ALL CRM requests, including contact-search POSTs.
     let lastRequest = 0;
@@ -85,12 +86,12 @@ export async function syncCustomerJourney(db: PrismaClient = prisma) {
       if (page.data.length < 100 || payments.length > page.totalCount) throw new Error("CRM payment pagination incomplete");
     }
     if (!paymentsComplete || new Set(payments.map(p => p._id)).size !== payments.length) throw new Error("CRM payment collection incomplete");
-    const now = new Date(), today = accountLocalDate(now, "Europe/London"), events: Row[] = [], submissions: Row[] = [];
+    const now = new Date(), calendarEnd = new Date(+now + 90 * 86_400_000), today = accountLocalDate(now, "Europe/London"), events: Row[] = [], submissions: Row[] = [];
     // Monthly calendar requests avoid provider range limits. First import
     // includes history; later imports still check historical showed/no-show changes.
-    for (let year = 2026; year <= now.getUTCFullYear(); year++) for (let month = 0; month < 12; month++) {
-      const since = Date.UTC(year, month, 1), until = Math.min(Date.UTC(year, month + 1, 1) - 1, +now);
-      if (since > +now) break;
+    for (let year = 2026; year <= calendarEnd.getUTCFullYear(); year++) for (let month = 0; month < 12; month++) {
+      const since = Date.UTC(year, month, 1), until = Math.min(Date.UTC(year, month + 1, 1) - 1, +calendarEnd);
+      if (since > +calendarEnd) break;
       const page = await read(`/calendars/events?locationId=${config.locationId}&calendarId=${calendarId}&startTime=${since}&endTime=${until}`, "journey calendar");
       if (!Array.isArray(page.events)) throw new Error("CRM calendar collection incomplete");
       if (page.events.some(e => typeof e.id !== "string" || !e.id)) throw new Error("CRM calendar event identity missing");
@@ -107,14 +108,11 @@ export async function syncCustomerJourney(db: PrismaClient = prisma) {
       if (data.submissions.length < 100 || submissions.length > total) throw new Error("CRM form pagination incomplete");
     }
     if (!submissionsComplete || submissions.some(s => typeof s.id !== "string" || !s.id) || new Set(submissions.map(s => s.id)).size !== submissions.length) throw new Error("CRM form collection incomplete");
-    const adRows = await db.ad.findMany();
-    const identities: MetaIdentity[] = adRows.map(a => ({ adId: a.metaId, adSetId: a.adSetMetaId, campaignId: a.campaignMetaId }));
-    const historical = await db.dailyInsight.findMany({ where: { level: "ad", scopeKey: "account" }, select: { entityId: true, raw: true } });
-    const seen = new Set(identities.map(a => a.adId));
-    for (const row of historical) if (!seen.has(row.entityId)) {
-      const raw = JSON.parse(row.raw);
-      identities.push({ adId: row.entityId, adSetId: raw.adset_id ?? null, campaignId: raw.campaign_id ?? null }); seen.add(row.entityId);
-    }
+    const [ads, historical, runs] = await db.$transaction([
+      db.ad.findMany(), db.dailyInsight.findMany({ where: { level: "ad", scopeKey: "account" } }),
+      db.syncRun.findMany({ where: { accountId, campaignId: null, status: "SUCCEEDED" } }),
+    ]);
+    const { identities } = ownedAcquisitionCatalogue({ accountId, runs, history: historical, ads });
     const stripe = await readStripeSnapshot();
     return normalizeCustomerJourney({ locationId: config.locationId!, contacts: contacts.items, opportunities: opportunities.items, events: [...new Map(events.map(e => [e.id, e])).values()], submissions,
       payments, stripe, identities, formId: formId!, pipelineId: config.pipelineId!, calendarSince: "2026-01-01", previous: previous ?? undefined,

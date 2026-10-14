@@ -26,8 +26,13 @@ function dates(since: string, until: string) {
   for (let day = since; day <= until; day = addCalendarDays(day, 1)) days.push(day);
   return days;
 }
-function covered(runs: Pick<SyncRun, "requestedSince" | "requestedUntil">[], since: string, until: string) {
-  return dates(since, until).every(day => runs.some(run => run.requestedSince && run.requestedUntil && day >= run.requestedSince && day <= run.requestedUntil));
+function covered(runs: Pick<SyncRun, "requestedSince" | "requestedUntil" | "warning">[], since: string, until: string) {
+  return dates(since, until).every(day => {
+    const latest = runs.find(run => run.requestedSince && run.requestedUntil && day >= run.requestedSince && day <= run.requestedUntil);
+    // Skipped provider rows cannot establish zero delivery. Missing lead fields
+    // on otherwise valid rows remain field-level unknowns instead.
+    return latest && !/malformed insight row|invalid account timezone/i.test(latest.warning ?? "");
+  });
 }
 const divide = (numerator: number | null, denominator: number | null) => numerator != null && denominator != null && denominator > 0 ? numerator / denominator : null;
 const change = (a: number | null, b: number | null) => a != null && b != null && b !== 0 ? (a / b - 1) * 100 : null;
@@ -57,17 +62,20 @@ export function cohortMetrics(snapshot: JourneySnapshot, contactIds: Set<string>
     if (current.some(s => s.status === "active")) active++;
     if (current.some(s => ["past_due", "unpaid"].includes(s.status))) pastDue++;
     if (current.some(s => s.cancelScheduled)) cancellationScheduled++;
-    if (!subs.length || (!current.length && subs.some(s => !s.endedAt))) subscriptionUnknown++;
-    const ended = !current.length && subs.length > 0 && subs.every(s => s.endedAt);
+    const unverifiable = !subs.length || subs.some(s => s.endedAt
+      ? !["canceled", "incomplete_expired"].includes(s.status) || Date.parse(s.endedAt) < Date.parse(s.startedAt)
+      : !["active", "trialing", "past_due", "unpaid", "paused"].includes(s.status));
+    if (unverifiable) subscriptionUnknown++;
+    const ended = !unverifiable && !current.length && subs.length > 0 && subs.every(s => s.endedAt);
     if (ended) churned++;
     const paidAt = firstPaid(contactId);
     const end = ended ? Math.max(...subs.map(s => Date.parse(s.endedAt!))) : asOf;
-    if (subs.length && (current.length || ended)) durations.push(Math.max(0, (end - paidAt) / 86_400_000));
+    if (!unverifiable && (current.length || ended)) durations.push(Math.max(0, (end - paidAt) / 86_400_000));
     for (const n of [30, 90]) {
       const milestone = paidAt + n * 86_400_000;
       // Right censor young and unverifiable cohorts. Renewal/replacement
       // subscriptions are joined by the verified customer/contact identity.
-      if (milestone > asOf || !subs.length) continue;
+      if (milestone > asOf || unverifiable) continue;
       const retained = subs.some(s => Date.parse(s.startedAt) <= milestone && (!s.endedAt || Date.parse(s.endedAt) > milestone));
       if (n === 30) { eligible30++; if (retained) retained30++; }
       else { eligible90++; if (retained) retained90++; }
@@ -95,12 +103,14 @@ export function buildAcquisitionReport(input: {
   names: Map<string, string>; now?: Date; latestJourneyAttempt?: { status: string; finishedAt: Date | null } | null;
   attributionKey?: string; adSetAttribution?: { id: string; name: string; specification: unknown }[];
   latestMetaAttempt?: { status: string } | null;
+  metaOmittedRows?: number;
 }) {
   const { query: q, insights, runs, journey } = input;
+  const coverageRuns = [...runs].sort((a, b) => +(b.finishedAt ?? 0) - +(a.finishedAt ?? 0));
   const now = input.now ?? new Date();
   const window = (since: string, until: string, entityId: string) => {
     const rows = insights.filter(r => r.level === q.level && r.entityId === entityId && r.date >= since && r.date <= until);
-    const complete = covered(runs, since, until);
+    const complete = covered(coverageRuns, since, until);
     const metrics: Bucket = aggregateInsights(rows);
     if (!complete) Object.keys(metrics).forEach(k => { metrics[k as keyof Bucket] = null; });
     else if (!rows.length) { metrics.spendCents = 0; metrics.impressions = 0; metrics.linkClicks = 0; metrics.leads = 0; }
@@ -110,7 +120,7 @@ export function buildAcquisitionReport(input: {
       const target = q.level === "ad" ? touch.adId : q.level === "adset" ? touch.adSetId : touch.campaignId;
       return date && date >= since && date <= until && target === entityId;
     }) : [];
-    return { since, until, complete, metrics, indicativeLeadRate: divide(metrics.leads, metrics.linkClicks), dailyReach: since === until && rows.length === 1 ? rows[0].reach : null, customers: journey ? cohortMetrics(journey, new Set(customers.map(c => c.id)), metrics.spendCents, until) : null };
+    return { since, until, complete, metrics, indicativeLeadRate: divide(metrics.leads, metrics.linkClicks), dailyReach: since === until && rows.length === 1 ? rows[0].reach : null, customers: journey ? cohortMetrics(journey, new Set(customers.map(c => c.id)), q.touch === "first" ? metrics.spendCents : null, until) : null };
   };
   const ids = new Set(insights.filter(r => r.level === q.level).map(r => r.entityId));
   const rows = [...ids].map(entityId => {
@@ -129,7 +139,8 @@ export function buildAcquisitionReport(input: {
       && weeklyCpl.every(v => v != null) && weeklyCpl[0]! > weeklyCpl[1]! && weeklyCpl[1]! > weeklyCpl[2]!;
     let recommendation = "Insufficient evidence for a customer profitability decision. Check attribution before moving budget.";
     if (deteriorating) recommendation = sustained ? "Sustained deterioration across three weekly samples. Review creative and audience overlap; prepare a controlled creative test." : "Compared-period deterioration. Check auction costs, landing-page conversion and creative before changing spend.";
-    if (current.customers && current.customers.payingCustomers >= 10 && current.customers.net > (current.metrics.spendCents ?? Infinity)) recommendation = "Observed customer revenue exceeds cohort spend. Check service margin, retention and unattributed coverage before considering more budget.";
+    if (q.touch === "first" && current.customers && current.customers.payingCustomers >= 10 && current.customers.net > (current.metrics.spendCents ?? Infinity)) recommendation = "Observed customer revenue exceeds cohort spend. Check service margin, retention and unattributed coverage before considering more budget.";
+    if (q.touch === "latest") recommendation += " Latest-touch groups describe return visits; acquisition costs and profitability advice require first-touch attribution.";
     return { entityId, name: input.names.get(entityId) ?? entityId, current, comparison, delta, fatigue: deteriorating && sustained ? "review" : "insufficient_evidence", recommendation };
   }).sort((a, b) => (b.current.metrics.spendCents ?? -1) - (a.current.metrics.spendCents ?? -1));
   const periods = new Map<string, { since: string; until: string }>();
@@ -149,8 +160,9 @@ export function buildAcquisitionReport(input: {
   return {
     query: q, currency: "GBP", generatedAt: now.toISOString(), rows, timeline, sources,
     health: {
+      metaOmittedRows: input.metaOmittedRows ?? 0,
       historicalSince: insights.map(r => r.date).sort()[0] ?? null,
-      currentCovered: covered(runs, q.since, q.until), comparisonCovered: covered(runs, q.compareSince, q.compareUntil),
+      currentCovered: covered(coverageRuns, q.since, q.until), comparisonCovered: covered(coverageRuns, q.compareSince, q.compareUntil),
       metaCheckedAt: runs.map(r => r.finishedAt).filter((v): v is Date => !!v).sort((a, b) => +b - +a)[0]?.toISOString() ?? null,
       metaStale: !runs.some(r => r.finishedAt && +now - +r.finishedAt <= 30 * 3600_000), metaLastAttempt: input.latestMetaAttempt?.status ?? null,
       journeyCheckedAt: journey?.checkedAt ?? null, journeyStale: journey ? +now - Date.parse(journey.checkedAt) > 26 * 3600_000 : null,
@@ -162,6 +174,8 @@ export function buildAcquisitionReport(input: {
     attribution: { reportingWindow: input.attributionKey ?? null, reportTime: "conversion", adSets: input.adSetAttribution ?? [] },
     explanations: [
       "Meta reports conversions on conversion date using the stored explicit attribution window. CRM cohorts use contact creation date and preserve first and latest touch separately.",
+      "Latest-touch customer groups use the latest recorded source for contact-created cohorts. They are descriptive return-visit groups; acquisition costs and customer profitability recommendations are withheld in that mode.",
+      "Meta leads / link clicks is an indicative ratio across reporting dates, including view-through conversions. It is not a verified click-to-customer conversion rate. Failed payments count failed Stripe charge attempts; failures without a charge are not included.",
       "Customer revenue is the verified cohort's captured Stripe payments less refunds observed by the last sync, including later renewals. It is not cash collected only during the advertising dates.",
       "Reach is available for a single day. Across days it cannot be added into a unique audience; frequency is a weighted daily diagnostic.",
       "The latest eight days are provisional. Daily syncs recheck 35 days; late provider corrections outside that window require a historical refresh.",
