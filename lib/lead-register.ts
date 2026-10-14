@@ -238,6 +238,9 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
   const formId = process.env.HIGHLEVEL_LEAD_FORM_ID, calendarId = process.env.HIGHLEVEL_SALES_CALENDAR_ID;
   if (!config.token || !validId(config.locationId) || !validId(formId) || !validId(calendarId)) throw new Error("Lead register connection unavailable");
   const start = new Date(+now - 90 * 86400000), calendarEnd = new Date(+now + 90 * 86400000);
+  // HighLevel treats the date-only end as exclusive. Read through tomorrow,
+  // then reconcileLeads applies the exact checkedAt boundary to every receipt.
+  const submissionEnd = new Date(+now + 86400000).toISOString().slice(0,10);
   const pacedFetch = createHighLevelPacedFetcher();
   async function read(path: string, stage: string): Promise<Row> {
     return readLeadRegisterProvider(path, stage, config.token!, config.apiVersion, pacedFetch);
@@ -245,7 +248,7 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
   async function submissions() {
     const rows: Row[] = [];
     for (let page=1; page<=Math.ceil(config.maxRecords/100);page++) {
-      const q = new URLSearchParams({locationId:config.locationId!,formId:formId!,startAt:start.toISOString().slice(0,10),endAt:now.toISOString().slice(0,10),limit:"100",page:String(page)});
+      const q = new URLSearchParams({locationId:config.locationId!,formId:formId!,startAt:start.toISOString().slice(0,10),endAt:submissionEnd,limit:"100",page:String(page)});
       const d=await read(`/forms/submissions?${q}`, "submissions"), meta=obj(d.meta);
       if (!Array.isArray(d.submissions) || typeof meta.total !== "number") throw new Error("Submission collection incomplete");
       rows.push(...d.submissions as Row[]);
