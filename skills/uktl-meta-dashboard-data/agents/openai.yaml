@@ -1,0 +1,4 @@
+interface:
+  display_name: "UKTL Meta Dashboard Data"
+  short_description: "Open UKTL data, compare ads and check enquiry syncs"
+  default_prompt: "Use $uktl-meta-dashboard-data to show my ad performance and enquiry sync status."

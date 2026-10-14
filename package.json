@@ -12,6 +12,7 @@
     "lint": "eslint && oxlint",
     "typecheck": "tsc --noEmit",
     "test": "node --import=tsx --test tests/*.test.mjs",
+    "test:dashboard-reader": "node --test skills/uktl-meta-dashboard-data/scripts/dashboard.test.mjs",
     "test:browser": "node scripts/browser-smoke.mjs",
     "backfill:meta-history": "node --import=tsx scripts/backfill-meta-history.mjs",
     "test:remote-sync": "node --import=tsx scripts/remote-sync-smoke.mjs",
