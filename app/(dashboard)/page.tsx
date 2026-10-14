@@ -6,6 +6,7 @@ import { AISummaryPanel } from "@/components/ai-summary-panel";
 import { AnomalyBanner } from "@/components/anomaly-banner";
 import { Scorecard } from "@/components/scorecard";
 import { MetricHeroCards } from "@/components/metric-hero-cards";
+import { MonthlyPerformancePanel } from "@/components/monthly-performance-panel";
 import { CreativeLeaderboard } from "@/components/creative-leaderboard";
 import { CreativeBriefGenerator } from "@/components/creative-brief-generator";
 import { Funnel } from "@/components/funnel";
@@ -124,7 +125,7 @@ export default function DashboardHome() {
       <OperatorHeader state={state} period={period} />
       <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <PeriodSelector period={period} onChange={setPeriod} />
-        <p className="text-xs text-muted-foreground">Use the matched comparison to decide where to look next.</p>
+        <div className="flex flex-wrap items-center gap-3"><p className="text-xs text-muted-foreground">Use the matched comparison to decide where to look next.</p><a href="#monthly-performance" className="text-sm font-medium underline underline-offset-4">Monthly history</a></div>
       </div>
       <SyncNotice state={state} />
       <SystemDiagnosticsPanel />
@@ -132,6 +133,7 @@ export default function DashboardHome() {
       <AnomalyBanner state={state} />
       <Scorecard state={state} period={period} />
       <MetricHeroCards state={state} period={period} />
+      <MonthlyPerformancePanel />
       <LeadRegisterPanel />
       <BusinessOutcomesPanel />
       <RecommendationPanel state={state} />

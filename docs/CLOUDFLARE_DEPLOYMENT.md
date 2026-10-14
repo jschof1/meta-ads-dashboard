@@ -3,12 +3,21 @@
 Cloudflare Workers replaces the original Vercel plan under Jack's 2026-09-08
 instruction. No Vercel account or project is required.
 
+Current cloud checks and access gates are recorded in
+[14 October resolution](./CLOUD_RESOLUTION_2026-10-14.md). The initial version,
+September checks and [3 October acceptance](./LIVE_ACCEPTANCE_2026-10-03.md) are
+historical evidence, not proof of today's deployed commit or provider state.
+The PR26 source contains nine migrations, including the new lead-register sync
+lease. Production was observed with eight on 3 October; its current ledger has
+not been re-read from cloud. Existing Worker/database resources and provider
+connections should be reused, with authorized current access and verification.
+
 ## Live resources
 
 - App: https://uktl-meta-dashboard.jackschofield1.workers.dev
 - Cloudflare account: `1d7541992ccacf0931ee0e385daa5e08`
 - Worker: `uktl-meta-dashboard`
-- Verified deployment version: `1558053e-9f19-494b-949f-a80313869609`.
+- Initial verified deployment version: `1558053e-9f19-494b-949f-a80313869609`.
 - Turso organization: `jschof1`, **Free** plan (confirmed in dashboard).
 - Database: `uktl-meta-dashboard`, SQLite/libSQL, Ireland (`aws-eu-west-1`).
 - Database ID: `01a08139-ff01-77b7-93ee-0b0135e9a00f`.
@@ -29,13 +38,26 @@ Sources checked 2026-09-08: [Workers pricing](https://developers.cloudflare.com/
 
 ## Build and deploy
 
+Release only the merged, independently reviewed commit with every CI gate green.
+The commands below are sequential gates, not permission to bypass a failing audit.
+The PR26 follow-up has **not** been merged or deployed: its upstream dependency
+audit is still red. The encrypted operator session was verified on the previous
+host on 3 October. It is not available in this cloud runtime; arrange protected
+access to existing credentials/session without posting values or restarting
+the stopped laptop/Mac mini workers.
+
 ```bash
-npm ci
-npm run lint
-npm run typecheck
-npm test
-npm run build:cloudflare
-npx wrangler deploy --dry-run
+npm ci &&
+npm audit --audit-level=high &&
+npm run lint &&
+npm run typecheck &&
+npm test &&
+npm run test:remote-sync &&
+npm run build &&
+npx playwright install chromium &&
+npm run test:browser &&
+npm run build:cloudflare &&
+npx wrangler deploy --dry-run &&
 npm run deploy:cloudflare
 ```
 

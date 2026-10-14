@@ -1,6 +1,9 @@
 import { createHighLevelClient, HighLevelApiError } from "@/lib/highlevel";
+import { createHighLevelPacedFetcher, highLevelRetryDelay, readHighLevelRateLimit, type HighLevelRateLimit } from "@/lib/highlevel-rate-limit";
 import { loadHighLevelSettings } from "@/lib/highlevel-config";
 import { prisma, withDatabaseClient } from "@/lib/db";
+import { randomUUID } from "node:crypto";
+import type { Client } from "@libsql/client";
 
 type Row = Record<string, unknown>;
 const str = (v: unknown) => typeof v === "string" ? v : "";
@@ -17,6 +20,56 @@ export type LeadEntry = {
 };
 export type LeadRegister = { locationId?: string; checkedAt: string; coverageStart: string; calendarEnd: string; entries: LeadEntry[] };
 
+const LEAD_REGISTER_LEASE_MS = 120_000;
+const LEAD_REGISTER_LEASE_RENEW_MS = 30_000;
+
+export class LeadRegisterSyncAlreadyRunningError extends Error {
+  readonly name = "LeadRegisterSyncAlreadyRunningError";
+  constructor() { super("A lead-register refresh is already running"); }
+}
+
+export async function tryAcquireLeadRegisterSyncLease(db: Client, locationId: string, owner: string, now = new Date()): Promise<boolean> {
+  const current = now.toISOString();
+  const expiresAt = new Date(now.getTime() + LEAD_REGISTER_LEASE_MS).toISOString();
+  const result = await db.execute({
+    sql: `INSERT INTO "LeadRegisterSyncLease" ("locationId", "owner", "expiresAt", "updatedAt") VALUES (?, ?, ?, ?)
+      ON CONFLICT("locationId") DO UPDATE SET "owner" = excluded."owner", "expiresAt" = excluded."expiresAt", "updatedAt" = excluded."updatedAt"
+      WHERE "LeadRegisterSyncLease"."expiresAt" <= excluded."updatedAt" RETURNING "locationId"`,
+    args: [locationId, owner, expiresAt, current],
+  });
+  return result.rows.length === 1;
+}
+
+export async function releaseLeadRegisterSyncLease(db: Client, locationId: string, owner: string): Promise<void> {
+  await db.execute({ sql: 'DELETE FROM "LeadRegisterSyncLease" WHERE "locationId" = ? AND "owner" = ?', args: [locationId, owner] });
+}
+
+function startLeadRegisterLeaseHeartbeat(db: Client, locationId: string, owner: string): { stop: () => Promise<void>; lost: () => boolean } {
+  let stopped = false;
+  let leaseLost = false;
+  let inFlight: Promise<void> | null = null;
+  async function renew(): Promise<void> {
+    if (stopped || inFlight) return inFlight ?? Promise.resolve();
+    inFlight = (async () => {
+      const now = new Date();
+      const result = await db.execute({
+        sql: 'UPDATE "LeadRegisterSyncLease" SET "expiresAt" = ?, "updatedAt" = ? WHERE "locationId" = ? AND "owner" = ? AND "expiresAt" > ?',
+        args: [new Date(now.getTime() + LEAD_REGISTER_LEASE_MS).toISOString(), now.toISOString(), locationId, owner, now.toISOString()],
+      });
+      if (result.rowsAffected !== 1) leaseLost = true;
+    })().catch((error) => {
+      leaseLost = true;
+      console.error("Lead-register sync lease renewal failed", { error: error instanceof Error ? error.name : "unknown" });
+    }).finally(() => { inFlight = null; });
+    return inFlight;
+  }
+  const timer = setInterval(() => { void renew(); }, LEAD_REGISTER_LEASE_RENEW_MS);
+  return {
+    lost: () => leaseLost,
+    async stop() { stopped = true; clearInterval(timer); await inFlight; },
+  };
+}
+
 export type LeadRegisterOutcomes = {
   checkedAt: string;
   contactsCreated: number;
@@ -32,15 +85,15 @@ export type LeadRegisterOutcomes = {
   metaContactsContacted: number;
 };
 
-export function leadRegisterFailureDiagnostic(error: unknown): { stage: string; status: number | null } {
+export function leadRegisterFailureDiagnostic(error: unknown): { stage: string; status: number | null; rateLimit?: HighLevelRateLimit } {
   if (error instanceof HighLevelApiError) return { stage: error.operation, status: error.status };
-  if (error instanceof LeadRegisterProviderError) return { stage: error.stage, status: error.status };
+  if (error instanceof LeadRegisterProviderError) return { stage: error.stage, status: error.status, ...(error.rateLimit ? { rateLimit: error.rateLimit } : {}) };
   return { stage: "unclassified", status: null };
 }
 
 export class LeadRegisterProviderError extends Error {
   readonly name = "LeadRegisterProviderError";
-  constructor(readonly stage: string, readonly status: number | null = null) {
+  constructor(readonly stage: string, readonly status: number | null = null, readonly rateLimit: HighLevelRateLimit | null = null) {
     super(`Lead register ${stage} request failed`);
   }
 }
@@ -67,14 +120,18 @@ export async function readLeadRegisterProvider(
       try { return obj(await response.json()); }
       catch { throw new LeadRegisterProviderError(stage); }
     }
-    if ((response.status === 429 && attempt < 1) || (response.status >= 500 && attempt < 2)) {
-      const retryAfter = Number(response.headers.get("retry-after"));
-      const interval = Number(response.headers.get("x-ratelimit-interval-milliseconds"));
-      const delay = response.status === 429
-        ? Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000
-          : Number.isFinite(interval) && interval > 0 ? interval : 10_000
-        : 250 * 2 ** attempt;
-      await sleep(Math.min(10_000, delay));
+    if (response.status === 429) {
+      const rateLimit = readHighLevelRateLimit(response.headers);
+      console.warn("HighLevel lead-register request rate-limited", { stage, ...rateLimit });
+      const delay = highLevelRetryDelay(rateLimit);
+      if (rateLimit.dailyRemaining === 0 || attempt >= 1 || delay == null || delay > 10_000) {
+        throw new LeadRegisterProviderError(stage, response.status, rateLimit);
+      }
+      await sleep(delay + 250);
+      continue;
+    }
+    if (response.status >= 500 && attempt < 2) {
+      await sleep(250 * 2 ** attempt);
       continue;
     }
     throw new LeadRegisterProviderError(stage, response.status);
@@ -181,8 +238,9 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
   const formId = process.env.HIGHLEVEL_LEAD_FORM_ID, calendarId = process.env.HIGHLEVEL_SALES_CALENDAR_ID;
   if (!config.token || !validId(config.locationId) || !validId(formId) || !validId(calendarId)) throw new Error("Lead register connection unavailable");
   const start = new Date(+now - 90 * 86400000), calendarEnd = new Date(+now + 90 * 86400000);
+  const pacedFetch = createHighLevelPacedFetcher();
   async function read(path: string, stage: string): Promise<Row> {
-    return readLeadRegisterProvider(path, stage, config.token!, config.apiVersion);
+    return readLeadRegisterProvider(path, stage, config.token!, config.apiVersion, pacedFetch);
   }
   async function submissions() {
     const rows: Row[] = [];
@@ -213,7 +271,7 @@ export async function fetchLeadRegister(now = new Date()): Promise<LeadRegister>
     }
     throw new Error("Conversation collection exceeds limit");
   }
-  const [contacts, forms, calendar, inbox] = await Promise.all([createHighLevelClient({config}).listContacts(), submissions(), read(`/calendars/events?${new URLSearchParams({locationId:config.locationId,calendarId,startTime:String(+start),endTime:String(+calendarEnd)})}`, "calendar"), conversations()]);
+  const [contacts, forms, calendar, inbox] = await Promise.all([createHighLevelClient({config, fetcher:pacedFetch}).listContacts(), submissions(), read(`/calendars/events?${new URLSearchParams({locationId:config.locationId,calendarId,startTime:String(+start),endTime:String(+calendarEnd)})}`, "calendar"), conversations()]);
   if(contacts.truncated || !Array.isArray(calendar.events)) throw new Error("Lead register collection incomplete");
   return { ...reconcileLeads(contacts.items,forms,calendar.events as Row[],start,now,calendarEnd,inbox,formId), locationId: config.locationId };
 }
@@ -226,16 +284,51 @@ export async function readLeadRegister(): Promise<LeadRegister | null> {
     return result.rows[0] ? JSON.parse(String(result.rows[0].payload)) as LeadRegister : null;
   });
 }
-export async function syncLeadRegister() {
-  const fresh=await fetchLeadRegister(),locationId=process.env.HIGHLEVEL_LOCATION_ID!;
-  return withDatabaseClient(prisma,async client=>{
-    const tx=await client.transaction("write");
+let activeLeadRegisterSync: Promise<LeadRegister> | null = null;
+
+export function syncLeadRegister(): Promise<LeadRegister> {
+  if (activeLeadRegisterSync) return activeLeadRegisterSync;
+  activeLeadRegisterSync = syncLeadRegisterWithLease().finally(() => { activeLeadRegisterSync = null; });
+  return activeLeadRegisterSync;
+}
+
+async function syncLeadRegisterWithLease(): Promise<LeadRegister> {
+  const locationId = process.env.HIGHLEVEL_LOCATION_ID;
+  if (!validId(locationId)) throw new Error("Lead register location unavailable");
+  const owner = randomUUID();
+  return withDatabaseClient(prisma, async (client) => {
+    const acquired = await tryAcquireLeadRegisterSyncLease(client, locationId, owner);
+    if (!acquired) throw new LeadRegisterSyncAlreadyRunningError();
+    const heartbeat = startLeadRegisterLeaseHeartbeat(client, locationId, owner);
     try {
-      const rows=await tx.execute({sql:'SELECT payload FROM LeadRegisterSnapshot WHERE locationId = ?',args:[locationId]});
-      const previous=rows.rows[0]?JSON.parse(String(rows.rows[0].payload)) as LeadRegister:null;
-      const data=mergeRegister(previous,fresh);
-      await tx.execute({sql:'INSERT INTO LeadRegisterSnapshot(locationId,payload,checkedAt) VALUES(?,?,?) ON CONFLICT(locationId) DO UPDATE SET payload=excluded.payload,checkedAt=excluded.checkedAt',args:[locationId,JSON.stringify(data),data.checkedAt]});
-      await tx.commit(); return data;
-    } catch(error){await tx.rollback();throw error;}finally{tx.close();}
+      const fresh = await fetchLeadRegister();
+      if (heartbeat.lost()) throw new Error("Lead-register sync lease was lost before commit");
+      const tx = await client.transaction("write");
+      try {
+        const now = new Date().toISOString();
+        const lease = await tx.execute({
+          sql: 'SELECT "owner" FROM "LeadRegisterSyncLease" WHERE "locationId" = ? AND "owner" = ? AND "expiresAt" > ?',
+          args: [locationId, owner, now],
+        });
+        if (heartbeat.lost() || lease.rows.length !== 1) throw new Error("Lead-register sync lease was lost before commit");
+        const rows = await tx.execute({ sql: 'SELECT payload FROM LeadRegisterSnapshot WHERE locationId = ?', args: [locationId] });
+        const previous = rows.rows[0] ? JSON.parse(String(rows.rows[0].payload)) as LeadRegister : null;
+        const data = mergeRegister(previous, fresh);
+        await tx.execute({
+          sql: 'INSERT INTO LeadRegisterSnapshot(locationId,payload,checkedAt) VALUES(?,?,?) ON CONFLICT(locationId) DO UPDATE SET payload=excluded.payload,checkedAt=excluded.checkedAt',
+          args: [locationId, JSON.stringify(data), data.checkedAt],
+        });
+        await tx.commit();
+        return data;
+      } catch (error) {
+        await tx.rollback();
+        throw error;
+      } finally { tx.close(); }
+    } finally {
+      await heartbeat.stop();
+      await releaseLeadRegisterSyncLease(client, locationId, owner).catch((error) => {
+        console.error("Lead-register sync lease release failed", { error: error instanceof Error ? error.name : "unknown" });
+      });
+    }
   });
 }

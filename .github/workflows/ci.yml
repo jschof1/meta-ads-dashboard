@@ -30,6 +30,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:dashboard-reader
       - run: npm run test:remote-sync
       - run: npm run build
       - run: npx playwright install --with-deps chromium

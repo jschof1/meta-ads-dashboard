@@ -4,14 +4,24 @@ import { normalizeClientAddress, runScheduledSync } from "../lib/cloudflare-sche
 
 test("Cloudflare schedules call only the matching protected route and propagate failures", async () => {
   const env = { CRON_SECRET: "fixture-secret-with-at-least-32-characters", HIGHLEVEL_SYNC_ENABLED: "true" };
+  const messages = [];
+  const originalInfo = console.info;
+  console.info = (...args) => messages.push(args);
+  try {
   for (const [cron, path] of [["45 * * * *", "sync-leads"], ["0 6 * * *", "sync-meta"], ["30 6 * * *", "sync-highlevel"]]) {
-    await runScheduledSync({ cron }, env, async (request) => {
+    await runScheduledSync({ cron, scheduledTime: 1_791_109_500_000 }, env, async (request) => {
       assert.equal(new URL(request.url).pathname, `/api/cron/${path}`);
       assert.equal(request.headers.get("authorization"), `Bearer ${env.CRON_SECRET}`);
       return new Response("ok");
     });
   }
+  assert.equal(messages.length, 6);
+  assert.deepEqual(messages[0], ["Dashboard scheduled sync started", { cron: "45 * * * *", scheduledTime: 1_791_109_500_000, path: "/api/cron/sync-leads" }]);
+  assert.equal(messages[1][0], "Dashboard scheduled sync completed");
+  assert.equal(messages[1][1].status, 200);
+  assert.equal("authorization" in messages[1][1], false);
   await assert.rejects(runScheduledSync({ cron: "0 6 * * *" }, env, async () => new Response("failed", { status: 500 })), /HTTP 500/);
+  } finally { console.info = originalInfo; }
 });
 
 test("disabled CRM, missing credentials and unknown schedules never dispatch", async () => {

@@ -106,13 +106,14 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   const crmOpportunityColumns = await db.$queryRawUnsafe('PRAGMA table_info("CrmOpportunity")');
   const metaActionColumns = await db.$queryRawUnsafe('PRAGMA table_info("MetaAction")');
   const authRateLimitColumns = await db.$queryRawUnsafe('PRAGMA table_info("AuthRateLimit")');
+  const leadRegisterSyncLeaseColumns = await db.$queryRawUnsafe('PRAGMA table_info("LeadRegisterSyncLease")');
   const actionLogColumns = await db.$queryRawUnsafe('PRAGMA table_info("ActionLog")');
   const crmContactIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmContact")');
   const crmOpportunityIndexes = await db.$queryRawUnsafe('PRAGMA index_list("CrmOpportunity")');
   const metaActionIndexes = await db.$queryRawUnsafe('PRAGMA index_list("MetaAction")');
 
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register"]);
-  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "RecommendationScopeState", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity", "MetaAction", "AuthRateLimit"]) {
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register", "20261004123000_lead_register_sync_lease"]);
+  for (const table of ["Campaign", "AdSet", "Ad", "Creative", "DailyInsight", "SyncRun", "Recommendation", "RecommendationScopeState", "AiBriefing", "CrmSyncRun", "CrmContact", "CrmOpportunity", "MetaAction", "AuthRateLimit", "LeadRegisterSyncLease"]) {
     assert.ok(tables.some((row) => row.name === table), `missing ${table}`);
   }
   for (const [name, columns] of [["Campaign", campaignColumns], ["AdSet", adSetColumns], ["Ad", adColumns], ["Creative", creativeColumns]]) {
@@ -147,6 +148,9 @@ test("applies the committed schema through Prisma migrate deploy", async () => {
   for (const column of ["keyHash", "count", "resetAt", "updatedAt"]) {
     assert.ok(authRateLimitColumns.some((candidate) => candidate.name === column), `AuthRateLimit missing ${column}`);
   }
+  for (const column of ["locationId", "owner", "expiresAt", "updatedAt"]) {
+    assert.ok(leadRegisterSyncLeaseColumns.some((candidate) => candidate.name === column), `LeadRegisterSyncLease missing ${column}`);
+  }
   assert.ok(crmContactIndexes.some((index) => index.name === "CrmContact_locationId_highLevelId_key"), "CrmContact missing location-scoped uniqueness");
   assert.ok(crmOpportunityIndexes.some((index) => index.name === "CrmOpportunity_locationId_pipelineId_highLevelId_key"), "CrmOpportunity missing location/pipeline-scoped uniqueness");
   assert.ok(metaActionIndexes.some((index) => index.name === "MetaAction_idempotencyKey_key"), "MetaAction missing idempotency uniqueness");
@@ -174,7 +178,7 @@ test("upgrades a populated PR03 database without dropping durable rows", async (
   assert.equal(campaign.name, "Existing campaign");
   assert.equal(insight.spendMinorUnits, 1234);
   assert.equal(insight.scopeKey, "account");
-  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register"]);
+  assert.deepEqual(migrations.map((row) => row.migration_name), ["20260904170000_pr03_sync_data", "20260904193000_pr05_operator_dashboard", "20260904210000_pr06_recommendation_engine", "20260905120000_pr07_ai_briefings", "20260905133000_pr08_highlevel_attribution", "20260905143000_pr09_approved_meta_actions", "20260905160000_pr10_production_hardening", "20260909140000_lead_register", "20261004123000_lead_register_sync_lease"]);
   await upgraded.$disconnect();
 });
 
