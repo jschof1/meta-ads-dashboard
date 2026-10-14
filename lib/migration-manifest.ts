@@ -17,6 +17,7 @@ export const EXPECTED_MIGRATIONS = [
   "20260905143000_pr09_approved_meta_actions",
   "20260905160000_pr10_production_hardening",
   "20260909140000_lead_register",
+  "20261004123000_lead_register_sync_lease",
 ] as const;
 
 export const EXPECTED_MIGRATION_CHECKSUMS: Record<string, string> = {
@@ -28,6 +29,7 @@ export const EXPECTED_MIGRATION_CHECKSUMS: Record<string, string> = {
   "20260905143000_pr09_approved_meta_actions": "74fa2cbda628d545ef18934876d0232a055ae68ccf61e65fe225023053160f42",
   "20260905160000_pr10_production_hardening": "3bb38fc00c53d6ce7843d2aecc73de2f5e61dc2fbcd6eaf276ce24c4b3f8a94d",
   "20260909140000_lead_register": "bff12d09989b4efdfcf749ed6db4c092cd43d9932df5672ad0d85b7b5670709c",
+  "20261004123000_lead_register_sync_lease": "1f30dc239ee0f52b43b2d09b13c3d89e39cba4958fe6eefe25d3a5ecf32a2ed4",
 };
 
 export const CURRENT_SCHEMA_MIGRATION = EXPECTED_MIGRATIONS[EXPECTED_MIGRATIONS.length - 1];

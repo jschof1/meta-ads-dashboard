@@ -2,6 +2,7 @@ import {
   HIGHLEVEL_BASE_URL,
   type HighLevelSettings,
 } from "@/lib/highlevel-config";
+import { highLevelRetryDelay, readHighLevelRateLimit } from "@/lib/highlevel-rate-limit";
 
 const PAGE_SIZE = 100;
 const MAX_RESPONSE_CHARS = 1_000_000;
@@ -113,18 +114,7 @@ function pipelineFrom(payload: Record<string, unknown>, operation: string): High
   return { id, locationId, stages };
 }
 
-function retryAfterMilliseconds(response: Response): number | null {
-  const raw = response.headers.get("retry-after")?.trim();
-  const seconds = Number(raw);
-  if (raw && Number.isFinite(seconds) && seconds >= 0) return Math.min(10_000, Math.round(seconds * 1_000));
-  if (response.status !== 429) return null;
-  const interval = Number(response.headers.get("x-ratelimit-interval-milliseconds"));
-  return Number.isFinite(interval) && interval > 0 ? Math.min(10_000, Math.round(interval)) : 10_000;
-}
-
-function isRetryable(status: number): boolean {
-  return status === 429 || status >= 500;
-}
+const MAX_INLINE_RATE_LIMIT_WAIT_MS = 10_000;
 
 function boundedPath(path: string): string {
   // All paths are assembled internally. Refuse an accidental absolute URL so
@@ -171,8 +161,21 @@ export function createHighLevelClient(options: ClientOptions): HighLevelClient {
       }
 
       if (!response.ok) {
-        if (isRetryable(response.status) && attempt < (response.status === 429 ? 1 : maxRetries)) {
-          await sleep(retryAfterMilliseconds(response) ?? Math.min(2_000, 250 * 2 ** attempt));
+        if (response.status === 429) {
+          const rate = readHighLevelRateLimit(response.headers);
+          console.warn("HighLevel API request rate-limited", { operation, ...rate });
+          const delay = highLevelRetryDelay(rate);
+          if (rate.dailyRemaining !== 0 && attempt < 1 && delay != null && delay <= MAX_INLINE_RATE_LIMIT_WAIT_MS) {
+            await sleep(delay + 250);
+            continue;
+          }
+        } else if (response.status >= 500 && attempt < maxRetries) {
+          const retryAfter = readHighLevelRateLimit(response.headers).retryAfterMs;
+          const delay = retryAfter ?? Math.min(2_000, 250 * 2 ** attempt);
+          if (delay > MAX_INLINE_RATE_LIMIT_WAIT_MS) {
+            throw new HighLevelApiError(operation, response.status, `HighLevel ${operation} returned HTTP ${response.status}`);
+          }
+          await sleep(delay + (retryAfter == null ? 0 : 250));
           continue;
         }
         throw new HighLevelApiError(operation, response.status, `HighLevel ${operation} returned HTTP ${response.status}`);

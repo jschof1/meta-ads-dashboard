@@ -132,7 +132,7 @@ test("retries transient provider responses without following provider-controlled
   const result = await client.listOpportunities();
   assert.equal(result.items.length, 1);
   assert.equal(attempts, 2);
-  assert.deepEqual(sleeps, [1000]);
+  assert.deepEqual(sleeps, [1250]);
 });
 
 test("waits for HighLevel's rate-limit window before retrying contact reads", async () => {
@@ -151,7 +151,29 @@ test("waits for HighLevel's rate-limit window before retrying contact reads", as
   });
   assert.equal((await client.listContacts()).items.length, 1);
   assert.equal(attempts, 2);
-  assert.deepEqual(sleeps, [10000]);
+  assert.deepEqual(sleeps, [10250]);
+});
+
+test("does not retry a depleted daily quota or retry before a long Retry-After window", async () => {
+  const config = loadHighLevelSettings(env());
+  let attempts = 0;
+  const sleeps = [];
+  const exhausted = createHighLevelClient({ config, sleep: async (ms) => sleeps.push(ms), fetcher: async () => {
+    attempts++;
+    return new Response("busy", { status: 429, headers: { "x-ratelimit-daily-remaining": "0", "retry-after": "1" } });
+  } });
+  await assert.rejects(() => exhausted.listContacts(), (error) => error instanceof HighLevelApiError && error.status === 429);
+  assert.equal(attempts, 1);
+  assert.deepEqual(sleeps, []);
+
+  attempts = 0;
+  const longRetry = createHighLevelClient({ config, sleep: async (ms) => sleeps.push(ms), fetcher: async () => {
+    attempts++;
+    return new Response("busy", { status: 429, headers: { "retry-after": "30", "x-ratelimit-interval-milliseconds": "10000" } });
+  } });
+  await assert.rejects(() => longRetry.listContacts(), (error) => error instanceof HighLevelApiError && error.status === 429);
+  assert.equal(attempts, 1);
+  assert.deepEqual(sleeps, []);
 });
 
 test("fails closed on malformed responses and provider errors without exposing the token", async () => {

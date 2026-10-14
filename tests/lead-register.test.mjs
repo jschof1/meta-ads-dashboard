@@ -74,11 +74,24 @@ test('retries transient lead-register provider failures and reports only safe di
  let calls=0;const delays=[];
  const fetcher=async()=>{calls++;return calls<3?new Response('',{status:calls===1?429:503}):Response.json({events:[]});};
  const result=await readLeadRegisterProvider('/calendars/events','calendar','private-token','v3',fetcher,async ms=>delays.push(ms));
- assert.deepEqual(result,{events:[]});assert.equal(calls,3);assert.deepEqual(delays,[10000,500]);
+ assert.deepEqual(result,{events:[]});assert.equal(calls,3);assert.deepEqual(delays,[10250,500]);
  calls=0;
  await assert.rejects(()=>readLeadRegisterProvider('/forms/submissions','submissions','private-token','v3',async()=>{calls++;return new Response('',{status:401});}),error=>{
   assert.deepEqual(leadRegisterFailureDiagnostic(error),{stage:'submissions',status:401});
   assert.equal(JSON.stringify(error).includes('private-token'),false);return true;
+ });
+ assert.equal(calls,1);
+});
+
+test('does not retry a daily-quota 429 and includes parsed numeric headers in safe diagnostics', async () => {
+ let calls=0;
+ await assert.rejects(()=>readLeadRegisterProvider('/forms/submissions','submissions','private-token','v3',async()=>{
+  calls++;
+  return new Response('',{status:429,headers:{'x-ratelimit-daily-remaining':'0','x-ratelimit-max':'100','x-ratelimit-remaining':'0','x-ratelimit-interval-milliseconds':'10000'}});
+ }),error=>{
+  assert.deepEqual(leadRegisterFailureDiagnostic(error),{stage:'submissions',status:429,rateLimit:{dailyLimit:null,dailyRemaining:0,intervalMs:10000,shortLimit:100,shortRemaining:0,retryAfterMs:null}});
+  assert.equal(JSON.stringify(error).includes('private-token'),false);
+  return true;
  });
  assert.equal(calls,1);
 });
