@@ -4,23 +4,23 @@ Owner: Jack approves consequential production changes; implementation and verifi
 
 ## Phase 1 — saved reporting and historical recovery
 
-Approval target: merge the reviewed branch, apply the two pending additive migrations through the existing Turso migration workflow, deploy the existing Cloudflare Worker with customer sync **disabled**, and import January–13 October daily Meta history in monthly batches. Preserve current monthly UI, schedules, saved data, Meta write gate and CRM stage gate.
+Approval target: merge the reviewed branch, apply the one pending additive customer migration through the existing Turso migration workflow, and deploy the existing Cloudflare Worker with customer sync **disabled**. Preserve current monthly UI, November 2025 history, schedules, saved data, Meta write gate and CRM stage gate. A separate authorised task has already applied the ninth lead-register lease migration and imported historical Meta data; this task independently verified those saved records and must not repeat that import unnecessarily.
 
 The existing release's security checks must remain green. Record the pre-release Worker version, applied migration checksums and scoped daily row counts. Use the existing backup/recovery workflow before database mutation. Apply only committed migrations through `scripts/apply-turso-migrations.mjs`; do not guess or reset a baseline.
 
 Plan, with no provider access or writes:
 
 ```sh
-node --import=tsx scripts/backfill-meta.mts --since=2026-01-01 --until=2026-10-13
+npm run backfill:meta-history -- --since=2026-01-01 --until=2026-10-13
 ```
 
 After approval, execute with existing credentials loaded privately into the operator environment:
 
 ```sh
-META_HISTORY_APPLY_APPROVED=yes node --import=tsx scripts/backfill-meta.mts --since=2026-01-01 --until=2026-10-13 --apply
+META_HISTORY_APPLY_APPROVED=yes npm run backfill:meta-history -- --since=2026-01-01 --until=2026-10-13 --apply
 ```
 
-Run one normal current Meta refresh afterwards, then reconcile the £197 advert's February and September figures against the recorded audit. Verify repeat import leaves daily identities/counts stable; retain successful run coverage, attribution keys, currency and time zone. A failed batch retains previous data; retry that month, never sum imported snapshots.
+Use the plan/apply command only if a correction or missing range requires it, with approval for that write. Run one normal current Meta refresh after deployment to collect the expanded CTR/attribution fields, then reconcile the £197 advert's February and September figures against the recorded audit. Repeat import must leave daily identities/counts stable; retain successful run coverage, attribution keys, currency and time zone. A failed batch retains previous data; retry that month, never sum imported snapshots.
 
 Set the approved recent-refresh configuration to 35 days; an existing explicit `META_RECENT_REFRESH_DAYS=7` override would otherwise take precedence over the new default. Check the saved run's requested date range after deployment.
 

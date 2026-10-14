@@ -53,6 +53,20 @@ test("the same original touch can gain newly verified IDs without overwriting it
   assert.equal(missingSource.first.source, "google"); assert.equal(missingSource.first.adId, null);
 });
 
+test("a same-channel provider rewrite cannot replace an originally unverified advert", () => {
+  const original = preserveAttribution({ attributionSource: touch }, []);
+  const rewritten = preserveAttribution({ attributionSource: { utmSource: "fb_ad", adId: "444444444" } }, [{ adId: "444444444", adSetId: "555555555", campaignId: "666666666" }], original);
+  assert.equal(rewritten.first.adId, null); assert.equal(rewritten.firstConflict, true);
+  assert.equal(rewritten.first.providerTouchKey, original.first.providerTouchKey);
+  const sourceOnly = preserveAttribution({ attributionSource: { utmSource: "fb_ad" } }, identities);
+  const later = preserveAttribution({ attributionSource: touch }, identities, sourceOnly);
+  assert.equal(later.first.adId, null); assert.equal(later.firstConflict, true, "channel similarity cannot identify the original click");
+  const noChannel = preserveAttribution({ attributionSource: { adId: "111111111" } }, []);
+  assert.match(noChannel.first.providerTouchKey, /^[a-f0-9]{64}$/);
+  const noChannelRewrite = preserveAttribution({ attributionSource: { adId: "444444444" } }, [{ adId: "444444444", adSetId: "555555555", campaignId: "666666666" }], noChannel);
+  assert.equal(noChannelRewrite.first.adId, null); assert.equal(noChannelRewrite.firstConflict, true);
+});
+
 test("contradictory owned hierarchy IDs quarantine all advert attribution", () => {
   const catalogue = [...identities, { adId: "444444444", adSetId: "555555555", campaignId: "666666666" }];
   for (const raw of [{ utmSource: "fb_ad", adId: "111111111", adset_id: "555555555", campaign_id: "666666666" }, { utmSource: "fb_ad", adset_id: "222222222", campaign_id: "666666666" }]) {

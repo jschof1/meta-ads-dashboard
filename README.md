@@ -24,7 +24,7 @@ The acquisition panel adds daily/weekly/monthly/custom Meta comparisons and inde
 
 See the [14 October audit](docs/CUSTOMER_ACQUISITION_AUDIT_2026-10-14.md) and [phased release checklist](docs/CUSTOMER_ACQUISITION_RELEASE.md) for historical recovery, reconciliation, remaining tracking gaps, safe testing and production approval. The customer schedule at 07:15 UTC is disabled by default. It requires `CUSTOMER_JOURNEY_SYNC_ENABLED=true`, an account-verified restricted `STRIPE_READ_KEY`, existing HighLevel read access and the exact sales calendar/form/pipeline configuration. Qualification mappings stay blank until verified. No new conversion sender is included.
 
-Meta refreshes default to 35 days to restate delayed results. Existing deployments with an explicit `META_RECENT_REFRESH_DAYS` retain their configured override until the release changes it. Historical imports use `scripts/backfill-meta.mts`, which plans without provider calls unless its explicit approval/apply gates are met.
+Meta refreshes default to 35 days to restate delayed results. Existing deployments with an explicit `META_RECENT_REFRESH_DAYS` retain their configured override until the release changes it. The existing `npm run backfill:meta-history` now plans without provider calls unless its explicit approval/apply gates are met; approved repairs run in monthly batches.
 
 ## Stack
 

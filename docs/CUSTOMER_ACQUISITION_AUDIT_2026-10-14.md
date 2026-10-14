@@ -1,6 +1,6 @@
 # Customer acquisition audit — 14 October 2026
 
-Status: implementation prepared on a review branch. Production migrations, historical imports, customer scheduling, advert URLs and conversion workflows have **not** been changed by this work. The commercial success criterion remains open until tracking is corrected and the approved release is verified live.
+Status: implementation prepared on a review branch. Production migrations, historical imports, customer scheduling, advert URLs and conversion workflows have **not** been changed by this task. Another authorised dashboard task released monthly/history improvements during the audit; current main is preserved and the resulting production history was independently rechecked. The commercial success criterion remains open until tracking is corrected and the approved customer release is verified live.
 
 ## What Jack can use this for
 
@@ -13,8 +13,8 @@ Compare the £197 advert with February using actual daily Meta data, then distin
 | Hosting | Existing Cloudflare Worker `uktl-meta-dashboard`; Turso/libSQL remains the durable database. No replacement infrastructure. |
 | Meta | UKTL account `act_1357893439073996`, GBP, Europe/London, Marketing API v26.0. Account, campaign, ad set and ad daily insights already work. Pagination, bounded retries, adaptive creative paging, leases and atomic snapshot writes are preserved. |
 | Updates | Meta daily at 06:00 UTC; saved lead register hourly at minute 45. CRM stage sync remains separately gated. New customer schedule is prepared for 07:15 UTC and disabled. |
-| Saved production history at audit | Daily insights begin 11 June 2026. Latest successful scheduled Meta run: 14 October 06:01 UTC. A prior failed run recovered; keep the existing failure monitoring. |
-| Pending schema | Production had eight migrations at audit. The existing lead-register lease migration and the new additive customer snapshot migration are pending. |
+| Saved production history | At the initial audit, daily insights began 11 June. Rechecked at 17:10 UTC after the separate authorised history release: all four levels now begin 20 November 2025 and extend through 14 October 2026. There are 3,034 daily insight rows. Latest successful history run finished 16:55:31 UTC, requesting 1 November–14 October. |
+| Pending schema | Production now has nine migrations, including the existing lead-register lease. Only the new additive customer snapshot migration remains pending. |
 | Attribution | Existing explicit reporting window is seven-day click plus one-day view, using conversion date. Live ad set additionally includes one-day engaged-video view. These totals need not match Ads Manager's ad set attribution totals. |
 | Advert URLs | All 26 listed ads use source, placement, campaign name and ad name; none carries stable campaign/ad set/ad IDs in its URL tags. |
 | CRM | 2,716 contacts read with complete pagination; two tagged test records excluded. 399 opportunities across the existing pipelines, 183 CRM transactions, 201 calendar events in the audited historical range. |
@@ -46,7 +46,7 @@ Payment failure counts cover failed Stripe charge attempts. Failures that never 
 
 ## Recoverable history and the £197 advert
 
-Successfully retrieved **2,731 daily insight rows across all four reporting levels**, covering requested months from 1 January to 13 October 2026. Private raw evidence and an isolated local review database were saved outside Git. No production history import has run. Months with no delivery on particular dates legitimately return no row; only a successful complete request establishes coverage. Missing action fields remain unknown.
+This task independently retrieved **2,731 daily insight rows across all four reporting levels**, covering requested months from 1 January to 13 October 2026. Private raw evidence and an isolated local review database were saved outside Git. The separate authorised history release subsequently imported November 2025 onward into production. Read-only reconciliation of the saved £197 advert's January–13 October figures matches the direct audit below, with no unknown lead days for that advert. Re-importing that interval is unnecessary unless provider corrections require it. Months with no delivery on particular dates legitimately return no row; only a successful complete request establishes coverage. Missing action fields remain unknown.
 
 Advert: `6914088373739` — BOF - Static - 197 Direct Offer - Price Lead. The same explicit attribution window and conversion-date reporting are used throughout.
 
@@ -65,24 +65,24 @@ Advert: `6914088373739` — BOF - Static - 197 Direct Offer - Price Lead. The sa
 
 February to September: CPL approximately **+75%**, CPM **+99%**, link CTR **−15%**. The deterioration is real at Meta lead-event level. Auction cost, audience overlap, landing-page conversion and creative all warrant investigation. Age alone does not establish fatigue; July also shows this is not a simple uninterrupted decline. Paying-customer profitability per advert cannot be recovered from these historical source names.
 
-Historical limitations: missing ad IDs, absent qualification timestamps, unrecorded attendance and individual event delivery/deduplication cannot be reconstructed reliably from names or dates. Current GHL stages alone do not provide every historic stage transition. Imported contact creation dates may differ from the actual first enquiry, so cohort labels explicitly say contact-created cohort. No such gaps are filled with guessed values.
+Historical limitations: missing ad IDs, absent qualification timestamps, unrecorded attendance, past attribution-setting changes and individual event delivery/deduplication cannot be reconstructed reliably from names or dates. Current GHL stages alone do not provide every historic stage transition. Future snapshots preserve witnessed qualification, booking, attendance and won milestones; they do not invent earlier transition times. Imported contact creation dates may differ from the actual first enquiry, so cohort labels explicitly say contact-created cohort. No such gaps are filled with guessed values.
 
 ## Prepared implementation
 
 - Authenticated, uncached acquisition endpoint using saved data only; opening the dashboard makes no new CRM/Stripe requests.
 - Daily, Monday-based weekly, monthly and custom comparisons; rolling 7/14/30 completed-day presets and last-month-versus-February shortcut; campaign, ad set and ad breakdowns.
 - Spend, impressions, daily reach, weighted daily frequency, CPM, link CTR, all-click CPC, primary Meta leads/CPL, indicative leads-to-link-click ratio and attribution settings. Ratios use summed numerators/denominators. Multi-day unique reach is deliberately unavailable.
-- Preserved first touch and independent latest touch, checked against account-owned IDs and hierarchy. Provider rewrites flag a conflict and retain original attribution.
+- Preserved first touch and independent latest touch, checked against completed UKTL-owned runs and consistent hierarchy. Missing IDs may be enriched when the same original touch becomes verifiable. Contradictory IDs are quarantined; channel rewrites retain original attribution and flag a conflict. Latest-touch return-visit groups withhold acquisition costs and customer profitability advice.
 - Normalized CRM/calendar/payment/subscription snapshots, exact account/location guards, complete-pagination checks, retries, pacing, overlapping-writer protection, expired-run handling and preservation of the last complete snapshot on failure.
 - Cohort cost per verified qualified lead, booked meeting and payer when identifiers/evidence exist; captured/refunded/net revenue, active/past-due/ended subscriptions and censored 30/90-day retention. Young cohorts are excluded, and fewer than ten eligible customers is labelled insufficient evidence.
 - Source-level customer quality when advert IDs are missing; no spend allocation to an unknown source. Cohort revenue includes later renewals observed by the snapshot date, rather than pretending it was all collected during the advert spend period.
 - Multi-indicator deterioration and a three-complete-week sustained check. Recommendations are advisory; no automatic advert or budget actions.
-- Tracking health for history coverage, attribution gaps/conflicts, unmatched customers/charges, failed syncs, freshness, provisional conversions and unverified qualification.
-- Bounded historical operator command that plans without credentials or provider access, then reuses the existing idempotent daily writer only with an explicit apply gate.
+- Tracking health for history coverage, omitted/stale rows, attribution gaps/conflicts, unmatched customers/charges, failed syncs, freshness, provisional conversions and unverified qualification. Skipped malformed rows cannot establish zero delivery; historical result-event types must match before counts can be called leads.
+- The existing historical operator command now plans without credentials or provider access, then reuses the existing idempotent daily writer in monthly batches only with an explicit apply gate. No duplicate import tool.
 
 The new storage omits names, email addresses, phones, full landing URLs, click IDs, IPs and Stripe client secrets. Provider/contact IDs remain pseudonymous personal data and stay behind existing authentication and database controls. They are not anonymous data. A lawful retention/erasure policy for the new snapshots remains a release decision.
 
-Only recognised source/medium categories are retained. Unknown custom UTM values become “other”, so personal details or credentials accidentally placed in those fields cannot flow into the snapshot or aggregate source table. Stable account-owned campaign/ad set/ad IDs remain independently checked.
+Only recognised source/medium categories are retained. Unknown custom UTM values become “other”, so personal details or credentials accidentally placed in those fields cannot flow into the snapshot or aggregate source table. Stable account-owned campaign/ad set/ad IDs remain independently checked. A one-way fingerprint of the original numeric provider claims allows later catalogue verification without silently assigning a different same-channel advert to the original acquisition. Source-only history cannot acquire a guessed advert ID.
 
 ## Existing senders and the supported next step
 
@@ -93,6 +93,16 @@ The active website ad set optimises `OFFSITE_CONVERSIONS` with pixel event `LEAD
 ## Approval and verification still required
 
 See [release checklist](CUSTOMER_ACQUISITION_RELEASE.md). The prepared dashboard and local reconciliation are not a deployed/live tracking repair. Nothing new is sending conversions to Meta. A real safe click → native form → CRM → consented Test Events exercise, verified booking → Schedule, and downstream qualified/won/payment event delivery remain open. Synthetic tests validate the reporting/matching contracts; they do not prove those external deliveries.
+
+## Implementation verification
+
+- 384 automated tests passed, including exact payment/customer matching, refunds, uncaptured authorisations, repeat imports, first-touch claim fingerprints, hierarchy/account conflicts, result-event scope, latest-touch cost withholding, witnessed CRM milestones, missing subscription histories and failed/overlapping refreshes.
+- All seven existing portable dashboard-reader tests passed; the existing reader/history release is preserved.
+- Lint, TypeScript, the Next.js/Cloudflare build, deployment dry run and dependency audit passed (zero reported vulnerabilities).
+- Thirteen isolated production-browser checks passed against the real HTTPS libSQL adapter: authentication, private acquisition reads, missing-customer evidence, rolling/weekly/latest controls, existing panels, disabled execution, mobile overflow, failed refresh preservation and production storage guards. One earlier run timed out waiting for the existing action approval UI; an unchanged rerun passed, with no browser errors or external requests.
+- The remote database sync fixture passed pagination/large snapshot, rollback, leases and idempotent write checks. It uses disposable test infrastructure, not production data.
+- Replayed all 2,731 independently fetched daily rows through the actual writer into a private local database. The local UI reproduced the £197 advert's September/February comparison and explicit attribution warnings. A read-only query of the subsequently updated production history matched the audited monthly totals.
+- Native GHL workflow configuration was read in Vivaldi. No workflow save, real form submission, ad setting change, charge or new Meta event sender was performed by this task.
 
 ## Current official sources consulted
 

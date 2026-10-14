@@ -102,7 +102,7 @@ function smokeEvidence(today) {
 }
 
 async function seedSmokeDatabase(connection) {
-  const accountId = "act_browser_smoke";
+  const accountId = "act_1357893439073996";
   const leadRegisterLocationId = "loc_browser_smoke";
   const attributionKey = "7d_click,1d_view";
   const runId = "browser-smoke-sync";
@@ -327,7 +327,7 @@ async function runFixture(directory, evidenceDirectory) {
       AUTH_SECRET: authSecret,
       CRON_SECRET: cronSecret,
       META_MARKETING_TOKEN: "",
-      META_AD_ACCOUNT_ID: "act_browser_smoke",
+      META_AD_ACCOUNT_ID: "act_1357893439073996",
       META_ATTRIBUTION_WINDOWS: "7d_click,1d_view",
       META_WRITES_ENABLED: "false",
       ANTHROPIC_API_KEY: "",

@@ -179,7 +179,7 @@ export function buildAcquisitionReport(input: {
       "Customer revenue is the verified cohort's captured Stripe payments less refunds observed by the last sync, including later renewals. It is not cash collected only during the advertising dates.",
       "Reach is available for a single day. Across days it cannot be added into a unique audience; frequency is a weighted daily diagnostic.",
       "The latest eight days are provisional. Daily syncs recheck 35 days; late provider corrections outside that window require a historical refresh.",
-      "Retention uses subscription start/end timestamps; young cohorts are excluded from 30/90-day eligibility. Active durations are ongoing observations, not lifetime forecasts.",
+      "Retention uses subscription start/end timestamps; young and unverifiable histories are excluded from 30/90-day eligibility. Active durations are ongoing observations, not lifetime forecasts. CRM qualification, booking, attendance and won figures preserve witnessed milestones; historic transition times are not reconstructed.",
       "Meta and CRM counts measure different things and cannot establish event loss or deduplication failures on their own. Test Events and native workflow logs must verify delivery.",
     ],
   };

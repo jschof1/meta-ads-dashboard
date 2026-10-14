@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { object, boundedText as text, preserveAttribution, resolveCustomerIdentities, type IdentityEvidence, type MetaIdentity } from "./acquisition-attribution";
 
-const touch = z.object({ source: z.string().nullable(), medium: z.string().nullable(), campaignId: z.string().nullable(), adSetId: z.string().nullable(), adId: z.string().nullable(), paidMeta: z.boolean(), hierarchyConflict: z.boolean().default(false) });
+const touch = z.object({ source: z.string().nullable(), medium: z.string().nullable(), campaignId: z.string().nullable(), adSetId: z.string().nullable(), adId: z.string().nullable(), paidMeta: z.boolean(), hierarchyConflict: z.boolean().default(false), providerTouchKey: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null) });
 export const journeySnapshotSchema = z.object({
   version: z.literal(1), accountId: z.literal("acct_1OuZwXBUDoaLc39G"), locationId: z.string(), checkedAt: z.iso.datetime(),
   calendarSince: z.string(), qualificationConfigured: z.boolean(),
