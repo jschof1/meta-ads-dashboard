@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { setTimeout as wait } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { createClient } from "@libsql/client";
 import { PrismaClient } from "@prisma/client";
 import { PrismaLibSQL } from "@prisma/adapter-libsql";
 import {
-  createSmokeCertificate, readSmokeCertificate, runCommand, safeSmokeEnvironment,
+  createSmokeCertificate, readSmokeCertificate, runCommand, safeSmokeEnvironment, smokeDownloadEnvironment,
   startHttpsProxy, startLibsqlSmokeServer, startProcess, stopLibsqlSmokeServer, stopProcess, unusedLoopbackPort,
 } from "./libsql-smoke-server.mjs";
 
@@ -356,13 +356,22 @@ async function runFixture(directory, evidenceDirectory) {
     });
     await waitForServer(server, baseUrl);
 
+    // Hosted runners can supply an already installed Chromium when the default
+    // Playwright download is unavailable. This only selects the fixture browser;
+    // the application, TLS checks and assertions remain unchanged.
+    const executablePath = process.env.BROWSER_SMOKE_EXECUTABLE_PATH;
+    if (executablePath) {
+      assert(isAbsolute(executablePath) && (await stat(executablePath)).isFile(), "BROWSER_SMOKE_EXECUTABLE_PATH must identify an installed browser file");
+    }
     browser = await chromium.launch({
       headless: true,
       env: safeSmokeEnvironment(),
+      ...(executablePath ? { executablePath } : {}),
       // Trust only this disposable certificate's public key in Chromium.
       // Node/app/database TLS validation remains enabled via NODE_EXTRA_CA_CERTS.
-      args: [`--ignore-certificate-errors-spki-list=${tls.spki}`],
+      args: [`--ignore-certificate-errors-spki-list=${tls.spki}`, ...(executablePath ? ["--no-zygote", "--disable-dev-shm-usage"] : [])],
     });
+    evidence.browser = { version: browser.version(), suppliedExecutable: Boolean(executablePath) };
     context = await browser.newContext({ baseURL: baseUrl });
     context.setDefaultTimeout(20_000);
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
@@ -585,8 +594,9 @@ async function main() {
     worker = startProcess(process.execPath, [scriptPath, "--fixture", directory, evidenceDirectory], {
       cwd: root,
       env: {
-        ...safeSmokeEnvironment(), NODE_ENV: "production", NODE_EXTRA_CA_CERTS: certPath,
+        ...smokeDownloadEnvironment(), NODE_ENV: "production", NODE_EXTRA_CA_CERTS: certPath,
         ...(process.env.BROWSER_SMOKE_PORT === undefined ? {} : { BROWSER_SMOKE_PORT: process.env.BROWSER_SMOKE_PORT }),
+        ...(process.env.BROWSER_SMOKE_EXECUTABLE_PATH === undefined ? {} : { BROWSER_SMOKE_EXECUTABLE_PATH: process.env.BROWSER_SMOKE_EXECUTABLE_PATH }),
       },
       detached: true,
       logPath: join(evidenceDirectory, "harness.log"),

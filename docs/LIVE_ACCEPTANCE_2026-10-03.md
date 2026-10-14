@@ -1,5 +1,10 @@
 # Live acceptance check — 3 October 2026
 
+This document records checks on the previous execution host on 3 October.
+It does not certify today's source, cloud access or production state. See
+[14 October cloud resolution](./CLOUD_RESOLUTION_2026-10-14.md) for current
+dependency, ninth-migration, security and access gates.
+
 Purpose: give Jack trustworthy real-ad reporting and a saved enquiry follow-up
 register, not another prototype. This is a bounded production check, not proof
 of better lead quality, customers or revenue attributable to advertising.

@@ -3,11 +3,14 @@
 Cloudflare Workers replaces the original Vercel plan under Jack's 2026-09-08
 instruction. No Vercel account or project is required.
 
-Current checks and access gates are recorded in
-[3 October acceptance](./LIVE_ACCEPTANCE_2026-10-03.md). The initial version and
-September checks below are historical, not a claim about the latest deployed
-commit. Eight migrations now apply. Meta reads and the HighLevel enquiry
-register are connected; no new database or provider-token setup is required.
+Current cloud checks and access gates are recorded in
+[14 October resolution](./CLOUD_RESOLUTION_2026-10-14.md). The initial version,
+September checks and [3 October acceptance](./LIVE_ACCEPTANCE_2026-10-03.md) are
+historical evidence, not proof of today's deployed commit or provider state.
+The PR26 source contains nine migrations, including the new lead-register sync
+lease. Production was observed with eight on 3 October; its current ledger has
+not been re-read from cloud. Existing Worker/database resources and provider
+connections should be reused, with authorized current access and verification.
 
 ## Live resources
 
@@ -37,9 +40,11 @@ Sources checked 2026-09-08: [Workers pricing](https://developers.cloudflare.com/
 
 Release only the merged, independently reviewed commit with every CI gate green.
 The commands below are sequential gates, not permission to bypass a failing audit.
-The 3 October follow-up has **not** been deployed: its upstream dependency audit
-is still red. An existing encrypted OAuth operator session was verified using
-current local Wrangler; do not infer missing access from the old global CLI.
+The PR26 follow-up has **not** been merged or deployed: its upstream dependency
+audit is still red. The encrypted operator session was verified on the previous
+host on 3 October. It is not available in this cloud runtime; arrange protected
+access to existing credentials/session without posting values or restarting
+the stopped laptop/Mac mini workers.
 
 ```bash
 npm ci &&

@@ -4,7 +4,22 @@ Source of truth: [MASTER_PLAN.md](./MASTER_PLAN.md), the work-item specification
 implementation PRs and [production runbook](./PRODUCTION_RUNBOOK.md). GitHub
 issues are disabled for this repository.
 
-## Current verification — 3 October 2026
+## Current cloud review — 14 October 2026
+
+PR26 remains draft, unmerged and unreleased. Compatible dependency repairs and
+the actual ninth-migration source are recorded in
+[cloud resolution](./CLOUD_RESOLUTION_2026-10-14.md). The unchanged high audit
+gate still blocks release; functional checks do not waive it. Today's cloud
+runtime has no authorized dashboard/Cloudflare/Turso credential handover, so
+current production authentication, remote migration ledger and provider sync
+outcomes remain unverified. Existing resources and credentials are preserved.
+
+PR27's portable saved-data reader is a separate open scope; it supplies no
+credentials and has not been merged by this sweep. Meta writes remain disabled.
+Jack owns upstream/access follow-through on 21 October 2026 or sooner when a
+supported patch or protected cloud access becomes available.
+
+## Historical verification — 3 October 2026
 
 PR01–PR10 code is merged, including PR #20 on 8 September. The application is
 live on the existing Cloudflare Worker and Turso database; no Vercel setup or
