@@ -24,7 +24,7 @@
     "META_WRITES_ENABLED": "false",
     "META_RECENT_REFRESH_DAYS": "35",
     "HIGHLEVEL_SYNC_ENABLED": "false",
-    "CUSTOMER_JOURNEY_SYNC_ENABLED": "false",
+    "CUSTOMER_JOURNEY_SYNC_ENABLED": "true",
     "HIGHLEVEL_LEAD_FORM_ID": "aEwGU42vGjqNm43qwms7"
   },
   "observability": {

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPrismaClient } from "../lib/db.ts";
-import { storeJourneyRun, readCustomerJourney, readJourneySubmissions, JourneySyncRunningError } from "../lib/customer-journey-store.ts";
+import { storeJourneyRun, readCustomerJourney, readJourneySubmissions, expireCustomerSnapshots, JourneySyncRunningError } from "../lib/customer-journey-store.ts";
 import { UKTL_LOCATION, UKTL_STRIPE_ACCOUNT } from "../lib/customer-journey.ts";
 
 test("journey form reads include same-day receipts and exclude future evidence", async () => {
@@ -44,5 +44,27 @@ test("customer snapshots survive partial reads and reject overlapping writers", 
     assert.equal(await db.customerJourneySyncRun.count({ where: { lockKey: { not: null } } }), 0);
     await assert.rejects(() => storeJourneyRun(db, async () => ({ ...snapshot, locationId: "wrong" })), /mismatch/);
     assert.deepEqual((await readCustomerJourney(db)).snapshot, snapshot);
+  } finally { await db.$disconnect(); await rm(dir, { recursive: true, force: true }); }
+});
+
+
+test("snapshot retention erases expired identifiers, hides stale payloads and preserves run diagnostics", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "journey-retention-")), db = createPrismaClient({ url: `file:${join(dir, "test.db")}` });
+  try {
+    const sql = await readFile(new URL("../prisma/migrations/20261014160000_customer_journey/migration.sql", import.meta.url), "utf8");
+    for (const statement of sql.split(";").filter(s => s.trim())) await db.$executeRawUnsafe(statement);
+    const now = new Date(), cutoff = new Date(+now - 30 * 86400000);
+    const scope = { locationId: UKTL_LOCATION, stripeAccountId: UKTL_STRIPE_ACCOUNT };
+    const expired = await db.customerJourneySyncRun.create({ data: { ...scope, status: "SUCCEEDED", startedAt: cutoff, finishedAt: cutoff, payload: "expired provider identifiers" } });
+    assert.equal((await readCustomerJourney(db)).snapshot, null);
+    const recent = await db.customerJourneySyncRun.create({ data: { ...scope, status: "FAILED", startedAt: now, finishedAt: now, payload: "recent payload", error: "diagnostic retained" } });
+    const other = await db.customerJourneySyncRun.create({ data: { ...scope, locationId: "other-location", status: "SUCCEEDED", startedAt: cutoff, finishedAt: cutoff, payload: "outside scope" } });
+    assert.equal((await expireCustomerSnapshots(db, now)).count, 1);
+    assert.equal((await db.customerJourneySyncRun.findUnique({ where: { id: expired.id } })).payload, null);
+    assert.equal((await db.customerJourneySyncRun.findUnique({ where: { id: recent.id } })).payload, "recent payload");
+    assert.equal((await db.customerJourneySyncRun.findUnique({ where: { id: other.id } })).payload, "outside scope");
+    assert.equal(await db.customerJourneySyncRun.count(), 3);
+    await assert.rejects(() => storeJourneyRun(db, async () => { throw new Error("provider unavailable"); }), /provider unavailable/);
+    assert.equal((await db.customerJourneySyncRun.findUnique({ where: { id: expired.id } })).payload, null);
   } finally { await db.$disconnect(); await rm(dir, { recursive: true, force: true }); }
 });

@@ -13,6 +13,18 @@ type Row = Record<string, unknown>;
 const scope = { locationId: UKTL_LOCATION, stripeAccountId: UKTL_STRIPE_ACCOUNT };
 export class JourneySyncRunningError extends Error {}
 
+export const CUSTOMER_SNAPSHOT_RETENTION_DAYS = 30;
+const retentionCutoff = (now: Date) => new Date(+now - CUSTOMER_SNAPSHOT_RETENTION_DAYS * 86_400_000);
+
+// Keep run diagnostics, but erase expired payloads containing provider IDs.
+// Run before collection so provider failures cannot prolong stored history.
+export async function expireCustomerSnapshots(db: PrismaClient = prisma, now = new Date()) {
+  return db.customerJourneySyncRun.updateMany({
+    where: { ...scope, payload: { not: null }, finishedAt: { lte: retentionCutoff(now) } },
+    data: { payload: null },
+  });
+}
+
 export async function readJourneySubmissions(read: (path: string, stage: string) => Promise<Row>, options: { locationId: string; formId: string; maxRecords: number; now: Date }) {
   const submissions: Row[] = [];
   // The provider's date-only end is exclusive; retain today's receipts while
@@ -35,7 +47,7 @@ export async function readJourneySubmissions(read: (path: string, stage: string)
 
 export async function readCustomerJourney(db: PrismaClient = prisma) {
   const [latest, attempt] = await Promise.all([
-    db.customerJourneySyncRun.findFirst({ where: { ...scope, status: "SUCCEEDED" }, orderBy: { finishedAt: "desc" } }),
+    db.customerJourneySyncRun.findFirst({ where: { ...scope, status: "SUCCEEDED", payload: { not: null }, finishedAt: { gt: retentionCutoff(new Date()) } }, orderBy: { finishedAt: "desc" } }),
     db.customerJourneySyncRun.findFirst({ where: scope, orderBy: { startedAt: "desc" } }),
   ]);
   let snapshot: JourneySnapshot | null = null;
@@ -48,9 +60,10 @@ export async function readCustomerJourney(db: PrismaClient = prisma) {
 }
 
 // Atomic compare-and-set permits one writer; incomplete provider reads never
-// replace the last completed payload. Existing historical snapshots are kept.
+// replace the last completed payload within the 30-day retention window.
 export async function storeJourneyRun(db: PrismaClient, collect: (previous: JourneySnapshot | null) => Promise<JourneySnapshot>) {
   const now = new Date(), owner = randomUUID();
+  await expireCustomerSnapshots(db, now);
   const run = await db.$transaction(async tx => {
     await tx.customerJourneySyncRun.updateMany({ where: { ...scope, status: "RUNNING", lockExpiresAt: { lte: now } }, data: { status: "FAILED", finishedAt: now, error: "Previous refresh expired", lockKey: null, lockOwner: null, lockExpiresAt: null } });
     try { return await tx.customerJourneySyncRun.create({ data: { ...scope, status: "RUNNING", startedAt: now, lockKey: UKTL_LOCATION, lockOwner: owner, lockExpiresAt: new Date(+now + 900_000) } }); }

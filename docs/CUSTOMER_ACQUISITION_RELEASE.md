@@ -1,6 +1,6 @@
 # Customer acquisition release checklist
 
-Owner: implementation and release verification remain with the dashboard task. Jack authorised finishing and releasing the proposed work on 16 October 2026. The restricted Stripe credential is installed and complete read-only reconciliation passed; customer sync activation still requires the snapshot retention/erasure choice and saved-run verification; see [current acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
+Owner: implementation and release verification remain with the dashboard task. Jack authorised finishing and releasing the proposed work on 16 October 2026. The restricted Stripe credential is installed and complete read-only reconciliation passed. Jack selected 30-day snapshot history; customer sync activation is being verified; see [current acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
 
 ## Phase 1 — saved reporting and historical recovery
 
@@ -34,9 +34,9 @@ Requires a securely supplied restricted **live read-only** Stripe key for `acct_
 
 Check the existing GHL token has read access to contacts, opportunities/pipeline, form submissions, the configured calendar and payments. Retain exact UKTL location, pipeline, form and calendar IDs. Confirm calendar history and future 90-day booking coverage. Larger accounts that exceed safe pagination limits must fail closed rather than publish a partial snapshot.
 
-Choose a lawful snapshot retention/erasure policy and verify access permissions before persisting customer IDs in production. API output is aggregate only, but stored IDs remain personal data. Do not enable a qualification mapping until an existing populated tag/stage is confirmed. If a stage is selected, it must belong to the configured pipeline.
+Jack selected a rolling 30-day snapshot history on 16 October. Reads exclude snapshots at or beyond 30 days; every customer refresh erases expired payloads before contacting providers, including when collection later fails. Run diagnostics remain without customer payloads. This limits snapshot history, not the age of source customers or payments in a fresh snapshot. A provider outage beyond 30 days makes customer reporting unavailable rather than extending identifier retention. Database/backups have separate retention controls. Existing authenticated APIs expose aggregate output only; stored provider IDs remain personal data. For an erasure request, remove the subject in the authoritative source and erase affected saved payloads before re-syncing; do not restore expired snapshots from backups into reporting. Do not enable a qualification mapping until an existing populated tag/stage is confirmed. If a stage is selected, it must belong to the configured pipeline.
 
-Set `CUSTOMER_JOURNEY_SYNC_ENABLED=true` only after configuration/read-only reconciliation approval. Perform one authenticated customer refresh, check exact account match, missing/ambiguous identity counts and last complete snapshot preservation, then verify one real 07:15 UTC scheduled run. Logs must contain only run status/counts, never provider bodies or credentials. Keep an owner for failed/stale sync follow-up; no new notification destination is configured by this branch.
+The restricted key, complete read-only reconciliation and 30-day policy are approved; set `CUSTOMER_JOURNEY_SYNC_ENABLED=true`. Perform one authenticated customer refresh, check exact account match, missing/ambiguous identity counts and last complete snapshot preservation, then verify one real 07:15 UTC scheduled run. Logs must contain only run status/counts, never provider bodies or credentials. Keep an owner for failed/stale sync follow-up; no new notification destination is configured by this branch.
 
 ## Phase 3 — attribution and meaningful conversions
 
