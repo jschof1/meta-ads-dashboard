@@ -61,7 +61,8 @@ async function get(path, init = {}) {
 }
 
 const startAt = new Date(cutoff).toISOString().slice(0, 10);
-const endAt = new Date(checked).toISOString().slice(0, 10);
+// The provider's end date is exclusive; currentSubmissions enforces checkedAt.
+const endAt = new Date(checked + 86400000).toISOString().slice(0, 10);
 const forms = await get(`/forms/?locationId=${config.HIGHLEVEL_LOCATION_ID}&limit=50`);
 const names = Object.fromEntries(forms.forms.map((form) => [form.id, form.name]));
 const submissions = [];

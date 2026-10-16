@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcileLeads, mergeRegister, summarizeLeadRegisterOutcomes, readLeadRegisterProvider, leadRegisterFailureDiagnostic } from '../lib/lead-register.ts';
+import { reconcileLeads, mergeRegister, summarizeLeadRegisterOutcomes, readLeadRegisterProvider, leadRegisterFailureDiagnostic, fetchLeadRegister } from '../lib/lead-register.ts';
 import { leadEvidence, leadRegisterChanges } from '../lib/lead-register-view.ts';
 const start=new Date('2026-08-10T23:00:00Z'), now=new Date('2026-09-09T12:00:00Z'), end=new Date('2026-12-08T12:00:00Z');
 const sub=(id,contactId,at='2026-09-08T15:00:00Z')=>({id,contactId,createdAt:at,others:{funneEventData:{page_url:'/book-a-call'}}});
@@ -25,6 +25,34 @@ test('preserves older people and submissions as provider window advances and rej
 test('applies precise timestamp boundaries rather than provider date-only filtering',()=>{
  const r=reconcileLeads([], [sub('before','a','2026-08-10T22:59:59Z'),sub('inside','b','2026-08-10T23:00:00Z'),sub('future','c','2026-09-09T12:00:01Z')],[],start,now,end);
  assert.deepEqual(r.entries.map(e=>e.contactId),['b']);
+});
+test('imports same-day receipts from an exclusive provider end date, including month and year rollover', async (t) => {
+ const settings={HIGHLEVEL_TOKEN:'fixture-token',HIGHLEVEL_LOCATION_ID:'fixture-location',HIGHLEVEL_LEAD_FORM_ID:'fixture-form',HIGHLEVEL_SALES_CALENDAR_ID:'fixture-calendar'};
+ const original=Object.fromEntries(Object.keys(settings).map(key=>[key,process.env[key]]));
+ Object.assign(process.env,settings);
+ t.after(()=>{for(const [key,value] of Object.entries(original)){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
+ for(const timestamp of ['2026-10-14T21:45:00Z','2026-12-31T23:59:59Z','2028-02-29T00:00:00Z']){
+  await t.test(timestamp, async (t) => {
+   const checkedAt=new Date(timestamp),createdAt=new Date(+checkedAt-1).toISOString();
+   const receipts=[sub('actual-receipt','same-person',createdAt),sub('after-check','same-person',new Date(+checkedAt+1).toISOString()),sub('before-window','same-person',new Date(+checkedAt-90*86400000-1).toISOString())];
+   t.mock.method(globalThis,'fetch',async input=>{
+    const url=new URL(input);
+    if(url.pathname==='/contacts/search')return Response.json({contacts:[{id:'same-person',dateAdded:createdAt,createdBy:{source:'FORM',sourceId:'fixture-form'}}],total:1});
+    if(url.pathname==='/forms/submissions'){
+     const start=Date.parse(url.searchParams.get('startAt')),end=Date.parse(url.searchParams.get('endAt'));
+     const submissions=receipts.filter(s=>Date.parse(s.createdAt)>=start&&Date.parse(s.createdAt)<end);
+     return Response.json({submissions,meta:{total:submissions.length,nextPage:null}});
+    }
+    if(url.pathname==='/calendars/events')return Response.json({events:[]});
+    if(url.pathname==='/conversations/search')return Response.json({conversations:[],total:0});
+    throw new Error('Unexpected provider read '+url.pathname);
+   });
+   const result=await fetchLeadRegister(checkedAt);
+   assert.equal(result.entries.length,1);
+   assert.deepEqual(result.entries[0].submissions.map(s=>s.id),['actual-receipt']);
+   assert.equal(leadEvidence(result.entries[0],+checkedAt-30*86400000),'form');
+  });
+ }
 });
 test('keeps recent messaging contacts even when their contact record is older than the import window',()=>{
  const r=reconcileLeads([{id:'sms',dateAdded:'2026-01-01',contactName:'Returning SMS'}],[],[],start,now,end,[{id:'conv',contactId:'sms',lastMessageDate:+new Date('2026-09-01'),lastMessageType:'TYPE_SMS',lastMessageBody:'private message'}]);
