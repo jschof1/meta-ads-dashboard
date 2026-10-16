@@ -135,3 +135,55 @@ paste a secret in chat. The release itself is live independently of this gate.
   implement that choice, activate the gate, verify a saved live refresh and then
   observe the first real 07:15 UTC scheduled run. No qualification mapping or
   advertising/conversion setting was changed.
+
+## Customer reporting activation — 16 October, 12:02 UTC
+
+Jack selected rolling 30-day snapshot history. Implemented expiry of customer
+payloads at the start of every customer refresh, before provider reads, retaining
+non-customer run diagnostics. Reads exclude snapshots at or beyond 30 days even
+if scheduled cleanup has not run. This retains snapshot history for 30 days;
+a fresh snapshot can still describe older source records and subscriptions.
+Existing database backup retention is separate. Tests cover exact cutoff,
+scope isolation, diagnostics preservation and failure handling.
+
+- Enabled the existing customer sync gate and preserved the 07:15 UTC schedule.
+- Initial deployment `bb52eb05-cd99-4c9d-909e-e6fbd0d26009` ran the first real
+  authenticated customer refresh successfully: HTTP 200, 41.8 seconds, run
+  `cmvax3c7f0000xs1ln3rzlt9d`, checked at `2026-10-16T12:02:27.436Z`.
+  Saved 2,715 CRM contacts; four unmatched Stripe customers and zero ambiguous
+  matches. Exact provider account, complete pagination and CRM scope checks pass.
+- All 390 automated tests, lint, typecheck and the Cloudflare build passed.
+  Live security/database smoke passed after activation.
+- Full-data acceptance caught a real acquisition-report CPU failure: Cloudflare
+  tail reported `exceededCpu`. The report repeatedly formatted each contact's
+  London cohort date for every advert, comparison and timeline bucket. Fixed by
+  calculating each contact's cohort date once per report. The full-data local
+  benchmark produces 14 advert rows and seven source groups in 194 ms / 171 ms
+  CPU. Cold live reads still used 1.0–1.5 seconds of CPU, so the Worker CPU
+  allowance is raised from one to five seconds for full-data request headroom.
+  All 29 targeted acquisition/customer tests, lint, typecheck and the
+  Cloudflare rebuild passed after that correction.
+
+The first genuine scheduled customer trigger is due 17 October at 07:15 UTC.
+Owner: this dashboard delivery thread; inspect its run after that time and
+investigate any failed/stale state. Manual endpoint success and registered cron
+configuration do not claim that future scheduled run has already happened.
+Missing ad IDs, qualification configuration and external funnel/conversion
+acceptance remain as documented in phase three; activation does not invent
+individual-ad customer attribution.
+
+Live report acceptance after the performance correction: authenticated default
+and October-vs-September requests return HTTP 200 in 2.5 and 1.5 seconds, with
+fresh saved customer evidence, seven/default and six/selected source groups,
+and 14 advert rows. No customer/charge/subscription IDs or credential values
+appear in aggregate API output. Signed-out report and customer-sync requests
+return 401. The actual browser source table renders correctly with no alerts or
+page horizontal overflow. Attribution warnings remain visible: 279 paid Meta
+contacts lack ad IDs, 54 charges and four customers are unmatched, and one
+non-GBP payment is excluded from GBP revenue. Qualification stays unconfigured.
+
+Final deployment: `621e3c8c-d606-434d-91d4-e32ac58f973e`, tag `7163cbf`
+(code `eb0c61f` plus CPU configuration), with all four existing cron triggers.
+Rollback for customer activation is Worker `10a67521-61a0-4126-b41f-2ab13895b29a`
+(customer sync disabled, restricted Stripe secret installed). Additive snapshots
+and earlier history need not be dropped for an application rollback.
