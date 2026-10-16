@@ -114,6 +114,31 @@ Known funnel work remains open from [the launch audit](AD_LAUNCH_AUDIT_2026-10-1
 
 These issues are **not resolved by uploading new ads**, and launch does not mean every funnel risk was eliminated. Review legitimate enquiries before increasing spend.
 
-## Evidence
+## Subsequent pause review — 16 October 2026
+
+After publication, Jack explicitly asked to pause existing ads worth removing. A fresh direct Meta read compared 9–15 October, 16 September–15 October, and 17 August–15 September with the same seven-day click / one-day view / one-day engaged-video attribution. All three Round1 ads now read back effective ACTIVE.
+
+Four older ads were switched off in Ads Manager. The reason is an observable offer mismatch combined with weak recent evidence, **not a claim of confirmed zero enquiries**. Every body variant in the three videos still sells the package at £297/month, while their headlines/current destination promote £197. News Article also retains £297 offer variants. No creative was edited or deleted.
+
+| Paused ad | Ad ID | Spend, 16 Sep–15 Oct | Reported landing-page views |
+| --- | --- | --- | --- |
+| Testimonial + B-Roll | `6914233553539` | £76.22 | 10 |
+| Founder Story | `6914233842939` | £20.48 | 2 |
+| Short Pitch - Outdoor Walking | `6893319538539` | £22.67 | 8 |
+| News Article | `6929347785139` | £1.81 | 2 |
+
+These four spent £121.18 in that 30-day period. Their period responses omit the website-lead action, so lead counts remain unavailable. Outdoor Walking previously reported two leads during 17 August–15 September; it is being parked for offer consistency, not declared permanently unsuccessful. Historical spend is not a forecast of savings: the £50 campaign budget remains unchanged and Meta can reallocate delivery.
+
+The original £197 Price Lead ad remains ACTIVE (19 Meta-reported website leads from £989.11 in the latest complete 30-day window). Plain Text and AI Comparison also remain ACTIVE, with four reported leads each from £138.75 and £111.44 respectively. These are attributed Meta events, not verified paying customers. Tweet previously produced four reported leads in the preceding period and was retained; the other low-spend ads lack sufficient evidence for a performance-based pause.
+
+Direct before/after comparison found exactly these four configured-status changes from ACTIVE to PAUSED, no creative-ID changes, and all other 25 ad statuses unchanged. Campaign `6890146663739` remains ACTIVE with `daily_budget: 5000`. All retained ads remain in original ad set `6890146663939`. Pauses can be reversed after correcting the offer and deciding to retest; the scheduled Round1 review must not reactivate these four automatically.
+
+The preserved winning ad itself still contains legacy £297 body variants alongside its £197 variants. Preserving it was Jack's explicit launch requirement; this review does not claim all legacy offer inconsistencies are fixed. Correcting that control should be a separately measured change after the new test has a stable baseline.
+
+Private evidence: `/tmp/uktl-round1-review/pause-audit-live.json`, `pause-before-creatives.json`, and `pause-after-readback.json`. The readback distinguishes configured PAUSED from a short-lived IN_PROCESS effective status while Meta applies a switch change. A subsequent refreshed Ads Manager view confirmed all four delivery states **Off**, with publication complete: [pause verification screenshot](evidence/round1-four-paused-2026-10-16.png).
+
+The production dashboard Meta sync subsequently succeeded (`cmvb9s8wu0000sh1lxwfvvmay`, 671 rows written). Its 110 unavailable enquiry-result rows remain missing, not zero.
+
+## Launch evidence
 
 Provider responses and original review materials remain private under `/tmp/uktl-round1-review/`; credentials and person records are excluded from this repository. Publication screenshot: [four ads in Meta](evidence/round1-published-2026-10-16.png). The screenshot shows the earlier processing/review state; the table above records the later direct verification.
