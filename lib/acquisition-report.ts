@@ -108,6 +108,12 @@ export function buildAcquisitionReport(input: {
   const { query: q, insights, runs, journey } = input;
   const coverageRuns = [...runs].sort((a, b) => +(b.finishedAt ?? 0) - +(a.finishedAt ?? 0));
   const now = input.now ?? new Date();
+  // A contact's cohort day is identical across every advert, comparison and
+  // timeline bucket. Repeated Intl conversions exhaust the Worker CPU budget
+  // once a real customer snapshot is present.
+  const contactDays = new Map((journey?.contacts ?? []).map(c => [c.id,
+    c.createdAt ? accountLocalDate(new Date(c.createdAt), "Europe/London") : null,
+  ]));
   const window = (since: string, until: string, entityId: string) => {
     const rows = insights.filter(r => r.level === q.level && r.entityId === entityId && r.date >= since && r.date <= until);
     const complete = covered(coverageRuns, since, until);
@@ -115,7 +121,7 @@ export function buildAcquisitionReport(input: {
     if (!complete) Object.keys(metrics).forEach(k => { metrics[k as keyof Bucket] = null; });
     else if (!rows.length) { metrics.spendCents = 0; metrics.impressions = 0; metrics.linkClicks = 0; metrics.leads = 0; }
     const customers = journey ? journey.contacts.filter(c => {
-      const date = c.createdAt ? accountLocalDate(new Date(c.createdAt), "Europe/London") : null;
+      const date = contactDays.get(c.id);
       const touch = c.attribution[q.touch];
       const target = q.level === "ad" ? touch.adId : q.level === "adset" ? touch.adSetId : touch.campaignId;
       return date && date >= since && date <= until && target === entityId;
@@ -150,7 +156,7 @@ export function buildAcquisitionReport(input: {
   }
   const timeline = [...periods].map(([label, range]) => ({ label, ...range, rows: [...ids].map(entityId => ({ entityId, ...window(range.since, range.until, entityId) })) }));
   const sourceContacts = journey?.contacts.filter(c => {
-    const day = c.createdAt ? accountLocalDate(new Date(c.createdAt), "Europe/London") : null;
+    const day = contactDays.get(c.id);
     return day && day >= q.since && day <= q.until;
   }) ?? [];
   const sources = journey ? [...new Set(sourceContacts.map(c => c.attribution[q.touch].source ?? "unattributed"))].map(source => ({
