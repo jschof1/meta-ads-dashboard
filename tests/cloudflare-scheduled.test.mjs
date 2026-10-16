@@ -3,19 +3,19 @@ import assert from "node:assert/strict";
 import { normalizeClientAddress, runScheduledSync } from "../lib/cloudflare-scheduled.mjs";
 
 test("Cloudflare schedules call only the matching protected route and propagate failures", async () => {
-  const env = { CRON_SECRET: "fixture-secret-with-at-least-32-characters", HIGHLEVEL_SYNC_ENABLED: "true" };
+  const env = { CRON_SECRET: "fixture-secret-with-at-least-32-characters", HIGHLEVEL_SYNC_ENABLED: "true", CUSTOMER_JOURNEY_SYNC_ENABLED: "true" };
   const messages = [];
   const originalInfo = console.info;
   console.info = (...args) => messages.push(args);
   try {
-  for (const [cron, path] of [["45 * * * *", "sync-leads"], ["0 6 * * *", "sync-meta"], ["30 6 * * *", "sync-highlevel"]]) {
+  for (const [cron, path] of [["45 * * * *", "sync-leads"], ["0 6 * * *", "sync-meta"], ["30 6 * * *", "sync-highlevel"], ["15 7 * * *", "sync-customers"]]) {
     await runScheduledSync({ cron, scheduledTime: 1_791_109_500_000 }, env, async (request) => {
       assert.equal(new URL(request.url).pathname, `/api/cron/${path}`);
       assert.equal(request.headers.get("authorization"), `Bearer ${env.CRON_SECRET}`);
       return new Response("ok");
     });
   }
-  assert.equal(messages.length, 6);
+  assert.equal(messages.length, 8);
   assert.deepEqual(messages[0], ["Dashboard scheduled sync started", { cron: "45 * * * *", scheduledTime: 1_791_109_500_000, path: "/api/cron/sync-leads" }]);
   assert.equal(messages[1][0], "Dashboard scheduled sync completed");
   assert.equal(messages[1][1].status, 200);
@@ -27,6 +27,7 @@ test("Cloudflare schedules call only the matching protected route and propagate 
 test("disabled CRM, missing credentials and unknown schedules never dispatch", async () => {
   const never = () => { throw new Error("must not dispatch"); };
   await runScheduledSync({ cron: "30 6 * * *" }, {}, never);
+  await runScheduledSync({ cron: "15 7 * * *" }, {}, never);
   await assert.rejects(runScheduledSync({ cron: "0 6 * * *" }, {}, never), /authentication/);
   await assert.rejects(runScheduledSync({ cron: "* * * * *" }, {}, never), /Unknown/);
 });

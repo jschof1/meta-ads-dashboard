@@ -1,5 +1,9 @@
 # Cloudflare deployment
 
+Current release and verification: [16 October 2026 acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
+The dated access/audit observations below are historical; current local access
+works, PR26 is merged, and the dependency audit is clean.
+
 Cloudflare Workers replaces the original Vercel plan under Jack's 2026-09-08
 instruction. No Vercel account or project is required.
 

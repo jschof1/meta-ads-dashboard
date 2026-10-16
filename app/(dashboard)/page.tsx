@@ -21,6 +21,7 @@ import { PeriodSelector } from "@/components/period-selector";
 import { RecommendationPanel } from "@/components/recommendation-panel";
 import { MetaActionPanel } from "@/components/meta-action-panel";
 import { SystemDiagnosticsPanel } from "@/components/system-diagnostics-panel";
+import { AcquisitionPanel } from "@/components/acquisition-panel";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { formatDateTime } from "@/lib/format";
 
@@ -134,6 +135,7 @@ export default function DashboardHome() {
       <Scorecard state={state} period={period} />
       <MetricHeroCards state={state} period={period} />
       <MonthlyPerformancePanel />
+      <AcquisitionPanel />
       <LeadRegisterPanel />
       <BusinessOutcomesPanel />
       <RecommendationPanel state={state} />

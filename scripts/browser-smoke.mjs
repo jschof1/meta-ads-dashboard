@@ -102,7 +102,7 @@ function smokeEvidence(today) {
 }
 
 async function seedSmokeDatabase(connection) {
-  const accountId = "act_browser_smoke";
+  const accountId = "act_1357893439073996";
   const leadRegisterLocationId = "loc_browser_smoke";
   const attributionKey = "7d_click,1d_view";
   const runId = "browser-smoke-sync";
@@ -327,7 +327,7 @@ async function runFixture(directory, evidenceDirectory) {
       AUTH_SECRET: authSecret,
       CRON_SECRET: cronSecret,
       META_MARKETING_TOKEN: "",
-      META_AD_ACCOUNT_ID: "act_browser_smoke",
+      META_AD_ACCOUNT_ID: "act_1357893439073996",
       META_ATTRIBUTION_WINDOWS: "7d_click,1d_view",
       META_WRITES_ENABLED: "false",
       ANTHROPIC_API_KEY: "",
@@ -407,6 +407,24 @@ async function runFixture(directory, evidenceDirectory) {
     assert(/;\s*Secure(?:;|$)/i.test(setCookie) && /;\s*HttpOnly(?:;|$)/i.test(setCookie), "expected Secure and HttpOnly on the login response itself");
     evidence.sessionCookie = { name: cookie.name, secure: cookie.secure, httpOnly: cookie.httpOnly, sameSite: cookie.sameSite, path: cookie.path };
     evidence.checks.push("browser login; Secure/HttpOnly/Strict cookie present and hidden from document.cookie");
+
+    const acquisition = page.getByRole("region", { name: "Customer acquisition and retention", exact: true });
+    await acquisition.getByText("Verified customer sync is awaiting activation. Customer metrics are unavailable.", { exact: true }).waitFor();
+    const acquisitionResponse = await context.request.get("/api/acquisition");
+    assert(acquisitionResponse.status() === 200, "stored acquisition report must load without provider credentials");
+    assert(acquisitionResponse.headers()["cache-control"] === "private, no-store", "customer report must never be publicly cached");
+    assert((await acquisitionResponse.json()).health.journeyCheckedAt === null, "missing Stripe evidence must not become zero verified revenue");
+    await acquisition.getByRole("button", { name: "Rolling 14 days", exact: true }).click();
+    await acquisition.getByRole("combobox", { name: "History interval", exact: true }).selectOption("week");
+    await acquisition.getByRole("combobox", { name: "Customer attribution touch", exact: true }).selectOption("latest");
+    const [comparisonResponse] = await Promise.all([
+      page.waitForResponse(r => new URL(r.url()).pathname === "/api/acquisition"),
+      acquisition.getByRole("button", { name: "Apply comparison", exact: true }).click(),
+    ]);
+    const comparison = await comparisonResponse.json();
+    assert(comparison.query.touch === "latest" && comparison.query.grain === "week", "comparison choices must reach the stored reporting API");
+    assert(Date.parse(comparison.query.until) - Date.parse(comparison.query.since) === 13 * 86400_000, "rolling fortnight must cover fourteen calendar days");
+    evidence.checks.push("acquisition report: private saved-data read, honest unavailable customer evidence, rolling 14-day weekly latest-touch comparison");
 
     const registerResponse = await context.request.get("/api/lead-register");
     assert(registerResponse.status() === 200, "expected stored lead register without live HighLevel credentials");

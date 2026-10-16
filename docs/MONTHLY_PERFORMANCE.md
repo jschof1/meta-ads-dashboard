@@ -56,8 +56,12 @@ and security gate; a feature build is not a production release.
 
 ## Historical import
 
-Run `npm run backfill:meta-history` with the existing operator environment to
-import Meta daily account, campaign, ad-set and ad history from 1 November 2025.
+Run `npm run backfill:meta-history` to plan monthly requests from 1 November
+2025. It does not read credentials, call providers or write data by default.
+After release approval, load the existing operator environment and use
+`META_HISTORY_APPLY_APPROVED=yes npm run backfill:meta-history -- --apply`
+to import daily account, campaign, ad-set and ad history. Optional `--since`
+and `--until` dates bound a repair to the required interval.
 This uses the existing paced, leased, atomic Meta import and preserves its scope,
 attribution, result-event and currency contracts. It changes saved reporting
 records only, never campaigns, tracking tags or HighLevel data. Subsequent
