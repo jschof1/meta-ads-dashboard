@@ -1,0 +1,638 @@
+{
+  "assessmentDate": "2026-10-16",
+  "performanceWindow": {
+    "since": "2026-09-16",
+    "until": "2026-10-15",
+    "compareSince": "2026-08-17",
+    "compareUntil": "2026-09-15",
+    "grain": "week",
+    "level": "ad",
+    "touch": "first"
+  },
+  "health": {
+    "metaOmittedRows": 0,
+    "historicalSince": "2026-01-05",
+    "currentCovered": true,
+    "comparisonCovered": true,
+    "metaCheckedAt": "2026-10-16T17:08:46.444Z",
+    "metaStale": false,
+    "metaLastAttempt": "SUCCEEDED",
+    "journeyCheckedAt": "2026-10-16T12:02:27.436Z",
+    "journeyStale": false,
+    "journeyLastAttempt": "SUCCEEDED",
+    "unmatchedCustomers": 4,
+    "ambiguousCustomers": 0,
+    "unmappedAdContacts": 279,
+    "attributionConflicts": 0,
+    "unmatchedCharges": 54,
+    "recentProvisional": true,
+    "qualificationConfigured": false,
+    "unmatchedCurrencyCharges": 1
+  },
+  "economics": {
+    "checkedAt": "2026-10-16T12:02:27.436Z",
+    "paidMetaContacts": 279,
+    "paidMetaPayers": 27,
+    "paidMetaPayers2026": 27,
+    "paidMetaSources": [
+      "ig",
+      "fb"
+    ],
+    "net": 1640300,
+    "lagDays": {
+      "median": 4.165663344907407,
+      "max": 195.69427671296296,
+      "over30": 2
+    },
+    "first90Days": {
+      "eligible": 21,
+      "averageNetMinor": 49014.28571428572,
+      "medianNetMinor": 59100,
+      "distribution": [
+        19700,
+        19700,
+        29400,
+        34600,
+        39400,
+        39400,
+        39400,
+        39400,
+        39400,
+        39400,
+        59100,
+        59100,
+        59100,
+        59100,
+        59100,
+        59100,
+        59100,
+        59100,
+        59100,
+        78800,
+        78800
+      ],
+      "note": "Refunds on these charges as observed today, not refund transaction timestamps; first 90 elapsed days after first captured payment, includes any billing dates inside this window."
+    },
+    "monthly": [
+      {
+        "month": "2026-01",
+        "payers": 3,
+        "net": 127900,
+        "sources": [
+          "ig",
+          "fb"
+        ],
+        "medianLagDays": 1.233171087962963,
+        "payWithin30Days": 3
+      },
+      {
+        "month": "2026-02",
+        "payers": 3,
+        "net": 300500,
+        "sources": [
+          "fb",
+          "ig"
+        ],
+        "medianLagDays": 0.5727214699074074,
+        "payWithin30Days": 3
+      },
+      {
+        "month": "2026-03",
+        "payers": 4,
+        "net": 334900,
+        "sources": [
+          "ig",
+          "fb"
+        ],
+        "medianLagDays": 12.460273431712963,
+        "payWithin30Days": 3
+      },
+      {
+        "month": "2026-04",
+        "payers": 7,
+        "net": 404200,
+        "sources": [
+          "fb"
+        ],
+        "medianLagDays": 2.0323129050925925,
+        "payWithin30Days": 7
+      },
+      {
+        "month": "2026-05",
+        "payers": 2,
+        "net": 39400,
+        "sources": [
+          "fb",
+          "ig"
+        ],
+        "medianLagDays": 4.6345889988425935,
+        "payWithin30Days": 2
+      },
+      {
+        "month": "2026-06",
+        "payers": 3,
+        "net": 256100,
+        "sources": [
+          "ig",
+          "fb"
+        ],
+        "medianLagDays": 4.165663344907407,
+        "payWithin30Days": 3
+      },
+      {
+        "month": "2026-07",
+        "payers": 2,
+        "net": 78800,
+        "sources": [
+          "fb",
+          "ig"
+        ],
+        "medianLagDays": 39.54023150462963,
+        "payWithin30Days": 1
+      },
+      {
+        "month": "2026-08",
+        "payers": 1,
+        "net": 59100,
+        "sources": [
+          "ig"
+        ],
+        "medianLagDays": 3.6468477430555555,
+        "payWithin30Days": 1
+      },
+      {
+        "month": "2026-09",
+        "payers": 2,
+        "net": 39400,
+        "sources": [
+          "ig",
+          "fb"
+        ],
+        "medianLagDays": 6.929355763888888,
+        "payWithin30Days": 2
+      },
+      {
+        "month": "2026-10",
+        "payers": 0,
+        "net": 0,
+        "sources": [],
+        "medianLagDays": null,
+        "payWithin30Days": 0
+      }
+    ]
+  },
+  "accountMonths": {
+    "2026-01": {
+      "spend": 137177,
+      "leads": 89,
+      "missingLeadDays": 0
+    },
+    "2026-02": {
+      "spend": 139406,
+      "leads": 79,
+      "missingLeadDays": 0
+    },
+    "2026-03": {
+      "spend": 103280,
+      "leads": 68,
+      "missingLeadDays": 0
+    },
+    "2026-04": {
+      "spend": 96184,
+      "leads": 59,
+      "missingLeadDays": 0
+    },
+    "2026-05": {
+      "spend": 152770,
+      "leads": 72,
+      "missingLeadDays": 0
+    },
+    "2026-06": {
+      "spend": 150049,
+      "leads": 43,
+      "missingLeadDays": 0
+    },
+    "2026-07": {
+      "spend": 161305,
+      "leads": 66,
+      "missingLeadDays": 0
+    },
+    "2026-08": {
+      "spend": 163746,
+      "leads": 41,
+      "missingLeadDays": 0
+    },
+    "2026-09": {
+      "spend": 149021,
+      "leads": 46,
+      "missingLeadDays": 0
+    },
+    "2026-10": {
+      "spend": 73017,
+      "leads": 10,
+      "missingLeadDays": 0
+    }
+  },
+  "contactCreated90DayCash": [
+    {
+      "month": "2026-01",
+      "contacts": 41,
+      "allMature": true,
+      "knownPayers": 3,
+      "net90Observed": 127900
+    },
+    {
+      "month": "2026-02",
+      "contacts": 29,
+      "allMature": true,
+      "knownPayers": 3,
+      "net90Observed": 177300
+    },
+    {
+      "month": "2026-03",
+      "contacts": 26,
+      "allMature": true,
+      "knownPayers": 4,
+      "net90Observed": 157600
+    },
+    {
+      "month": "2026-04",
+      "contacts": 24,
+      "allMature": true,
+      "knownPayers": 7,
+      "net90Observed": 330100
+    },
+    {
+      "month": "2026-05",
+      "contacts": 23,
+      "allMature": true,
+      "knownPayers": 2,
+      "net90Observed": 39400
+    },
+    {
+      "month": "2026-06",
+      "contacts": 19,
+      "allMature": true,
+      "knownPayers": 3,
+      "net90Observed": 177300
+    },
+    {
+      "month": "2026-07",
+      "contacts": 23,
+      "allMature": false,
+      "knownPayers": 2,
+      "net90Observed": 78800
+    },
+    {
+      "month": "2026-08",
+      "contacts": 17,
+      "allMature": false,
+      "knownPayers": 1,
+      "net90Observed": 59100
+    },
+    {
+      "month": "2026-09",
+      "contacts": 20,
+      "allMature": false,
+      "knownPayers": 2,
+      "net90Observed": 39400
+    },
+    {
+      "month": "2026-10",
+      "contacts": 7,
+      "allMature": false,
+      "knownPayers": 0,
+      "net90Observed": 0
+    }
+  ],
+  "adMetrics": [
+    {
+      "id": "6914088373739",
+      "name": "BOF - Static - 197 Direct Offer - Price Lead",
+      "current": {
+        "spendCents": 98910,
+        "impressions": 26490,
+        "linkClicks": 240,
+        "leads": 19,
+        "cplCents": 5206,
+        "cpcCents": 270,
+        "ctrLink": 0.009060022650056626,
+        "cpmCents": 3734,
+        "frequency": 1.2895452680634198
+      },
+      "comparison": {
+        "spendCents": 106808,
+        "impressions": 25859,
+        "linkClicks": 247,
+        "leads": 43,
+        "cplCents": 2484,
+        "cpcCents": 253,
+        "ctrLink": 0.009551800146950772,
+        "cpmCents": 4130,
+        "frequency": 1.2770650382458721
+      }
+    },
+    {
+      "id": "6929339201539",
+      "name": "BOF - Static - Plain Text Direct Offer",
+      "current": {
+        "spendCents": 13875,
+        "impressions": 3664,
+        "linkClicks": 32,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 227,
+        "ctrLink": 0.008733624454148471,
+        "cpmCents": 3787,
+        "frequency": 1.3818472991266377
+      },
+      "comparison": {
+        "spendCents": 7081,
+        "impressions": 1698,
+        "linkClicks": 9,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 322,
+        "ctrLink": 0.00530035335689046,
+        "cpmCents": 4170,
+        "frequency": 1.258021364546525
+      }
+    },
+    {
+      "id": "6936461292139",
+      "name": "BOF - Static - AI Comparison",
+      "current": {
+        "spendCents": 11144,
+        "impressions": 3315,
+        "linkClicks": 76,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 122,
+        "ctrLink": 0.022926093514328807,
+        "cpmCents": 3362,
+        "frequency": 1.5874203930618402
+      },
+      "comparison": {
+        "spendCents": 7998,
+        "impressions": 1451,
+        "linkClicks": 43,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 163,
+        "ctrLink": 0.029634734665747762,
+        "cpmCents": 5512,
+        "frequency": 1.1560278766368022
+      }
+    },
+    {
+      "id": "6929348452739",
+      "name": "TOF - Static - Tweet",
+      "current": {
+        "spendCents": 7895,
+        "impressions": 2101,
+        "linkClicks": 26,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 263,
+        "ctrLink": 0.012375059495478343,
+        "cpmCents": 3758,
+        "frequency": 1.1839744997620179
+      },
+      "comparison": {
+        "spendCents": 5484,
+        "impressions": 1555,
+        "linkClicks": 15,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 196,
+        "ctrLink": 0.00964630225080386,
+        "cpmCents": 3527,
+        "frequency": 1.2563363601286175
+      }
+    },
+    {
+      "id": "6914233553539",
+      "name": "MOF - Video - Testimonial + B-Roll",
+      "current": {
+        "spendCents": 7622,
+        "impressions": 1273,
+        "linkClicks": 15,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 272,
+        "ctrLink": 0.01178318931657502,
+        "cpmCents": 5987,
+        "frequency": 1.201028810683425
+      },
+      "comparison": {
+        "spendCents": 1288,
+        "impressions": 257,
+        "linkClicks": 4,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 161,
+        "ctrLink": 0.01556420233463035,
+        "cpmCents": 5012,
+        "frequency": 1.0907549299610897
+      }
+    },
+    {
+      "id": "6893319538539",
+      "name": "MOF - Video - Short Pitch - Outdoor Walking",
+      "current": {
+        "spendCents": 2267,
+        "impressions": 483,
+        "linkClicks": 8,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 227,
+        "ctrLink": 0.016563146997929608,
+        "cpmCents": 4694,
+        "frequency": 1.1458062256728778
+      },
+      "comparison": {
+        "spendCents": 9744,
+        "impressions": 2209,
+        "linkClicks": 21,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 212,
+        "ctrLink": 0.009506564056133997,
+        "cpmCents": 4411,
+        "frequency": 1.206429886373925
+      }
+    },
+    {
+      "id": "6914233842939",
+      "name": "TOF - Video - Founder Story",
+      "current": {
+        "spendCents": 2048,
+        "impressions": 401,
+        "linkClicks": 4,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 341,
+        "ctrLink": 0.00997506234413965,
+        "cpmCents": 5107,
+        "frequency": 1.1983164239401494
+      },
+      "comparison": {
+        "spendCents": 6175,
+        "impressions": 990,
+        "linkClicks": 18,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 229,
+        "ctrLink": 0.01818181818181818,
+        "cpmCents": 6237,
+        "frequency": 1.2691578454545458
+      }
+    },
+    {
+      "id": "6914101196739",
+      "name": "MOF - Carousel - Review & Results",
+      "current": {
+        "spendCents": 1484,
+        "impressions": 336,
+        "linkClicks": 5,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 165,
+        "ctrLink": 0.01488095238095238,
+        "cpmCents": 4417,
+        "frequency": 1.1979125624999998
+      },
+      "comparison": {
+        "spendCents": 1734,
+        "impressions": 662,
+        "linkClicks": 10,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 133,
+        "ctrLink": 0.015105740181268883,
+        "cpmCents": 2619,
+        "frequency": 1.2258715966767373
+      }
+    },
+    {
+      "id": "6936464742339",
+      "name": "BOF - Static - AI Tradie in Car",
+      "current": {
+        "spendCents": 1433,
+        "impressions": 371,
+        "linkClicks": 15,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 80,
+        "ctrLink": 0.04043126684636118,
+        "cpmCents": 3863,
+        "frequency": 1.2325691455525605
+      },
+      "comparison": {
+        "spendCents": 2526,
+        "impressions": 447,
+        "linkClicks": 7,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 211,
+        "ctrLink": 0.015659955257270694,
+        "cpmCents": 5651,
+        "frequency": 1.1731655704697987
+      }
+    },
+    {
+      "id": "6929344595939",
+      "name": "BOF - Static - Jack Money Back Offer",
+      "current": {
+        "spendCents": 622,
+        "impressions": 130,
+        "linkClicks": 1,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 207,
+        "ctrLink": 0.007692307692307693,
+        "cpmCents": 4785,
+        "frequency": 1.1287655692307692
+      },
+      "comparison": {
+        "spendCents": 1088,
+        "impressions": 197,
+        "linkClicks": 2,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 155,
+        "ctrLink": 0.01015228426395939,
+        "cpmCents": 5523,
+        "frequency": 1.1003527208121828
+      }
+    },
+    {
+      "id": "6929347785139",
+      "name": "TOF - Static - News Article",
+      "current": {
+        "spendCents": 181,
+        "impressions": 47,
+        "linkClicks": 3,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 60,
+        "ctrLink": 0.06382978723404255,
+        "cpmCents": 3851,
+        "frequency": 1.2488178936170213
+      },
+      "comparison": {
+        "spendCents": 827,
+        "impressions": 148,
+        "linkClicks": 3,
+        "leads": null,
+        "cplCents": null,
+        "cpcCents": 165,
+        "ctrLink": 0.02027027027027027,
+        "cpmCents": 5588,
+        "frequency": 1.1590110810810812
+      }
+    }
+  ],
+  "campaignReadback": {
+    "id": "6890146663739",
+    "name": "TotalMatrix | AG Digital Studio",
+    "status": "ACTIVE",
+    "effective_status": "ACTIVE",
+    "updated_time": "2026-08-03T14:59:11+0100",
+    "daily_budget": "5000"
+  },
+  "newAdStatusReadback": [
+    {
+      "id": "52555243799343",
+      "name": "R1 | Video | Wish I Found These Guys Sooner | 2026-10-16",
+      "status": "ACTIVE",
+      "effective_status": "ACTIVE",
+      "adset_id": "6890146663939",
+      "campaign_id": "6890146663739"
+    },
+    {
+      "id": "52555243798943",
+      "name": "R1 | Static | We Build It You Own It | 2026-10-16",
+      "status": "ACTIVE",
+      "effective_status": "ACTIVE",
+      "adset_id": "6890146663939",
+      "campaign_id": "6890146663739"
+    },
+    {
+      "id": "52555243799143",
+      "name": "R1 | Static | Stop Renting Leads | 2026-10-16",
+      "status": "ACTIVE",
+      "effective_status": "ACTIVE",
+      "adset_id": "6890146663939",
+      "campaign_id": "6890146663739"
+    }
+  ],
+  "limitations": [
+    "Source-linked cohorts, not causal ad attribution.",
+    "Matched first-touch paidMeta flag checked separately from source labels.",
+    "First90 revenue includes captured charges before firstPaid+90 elapsed days less currently observed refunds.",
+    "Monthly customer groups use contact creation, not payment month.",
+    "Recent Meta data provisional.",
+    "No account mutations."
+  ]
+}
