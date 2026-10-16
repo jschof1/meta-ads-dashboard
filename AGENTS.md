@@ -1,3 +1,24 @@
+# UKTL acquisition journey reference
+
+Before working on UKTL adverts, landing pages, forms, bookings, phone/SMS routes,
+CRM attribution, conversion tracking or acquisition reporting, read
+[the ad-to-customer flow](docs/AD_TO_CUSTOMER_FLOW.md). It explains the existing
+journey, tracking changes, reporting definitions and outstanding evidence gaps.
+
+- Treat the reference as dated evidence, not automatically current provider
+  state. Verify the affected behaviour against the live system before changing
+  it or claiming it works. Follow its supporting audit/release links as needed.
+- Keep Meta events, form receipts, CRM contacts, calendar bookings, attended
+  calls and captured payments distinct. A page view, click or successful
+  workflow action does not prove an enquiry, receipt, attendance or sale.
+- Preserve the existing HighLevel funnel and native conversion senders unless
+  the task explicitly requires changing them. Check sender overlap and
+  deduplication before adding another conversion path.
+- After a verified change to the journey or its measurement, update the relevant
+  sections of the reference in the same delivery. Date the evidence and separate
+  implemented/live behaviour from historical tests, proposals and open checks.
+  Never mark a gap resolved based only on configuration or deployment.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
