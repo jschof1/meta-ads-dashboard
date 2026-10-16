@@ -1,6 +1,6 @@
 # Customer acquisition release checklist
 
-Owner: Jack approves consequential production changes; implementation and verification stay with this task. No production change is authorised merely because the branch is pushed.
+Owner: implementation and release verification remain with the dashboard task. Jack authorised finishing and releasing the proposed work on 16 October 2026. Customer sync activation still requires its missing credential and verified configuration; see [current acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
 
 ## Phase 1 — saved reporting and historical recovery
 

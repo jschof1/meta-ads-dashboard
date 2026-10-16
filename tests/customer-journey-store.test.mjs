@@ -4,8 +4,24 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPrismaClient } from "../lib/db.ts";
-import { storeJourneyRun, readCustomerJourney, JourneySyncRunningError } from "../lib/customer-journey-store.ts";
+import { storeJourneyRun, readCustomerJourney, readJourneySubmissions, JourneySyncRunningError } from "../lib/customer-journey-store.ts";
 import { UKTL_LOCATION, UKTL_STRIPE_ACCOUNT } from "../lib/customer-journey.ts";
+
+test("journey form reads include same-day receipts and exclude future evidence", async () => {
+  const now = new Date("2026-10-16T23:30:00Z"); // already 17 October in London
+  const result = await readJourneySubmissions(async path => {
+    const url = new URL(path, "https://example.test");
+    assert.equal(url.searchParams.get("endAt"), "2026-10-18");
+    return { meta: { total: 3 }, submissions: [
+      { id: "today", createdAt: "2026-10-16T11:00:00Z" },
+      { id: "local-today", createdAt: "2026-10-16T23:15:00Z" },
+      { id: "future", createdAt: "2026-10-17T12:00:00Z" },
+    ] };
+  }, { locationId: UKTL_LOCATION, formId: "verified-form", maxRecords: 100, now });
+  assert.deepEqual(result.map(row => row.id), ["today", "local-today"]);
+  await assert.rejects(() => readJourneySubmissions(async () => ({ meta: { total: 101 }, submissions: [] }),
+    { locationId: UKTL_LOCATION, formId: "verified-form", maxRecords: 100, now }), /incomplete/);
+});
 
 test("customer snapshots survive partial reads and reject overlapping writers", async () => {
   const dir = await mkdtemp(join(tmpdir(), "journey-store-")), db = createPrismaClient({ url: `file:${join(dir, "test.db")}` });

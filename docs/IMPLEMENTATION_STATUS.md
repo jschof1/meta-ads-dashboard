@@ -4,20 +4,23 @@ Source of truth: [MASTER_PLAN.md](./MASTER_PLAN.md), the work-item specification
 implementation PRs and [production runbook](./PRODUCTION_RUNBOOK.md). GitHub
 issues are disabled for this repository.
 
-## Current cloud review — 14 October 2026
+## Current release — 16 October 2026
 
-PR26 remains draft, unmerged and unreleased. Compatible dependency repairs and
-the actual ninth-migration source are recorded in
-[cloud resolution](./CLOUD_RESOLUTION_2026-10-14.md). The unchanged high audit
-gate still blocks release; functional checks do not waive it. Today's cloud
-runtime has no authorized dashboard/Cloudflare/Turso credential handover, so
-current production authentication, remote migration ledger and provider sync
-outcomes remain unverified. Existing resources and credentials are preserved.
+PRs 26–29 and 31 are merged. Direct production checks confirm the same-day
+HighLevel enquiry fix is deployed, today's 06:01 UTC Meta import succeeded,
+and nine migrations are applied. The old security blocker is resolved:
+the current dependency audit reports zero vulnerabilities.
 
-PR27's portable saved-data reader is a separate open scope; it supplies no
-credentials and has not been merged by this sweep. Meta writes remain disabled.
-Jack owns upstream/access follow-through on 21 October 2026 or sooner when a
-supported patch or protected cloud access becomes available.
+PR30 adds acquisition and retention reporting. Jack's 16 October instruction
+authorises completing and releasing this work. The release includes main's
+same-day enquiry fix and corrects the equivalent new customer-reader path.
+Customer synchronisation remains disabled because no unattended restricted
+Stripe credential is configured. Stage qualification remains undefined;
+no stage is guessed from its name. Meta writes remain disabled.
+
+Current deployment evidence, verification and remaining work:
+[LIVE_ACCEPTANCE_2026-10-16.md](./LIVE_ACCEPTANCE_2026-10-16.md).
+Older dated sections below are retained as historical evidence.
 
 ## Historical verification — 3 October 2026
 
@@ -53,7 +56,7 @@ has been performed.
 | [07](https://github.com/jschof1/meta-ads-dashboard/pull/17) | Trustworthy AI analyst | COMPLETE | `codex/implement-pr07-from-main/07-ai-analyst` | PR06 | Synthetic live Anthropic validation passed; production configuration pending |
 | [08](https://github.com/jschof1/meta-ads-dashboard/pull/18) | HighLevel CRM attribution | COMPLETE | `codex/implement-pr08-from-main/08-highlevel-attribution` | PR07 | Runtime token/enquiry register operational; stage-based attribution unavailable |
 | [09](https://github.com/jschof1/meta-ads-dashboard/pull/19) | Approval-gated Meta actions | COMPLETE | `codex/implement-pr09-from-main/09-approved-meta-actions` | PR01, PR02, PR06, explicit approval | Meta write permission; disabled by default |
-| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | BLOCKED | `feat/10-production-ready` (merged) | PR01–PR09 (PR08 may be explicitly deferred) | Unpatched upstream security advisory blocks audit/release; see current acceptance |
+| [10](https://github.com/jschof1/meta-ads-dashboard/pull/20) | Production hardening and docs | COMPLETE | `feat/10-production-ready` (merged) | PR01–PR09 (PR08 may be explicitly deferred) | Security dependency repairs merged through PR26; audit clean on 16 October |
 
 Allowed statuses: `NOT STARTED`, `ACTIVE`, `BLOCKED`, `IN REVIEW`, `COMPLETE`.
 

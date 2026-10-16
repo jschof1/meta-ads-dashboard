@@ -18,9 +18,11 @@ Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition 
 
 Budget projections and customer-value assumptions are intentionally absent. They are not inferred from acquisition data.
 
-## Verified customer acquisition (prepared release)
+## Verified customer acquisition
 
 The acquisition panel adds daily/weekly/monthly/custom Meta comparisons and independently verified CRM/Stripe contact-created cohorts, with first/latest attribution, captured revenue/refunds, subscription states and 30/90-day retention. Missing stable ad IDs and qualification evidence remain visible. It uses the current database and authenticated saved-data reads; loading the page does not query Stripe or HighLevel.
+
+Release status and live checks: [16 October acceptance](docs/LIVE_ACCEPTANCE_2026-10-16.md).
 
 See the [14 October audit](docs/CUSTOMER_ACQUISITION_AUDIT_2026-10-14.md) and [phased release checklist](docs/CUSTOMER_ACQUISITION_RELEASE.md) for historical recovery, reconciliation, remaining tracking gaps, safe testing and production approval. The customer schedule at 07:15 UTC is disabled by default. It requires `CUSTOMER_JOURNEY_SYNC_ENABLED=true`, an account-verified restricted `STRIPE_READ_KEY`, existing HighLevel read access and the exact sales calendar/form/pipeline configuration. Qualification mappings stay blank until verified. No new conversion sender is included.
 

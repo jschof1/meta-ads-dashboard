@@ -6,12 +6,32 @@ import { loadHighLevelSettings } from "./highlevel-config";
 import { readLeadRegisterProvider } from "./lead-register";
 import { normalizeCustomerJourney, journeySnapshotSchema, UKTL_LOCATION, UKTL_STRIPE_ACCOUNT, UKTL_META_ACCOUNT, type JourneySnapshot } from "./customer-journey";
 import { readStripeSnapshot } from "./stripe-read";
-import { accountLocalDate } from "./periods";
+import { accountLocalDate, addCalendarDays } from "./periods";
 import { ownedAcquisitionCatalogue } from "./acquisition-catalogue";
 
 type Row = Record<string, unknown>;
 const scope = { locationId: UKTL_LOCATION, stripeAccountId: UKTL_STRIPE_ACCOUNT };
 export class JourneySyncRunningError extends Error {}
+
+export async function readJourneySubmissions(read: (path: string, stage: string) => Promise<Row>, options: { locationId: string; formId: string; maxRecords: number; now: Date }) {
+  const submissions: Row[] = [];
+  // The provider's date-only end is exclusive; retain today's receipts while
+  // rejecting anything beyond the exact observation time.
+  const endAt = addCalendarDays(accountLocalDate(options.now, "Europe/London"), 1);
+  for (let page = 1; page <= Math.ceil(options.maxRecords / 100); page++) {
+    const params = new URLSearchParams({ locationId: options.locationId, formId: options.formId, startAt: "2026-01-01", endAt, limit: "100", page: String(page) });
+    const data = await read(`/forms/submissions?${params}`, "journey submissions");
+    const total = (data.meta as Row | undefined)?.total;
+    if (!Array.isArray(data.submissions) || typeof total !== "number") throw new Error("CRM form collection incomplete");
+    submissions.push(...data.submissions as Row[]);
+    if (submissions.length === total) {
+      if (submissions.some(s => typeof s.id !== "string" || !s.id || !Number.isFinite(Date.parse(String(s.createdAt)))) || new Set(submissions.map(s => s.id)).size !== submissions.length) throw new Error("CRM form collection incomplete");
+      return submissions.filter(s => Date.parse(String(s.createdAt)) <= +options.now && Date.parse(String(s.createdAt)) >= Date.parse("2026-01-01"));
+    }
+    if (data.submissions.length < 100 || submissions.length > total) throw new Error("CRM form pagination incomplete");
+  }
+  throw new Error("CRM form collection incomplete");
+}
 
 export async function readCustomerJourney(db: PrismaClient = prisma) {
   const [latest, attempt] = await Promise.all([
@@ -86,7 +106,7 @@ export async function syncCustomerJourney(db: PrismaClient = prisma) {
       if (page.data.length < 100 || payments.length > page.totalCount) throw new Error("CRM payment pagination incomplete");
     }
     if (!paymentsComplete || new Set(payments.map(p => p._id)).size !== payments.length) throw new Error("CRM payment collection incomplete");
-    const now = new Date(), calendarEnd = new Date(+now + 90 * 86_400_000), today = accountLocalDate(now, "Europe/London"), events: Row[] = [], submissions: Row[] = [];
+    const now = new Date(), calendarEnd = new Date(+now + 90 * 86_400_000), events: Row[] = [];
     // Monthly calendar requests avoid provider range limits. First import
     // includes history; later imports still check historical showed/no-show changes.
     for (let year = 2026; year <= calendarEnd.getUTCFullYear(); year++) for (let month = 0; month < 12; month++) {
@@ -97,17 +117,7 @@ export async function syncCustomerJourney(db: PrismaClient = prisma) {
       if (page.events.some(e => typeof e.id !== "string" || !e.id)) throw new Error("CRM calendar event identity missing");
       events.push(...page.events as Row[]);
     }
-    let submissionsComplete = false;
-    for (let page = 1; page <= Math.ceil(config.maxRecords / 100); page++) {
-      const params = new URLSearchParams({ locationId: config.locationId!, formId: formId!, startAt: "2026-01-01", endAt: today, limit: "100", page: String(page) });
-      const data = await read(`/forms/submissions?${params}`, "journey submissions");
-      const total = (data.meta as Row | undefined)?.total;
-      if (!Array.isArray(data.submissions) || typeof total !== "number") throw new Error("CRM form collection incomplete");
-      submissions.push(...data.submissions as Row[]);
-      if (submissions.length === total) { submissionsComplete = true; break; }
-      if (data.submissions.length < 100 || submissions.length > total) throw new Error("CRM form pagination incomplete");
-    }
-    if (!submissionsComplete || submissions.some(s => typeof s.id !== "string" || !s.id) || new Set(submissions.map(s => s.id)).size !== submissions.length) throw new Error("CRM form collection incomplete");
+    const submissions = await readJourneySubmissions(read, { locationId: config.locationId!, formId: formId!, maxRecords: config.maxRecords, now });
     const [ads, historical, runs] = await db.$transaction([
       db.ad.findMany(), db.dailyInsight.findMany({ where: { level: "ad", scopeKey: "account" } }),
       db.syncRun.findMany({ where: { accountId, campaignId: null, status: "SUCCEEDED" } }),

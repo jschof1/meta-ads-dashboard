@@ -1,5 +1,9 @@
 # Production verification and recovery runbook
 
+Current release and verification: [16 October 2026 acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
+The dated access/audit observations below are historical; current local access
+works, PR26 is merged, and the dependency audit is clean.
+
 Status (2026-10-03): deployed on the existing Cloudflare Worker and Turso database.
 Live login, protected API boundaries, database access and all eight migration
 checks pass. Meta scheduled/manual imports work; HighLevel's saved enquiry
