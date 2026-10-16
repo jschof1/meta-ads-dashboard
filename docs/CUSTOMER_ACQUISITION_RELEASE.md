@@ -1,6 +1,6 @@
 # Customer acquisition release checklist
 
-Owner: implementation and release verification remain with the dashboard task. Jack authorised finishing and releasing the proposed work on 16 October 2026. Customer sync activation still requires its missing credential and verified configuration; see [current acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
+Owner: implementation and release verification remain with the dashboard task. Jack authorised finishing and releasing the proposed work on 16 October 2026. The restricted Stripe credential is installed and complete read-only reconciliation passed; customer sync activation still requires the snapshot retention/erasure choice and saved-run verification; see [current acceptance](LIVE_ACCEPTANCE_2026-10-16.md).
 
 ## Phase 1 — saved reporting and historical recovery
 

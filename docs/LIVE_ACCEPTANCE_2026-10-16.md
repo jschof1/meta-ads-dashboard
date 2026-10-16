@@ -110,3 +110,28 @@ The tab is retained for Jack's sign-in, after which the delivery task can prepar
 minimum read permissions, store the credential privately in the existing Worker,
 reconcile provider reads and complete customer-sync activation. Never ask Jack to
 paste a secret in chat. The release itself is live independently of this gate.
+
+## Stripe activation follow-up — 16 October, 11:57 UTC
+
+- Jack completed Stripe sign-in and the provider's email verification. Created
+  `UKTL Meta Dashboard payment and retention read-only`, with only Accounts,
+  Customers, Charges and Refunds, and Subscriptions set to Read. All other
+  resource permissions remain None. No write permission was granted.
+- Installed `STRIPE_READ_KEY` privately in the existing Worker; Cloudflare
+  deployed secret-change version `10a67521-61a0-4126-b41f-2ab13895b29a`.
+  A protected local credential handover was updated; no key appears in Git,
+  command arguments or this report. The temporary clipboard copy was cleared.
+- Verified account identity and all three required collection endpoints return
+  HTTP 200 against the expected live Stripe account.
+- Full read-only reconciliation completed without saving a production snapshot:
+  2,715 CRM contacts, 392 Stripe charges and 71 subscriptions. Provider reads
+  passed complete-pagination checks. Health: four unmatched Stripe customers,
+  zero ambiguous matches, 54 unmatched charges, 279 Meta-attributed contacts
+  without ad IDs and zero attribution conflicts. These are source coverage
+  counts, not claimed acquired customers or attributed revenue.
+- The credential blocker is resolved. Customer sync remains disabled pending the
+  snapshot retention/erasure choice required in phase two. Jack has been asked
+  whether to retain 30 days or only the latest snapshot. The delivery owner must
+  implement that choice, activate the gate, verify a saved live refresh and then
+  observe the first real 07:15 UTC scheduled run. No qualification mapping or
+  advertising/conversion setting was changed.
