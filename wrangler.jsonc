@@ -31,7 +31,7 @@
     "enabled": true
   },
   "limits": {
-    "cpu_ms": 1000
+    "cpu_ms": 5000
   },
   "triggers": {
     "crons": [
