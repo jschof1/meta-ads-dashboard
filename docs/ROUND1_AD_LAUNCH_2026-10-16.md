@@ -55,8 +55,10 @@ Primary text:
 >
 > Forget having to...
 >
-> Rely on word-of-mouth  
-> Door knock  
+> Rely on word-of-mouth
+>
+> Door knock
+>
 > Or cross your fingers hoping to get more jobs
 >
 > Instead, we build you a website with no build fee as part of our £197/month package.
