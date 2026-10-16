@@ -11,7 +11,7 @@ HighLevel enquiry fix is deployed, today's 06:01 UTC Meta import succeeded,
 and nine migrations are applied. The old security blocker is resolved:
 the current dependency audit reports zero vulnerabilities.
 
-PR30 adds acquisition and retention reporting. Jack's 16 October instruction
+PR30 is merged and deployed as Worker version `bb96f0d0-aa2b-48ab-a4df-f3ad3dd60b58` with ten migrations. Live API, login and mobile comparison checks pass. It adds acquisition and retention reporting. Jack's 16 October instruction
 authorises completing and releasing this work. The release includes main's
 same-day enquiry fix and corrects the equivalent new customer-reader path.
 Customer synchronisation remains disabled because no unattended restricted
