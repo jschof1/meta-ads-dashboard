@@ -1,6 +1,6 @@
 # UK Trade Leads: current ad-to-customer flow
 
-Internal reference for Jack. Last checked **16 October 2026**, Europe/London.
+Internal reference for Jack. Last checked **17 October 2026**, Europe/London.
 This is a dated analysis, not an automatically updated status page.
 
 ## What happens today
@@ -20,8 +20,8 @@ previous dated test; “open” means not established; “proposed” means not 
 
 ## 1. Advert → website
 
-- **Current setup, 16 Oct:** one active Leads campaign, one active ad set and
-  11 active adverts at a £50/day campaign budget. The optimisation event is
+- **Current setup, 17 Oct 09:00 BST:** one active Leads campaign, one active ad set and
+  10 active adverts among 29 total, at a £50/day campaign budget. The optimisation event is
   **Lead**, using UK Trade Leads pixel `25839137269022721`.
 - **Destination:** [free-website-page](https://uktradeleads.com/free-website-page).
   [free-website](https://uktradeleads.com/free-website) is an existing alternate
@@ -32,14 +32,15 @@ previous dated test; “open” means not established; “proposed” means not 
   views. The website sends browser pixel events. Optional PostHog analytics
   records behaviour for visitors whose analytics choice permits it.
 
-**Attribution gap:** all 26 inspected advert URL-tag strings lack stable campaign,
-ad set and ad IDs. Other attribution fields may still identify Meta as the source,
+**Attribution gap:** the 26 original adverts inspected on 16 October lacked stable campaign,
+ad set and ad IDs in URL tags. The three subsequently published Round1 ads include
+those templates, verified at publication. Other attribution fields may still identify Meta as the source,
 but reliable individual-ad customer attribution is incomplete. The customer
 snapshot flags 279 Meta-attributed contacts without ad IDs across retained
 history; these are not 279 newly lost enquiries.
 
-**Proposed, not applied:** add stable IDs, then prove they survive the actual
-ad click, form, contact record and reporting join. Suggested parameters are
+**Applied to the three Round1 ads only:** stable IDs. Still open: prove they survive the actual
+ad click, form, contact record and reporting join. Parameters are
 `campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}`.
 Their presence in an advert URL alone would not prove that HighLevel saves them.
 
@@ -167,8 +168,10 @@ separate.
 
 Saved dashboard reads do not refresh the providers. Meta refresh is scheduled
 daily at 06:00 UTC; the enquiry register hourly at :45; customer reporting daily
-at 07:15 UTC. The first genuine scheduled customer run is due **17 Oct at 07:15
-UTC** and remains unobserved in this reference. Check each source's timestamp
+at 07:15 UTC. The first genuine scheduled customer run **succeeded on 17 Oct**,
+starting at 07:15:23 UTC and completing at 07:16:23 UTC. Its saved payload contains
+2,715 contacts, 394 charges and 71 subscriptions: coverage counts, not new customers.
+Check each source's timestamp
 before comparing figures.
 
 Private dashboard: <https://uktl-meta-dashboard.jackschofield1.workers.dev/>.
@@ -258,7 +261,7 @@ open actions, not changes implemented by writing this reference.
    before applying URL tags broadly or relying on ad-level customer economics.
 4. **Prove call/SMS receipt and follow-up.** Confirm routing, CRM capture and an
    accountable next action for missed calls/messages.
-5. **Close reporting acceptance.** Observe the 17 Oct scheduled customer run;
+5. **Close reporting acceptance.** The 17 Oct scheduled customer run succeeded;
    agree qualification/attendance mappings; investigate payment-join warnings;
    align offer copy before launching the next creative batch or increasing spend.
 
@@ -267,6 +270,10 @@ Use verified CRM/contact evidence for today's sales work while closing these
 measurement gaps.
 
 ## Supporting evidence
+
+- [17 October Round1 delivery and CRM review](ROUND1_REVIEW_2026-10-17.md): current
+  ads verified, missed register window manually refreshed, new and returning form
+  contacts distinguished. The refresh does not prove the hourly schedule is repaired.
 
 - [16 October advertising and tracking audit](AD_LAUNCH_AUDIT_2026-10-16.md)
 - [16 October release and live acceptance, including later activation updates](LIVE_ACCEPTANCE_2026-10-16.md)

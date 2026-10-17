@@ -141,4 +141,7 @@ The production dashboard Meta sync subsequently succeeded (`cmvb9s8wu0000sh1lxwf
 
 ## Launch evidence
 
+Daily follow-up: [17 October review](ROUND1_REVIEW_2026-10-17.md) — all three active,
+£13.11 combined spend, unchanged £50 campaign budget, no qualifying pause condition.
+
 Provider responses and original review materials remain private under `/tmp/uktl-round1-review/`; credentials and person records are excluded from this repository. Publication screenshot: [four ads in Meta](evidence/round1-published-2026-10-16.png). The screenshot shows the earlier processing/review state; the table above records the later direct verification.
