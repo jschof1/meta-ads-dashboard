@@ -2,7 +2,9 @@
 
 Private internal dashboard for UK Trade Leads. It turns stored Meta acquisition data into a clear operator view without pretending that lead volume is the same as lead quality or customer value.
 
-For Jack's current journey reference, see [Ad click → website → callback, booking, call/SMS → customer](docs/AD_TO_CUSTOMER_FLOW.md). It explains the live routes, tracking changes, reporting limits and outstanding checks, as inspected on 16 October 2026.
+For advertising decisions or a new chat, start with [the UKTL acquisition handoff](docs/ACQUISITION_HANDOFF.md): Jack's commercial inputs, the spending assessment, subsequent ad changes, existing review owner and next checks.
+
+For the journey reference, see [Ad click → website → callback, booking, call/SMS → customer](docs/AD_TO_CUSTOMER_FLOW.md). It explains the routes, tracking changes, reporting limits and outstanding checks; use the dated evidence inside it and verify current provider state.
 
 ## What it shows
 

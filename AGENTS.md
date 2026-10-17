@@ -5,6 +5,12 @@ CRM attribution, conversion tracking or acquisition reporting, read
 [the ad-to-customer flow](docs/AD_TO_CUSTOMER_FLOW.md). It explains the existing
 journey, tracking changes, reporting definitions and outstanding evidence gaps.
 
+For advertising spend, creative tests, pause/scale decisions or resuming the
+acquisition discussion, also read [the acquisition handoff](docs/ACQUISITION_HANDOFF.md).
+It records Jack's commercial inputs, dated recommendations, subsequent changes,
+the existing review owner and next checks. Read the latest linked review before
+acting; historical advice is not a new execution instruction.
+
 - Treat the reference as dated evidence, not automatically current provider
   state. Verify the affected behaviour against the live system before changing
   it or claiming it works. Follow its supporting audit/release links as needed.

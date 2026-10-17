@@ -2,6 +2,10 @@
 
 Assessment: **16 October 2026**. Owner of the spending decision: Jack. This is advice, not an instruction to an automation or evidence of changed advertising settings.
 
+**Resuming this work? Read the [acquisition handoff](ACQUISITION_HANDOFF.md) first.**
+Subsequent authorised pauses and a later attribution view changed parts of the
+ad shortlist below. This original assessment is retained as dated evidence.
+
 ## Recommendation
 
 **Do not increase the £50/day campaign budget yet. Continue the three creatives already launched as a bounded test, retain the £197 control, and review the customer economics before extending or scaling. Do not blanket-pause the account because Meta CPL changed.**
